@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BODY_TYPE_IDS,
+  cargoCategory,
   CATEGORY_IDS,
   COUNTRIES,
   REGIONS,
@@ -51,4 +52,13 @@ test("Toshkent shahri va viloyati bitta hudud", () => {
   assert.equal(sameArea("fargona", "fargona"), true);
   assert.equal(sameArea("fargona", "andijon"), false);
   assert.equal(sameArea(null, "fargona"), false);
+});
+
+test("yuk toifasi: sinfdan, bo'lmasa og'irlikdan; pochta/yo'lovchiga tegilmaydi", () => {
+  assert.equal(cargoCategory({ category: "fura", truckClass: null, weightT: 9 }), "yengil");
+  assert.equal(cargoCategory({ category: "yengil", truckClass: null, weightT: 12 }), "fura");
+  assert.equal(cargoCategory({ category: "fura", truckClass: "isuzu", weightT: 12 }), "yengil", "sinf og'irlikdan ustun");
+  assert.equal(cargoCategory({ category: "yengil", truckClass: "mini_fura", weightT: null }), "fura");
+  assert.equal(cargoCategory({ category: "pochta", truckClass: null, weightT: 0.01 }), "pochta");
+  assert.equal(cargoCategory({ category: "yengil", truckClass: null, weightT: null }), "yengil", "hech narsa yo'q — AI aytgani");
 });

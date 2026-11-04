@@ -1,7 +1,7 @@
 // Bitta e'lonni AI orqali JSON'ga aylantiradi.
 // Qaysi AI ishlashi .env dagi PARSER_PROVIDER ga bog'liq: gemini (standart, bepul) yoki claude.
 import { extractPhones, maskPhones } from "./phones.js";
-import { normalizePlaces } from "@yuk/shared";
+import { cargoCategory, normalizePlaces } from "@yuk/shared";
 import { DEFAULT_PROVIDER, getProvider } from "./providers/index.js";
 
 export const DEFAULT_EFFORT = "low"; // qanchalik chuqur o'ylashi — hozircha faqat Claude'da ishlatiladi
@@ -39,7 +39,11 @@ export function createParser(options = {}) {
       postType: data.postType,
       // Telefonlar AI'dan emas, regex'dan olinadi va e'londagi har bir yukka biriktiriladi.
       // Shahar ro'yxatda bo'lsa, viloyat/davlat ro'yxatdan olinadi (AI adashsa ham to'g'ri chiqadi).
-      loads: data.loads.map((load) => ({ ...normalizePlaces(load), phones })),
+      // Toifa (fura / yengil) ham AI'dan emas, mashina sinfi va og'irlikdan hisoblanadi.
+      loads: data.loads.map((load) => {
+        const fixed = normalizePlaces(load);
+        return { ...fixed, category: cargoCategory(fixed), phones };
+      }),
       ...meta,
     };
   }

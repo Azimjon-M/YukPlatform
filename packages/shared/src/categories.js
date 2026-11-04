@@ -1,3 +1,5 @@
+import { TRUCK_CLASSES } from "./vehicles.js";
+
 // Yuk turlari. Platforma boshidan hammasini biladi, lekin ish faqat "fura" bilan boshlanadi.
 // fura = fura va mini fura sinfi (8 t dan ortiq), yengil = Isuzu, Kia, Porter, Gazel, Labo, Damas.
 export const CATEGORIES = [
@@ -35,3 +37,15 @@ export const CATEGORY_IDS = CATEGORIES.map((c) => c.id);
 export const POST_TYPE_IDS = POST_TYPES.map((p) => p.id);
 export const PRICE_UNIT_IDS = PRICE_UNITS.map((u) => u.id);
 export const PAYMENT_TYPE_IDS = PAYMENT_TYPES.map((p) => p.id);
+
+// Yuk toifasi (fura yoki yengil) AI'ga emas, qoidaga ishonib hisoblanadi: AI ba'zan 9 t yukni ham "fura" deydi.
+// Mashina sinfi yozilgan bo'lsa — sinfning toifasi; aks holda og'irlik: 10 t va undan ortiq → fura.
+// Pochta va yo'lovchi e'lonlariga tegilmaydi.
+export const FURA_MIN_T = 10;
+export function cargoCategory(load) {
+  if (load.category && load.category !== "fura" && load.category !== "yengil") return load.category;
+  const truckClass = TRUCK_CLASSES.find((t) => t.id === load.truckClass);
+  if (truckClass) return truckClass.category;
+  if (load.weightT != null) return load.weightT >= FURA_MIN_T ? "fura" : "yengil";
+  return load.category ?? "fura";
+}

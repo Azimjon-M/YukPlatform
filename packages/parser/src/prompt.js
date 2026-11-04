@@ -53,6 +53,7 @@ For mashina_bor posts, describe the vehicle's offered route and capacity in the 
 ### Places
 - fromCity / toCity: a settlement name in Uzbek Latin spelling, preferably exactly as in the lists below. Only when a settlement is actually named.
   - Region-only names ("Surxondaryodan", "Qashqadaryoga", "Xorazm", "Sirdaryo viloyati") → city null, region set. Never fill in the region's capital yourself.
+  - The same for countries: "Германия", "Rossiyaga", "Qozog'istonga" alone → city null, country set. Never fill in the capital (Berlin, Moskva, Astana) yourself.
   - A region or big city followed by a smaller town or district names that town: the city is the SMALLER place ("Surxondaryo Sherobotdan" → Sherobod; "Сурхандарё шурчидан" → Sho'rchi; "Samarqanddan. Chelakdan" → Chelak; "Buxoro Kogondan" → Kogon; "Toshkent Ohangarondan" → Ohangaron).
   - Names that are both a region and its center (Andijon, Namangan, Farg'ona, Samarqand, Buxoro, Navoiy, Jizzax) set both city and region.
   - Plain "Toshkent" / "Ташкент" / "Тош" → city "Toshkent", region toshkent_sh.
@@ -78,6 +79,7 @@ ${truckLines}
 - bodyType:
 ${bodyLines}
   "fura kerak", "mashina kerak", "isuzu kerak" alone name no body type → bodyType null. NEVER default to tent.
+  "boshqa" only for a named body type that is not in the list. "mega fura" / "МЕГА ФУРА" is a truck size (fura), not a body type → bodyType null.
   "usti ochiladigan" is a loading side (ust), not a body type.
   If alternatives are given ("Ref Tent", "tent yoki ref"), take the first one and mention the other in note.
 - vehicleCount: number of vehicles needed if stated ("2 ta fura kerak", "3 реф нужен", "10 рефрижераторов" → 2, 3, 10), else null.

@@ -1,6 +1,6 @@
 # parser — AI parser
 
-**Bosqich:** 0 ✅ haqiqiy e'lonlarda sinaldi: qo'lda tekshirilgan 32 ta e'londa aniqlik **99%** (Gemini bepul tarifi)
+**Bosqich:** 0 ✅ haqiqiy e'lonlarda sinaldi: qo'lda tekshirilgan 32 ta e'londa aniqlik **99%** (424 maydondan 421 tasi to'g'ri) (Gemini bepul tarifi)
 
 E'lon matnini (kirill/lotin aralash, ruscha, turkcha so'zlar, qisqartmalar bilan) tuzilgan JSON'ga aylantiradi.
 
@@ -34,10 +34,12 @@ npm run parse:eval -- --results data/samples/natija-v3.jsonl --results data/samp
 
 | Versiya | Nima o'zgardi | Aniqlik |
 |---|---|---|
-| v1 | Birinchi prompt, bitta `vehicle` maydoni | 86% |
-| v2 | Haydovchi suhbatidan keyin yangi sxema va qoidalar | 98% |
-| v3 | Joy nomlari, og'irlik oralig'i, narx qoidalari aniqlandi | 98% |
-| v3 + ro'yxat | Shahar ro'yxatda bo'lsa, viloyat ro'yxatdan olinadi | 99% |
+| v1 | Birinchi prompt, bitta `vehicle` maydoni | 85% (362/424) |
+| v3 | Haydovchi suhbatidan keyin yangi sxema; joy, og'irlik oralig'i, narx qoidalari | 98% (417/424) |
+| v4 + kod qoidalari | "tent kerak" o'lcham emas; viloyat ro'yxatdan, "Toshkent Nazarbek" → Nazarbek, toifa og'irlikdan | 99.3% (421/424) |
+| v5 | "mega fura" kuzov emas | 99.3% (421/424) |
+
+Bir xil prompt ikki marta ishga tushirilsa ham natija 1–2 maydonga farq qilishi mumkin. Shuning uchun faqat jami foizga emas, har bir maydon jadvaliga qarang.
 
 ## AI provayderlari
 

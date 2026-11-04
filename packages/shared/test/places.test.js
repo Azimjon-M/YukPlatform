@@ -30,6 +30,28 @@ test("AI adashtirgan viloyat ro'yxat bo'yicha to'g'rilanadi", () => {
   assert.equal(load.toRegion, "buxoro", "asl obyekt o'zgarmaydi");
 });
 
+test("'Toshkent Nazarbek': joy o'sha hududdagi shahar bo'lsa, shahar bo'ladi", () => {
+  const fixed = normalizePlaces({ fromCity: "Toshkent", fromPlace: "Nazarbek", fromRegion: "toshkent_sh", fromCountry: "O'zbekiston" });
+  assert.equal(fixed.fromCity, "Nazarbek");
+  assert.equal(fixed.fromPlace, null);
+  assert.equal(fixed.fromRegion, "toshkent");
+});
+
+test("Toshkent tumani va boshqa viloyatdagi bir xil nom joyida qoladi", () => {
+  const sergeli = normalizePlaces({ toCity: "Toshkent", toPlace: "Sergeli", toRegion: "toshkent_sh" });
+  assert.equal(sergeli.toCity, "Toshkent");
+  assert.equal(sergeli.toPlace, "Sergeli");
+  const uchtepa = normalizePlaces({ toCity: "Toshkent", toPlace: "Uchtepa", toRegion: "toshkent_sh" });
+  assert.equal(uchtepa.toCity, "Toshkent", "Uchtepa — Toshkent tumani, Jizzaxdagi Uchtepa emas");
+  const other = normalizePlaces({ toCity: "Samarqand", toPlace: "Baxmal", toRegion: "samarqand" });
+  assert.equal(other.toCity, "Samarqand", "Baxmal Jizzaxda — Samarqand yukiga tegilmaydi");
+  const city = normalizePlaces({ toCity: "Qo'qon", toPlace: "Uchko'prik", toRegion: "fargona" });
+  assert.equal(city.toCity, "Qo'qon", "Qo'qon viloyat nomi emas — shahar o'zgarmaydi");
+  assert.equal(city.toPlace, "Uchko'prik");
+  const pop = normalizePlaces({ fromCity: "Namangan", fromPlace: "pop", fromRegion: "namangan" });
+  assert.equal(pop.fromCity, "Pop");
+});
+
 test("shahar noma'lum bo'lsa AI yozgani qoladi", () => {
   const load = { fromCity: null, fromRegion: "surxondaryo", toCity: "Lotfobod", toRegion: "xorij", toCountry: "Eron" };
   assert.deepEqual(normalizePlaces(load), load);
