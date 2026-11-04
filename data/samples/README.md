@@ -1,6 +1,10 @@
 # Namunaviy e'lonlar
 
-E'lonlarni shu papkadagi `elonlar.txt` fayliga qo'ying.
+E'lonlar shu papkadagi `elonlar.txt` fayliga yig'iladi.
+
+**Avtomatik (tavsiya):** `npm run tg:export -- @guruh1 @guruh2 --limit 200`. Bu buyruq guruhlardan xabarlarni olib, qisqa va takror xabarlarni tashlab, faylga qo'shadi. Sozlash: [apps/collector/README.md](../../apps/collector/README.md).
+
+**Qo'lda:** xabarlarni Telegram'dan nusxalab, faylga o'zingiz qo'ying.
 
 **Format:** e'lonlar orasiga alohida qatorga `---` qo'yiladi.
 

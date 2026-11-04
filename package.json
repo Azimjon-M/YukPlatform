@@ -8,6 +8,10 @@
   ],
   "scripts": {
     "parse": "npm run parse -w @yuk/parser --",
+    "tg:login": "npm run login -w @yuk/collector",
+    "tg:dialogs": "npm run dialogs -w @yuk/collector",
+    "tg:export": "npm run export -w @yuk/collector --",
+    "tg:logout": "npm run logout -w @yuk/collector",
     "test": "npm test --workspaces --if-present"
   },
   "engines": {

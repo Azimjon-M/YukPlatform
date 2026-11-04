@@ -50,7 +50,7 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | api | Node.js, Express, PostgreSQL + Prisma |
 | bot | Node.js + grammY |
 | collector | Node.js + GramJS (`telegram` paketi) |
-| parser | Claude API |
+| parser | Gemini API (bepul tarif), ixtiyoriy: Claude API |
 | web | React + Vite + Tailwind |
 | mobile | Expo (React Native) |
 
@@ -65,7 +65,10 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | Buyruq | Nima qiladi |
 |---|---|
 | `npm test` | Barcha testlar |
+| `npm run tg:login` | Telegram'ga kirish (bir marta, o'z terminalingizda) |
+| `npm run tg:dialogs` | Akkaunt a'zo bo'lgan guruh/kanallar |
+| `npm run tg:export -- @guruh1 @guruh2` | Guruhlardagi oxirgi xabarlarni `data/samples/elonlar.txt` ga qo'shadi |
 | `npm run parse -- --dry-run` | E'lonlarni sanaydi va telefonlarni ajratadi (AI'siz, bepul) |
 | `npm run parse -- --limit 10` | Birinchi 10 ta e'lonni AI bilan tahlil qiladi |
 
-Batafsil: [packages/parser/README.md](packages/parser/README.md)
+Batafsil: [apps/collector/README.md](apps/collector/README.md), [packages/parser/README.md](packages/parser/README.md)

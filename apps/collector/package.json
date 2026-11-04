@@ -1,0 +1,17 @@
+{
+  "name": "@yuk/collector",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "login": "node --env-file-if-exists=../../.env src/cli.js login",
+    "dialogs": "node --env-file-if-exists=../../.env src/cli.js dialogs",
+    "export": "node --env-file-if-exists=../../.env src/cli.js export",
+    "logout": "node --env-file-if-exists=../../.env src/cli.js logout",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@yuk/parser": "*",
+    "telegram": "^2.26.22"
+  }
+}

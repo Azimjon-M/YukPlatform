@@ -1,16 +1,54 @@
 # collector — Userbot
 
-**Bosqich:** 1 (MVP)
+Oddiy Telegram akkaunt orqali yuk guruhlari va kanallarini o'qiydi. Guruh adminidan ruxsat kerak emas.
 
-- Ochiq yuk guruhlari va kanallarini admin ruxsatisiz o'qiydi
-- Har bir yangi xabarni `api` ga yuboradi
+| Bosqich | Nima qiladi | Holati |
+|---|---|---|
+| 0 | Guruhlardagi oxirgi xabarlarni `data/samples/elonlar.txt` ga yig'adi (parserni sinash uchun) | ✅ tayyor |
+| 1 | Yangi xabarlarni real vaqtda o'qib, `api` ga yuboradi | — |
 
 **Nima uchun botdan alohida:** userbot bloklansa yoki to'xtab qolsa ham bot ishlashda davom etadi.
 
+## Birinchi sozlash (bir marta)
+
+1. [my.telegram.org](https://my.telegram.org) → **API development tools** → ilova yarating (nomi ixtiyoriy).
+2. `api_id` va `api_hash` ni **o'zingiz** `.env` fayliga yozing: `TG_API_ID=...`, `TG_API_HASH=...`.
+3. O'z terminalingizda (YukPlatform papkasida) kiring:
+
+   ```bash
+   npm run tg:login
+   ```
+
+   Telefon raqam, Telegram yuborgan kod va 2FA parol (bo'lsa) so'raladi. Ularni faqat o'zingiz kiritasiz.
+   Sessiya `apps/collector/telegram.session` fayliga saqlanadi va keyingi safar qayta kirish shart emas.
+
+## Buyruqlar
+
+| Buyruq | Nima qiladi |
+|---|---|
+| `npm run tg:login` | Telegram'ga kirish (bir marta) |
+| `npm run tg:dialogs` | Akkaunt a'zo bo'lgan guruh/kanallar ro'yxati (manzil yoki id bilan) |
+| `npm run tg:export -- @guruh1 t.me/guruh2` | Har biridan oxirgi 100 ta xabarni `elonlar.txt` ga qo'shadi |
+| `npm run tg:export -- @guruh --limit 300` | Har bir chatdan 300 ta xabar |
+| `npm run tg:logout` | Sessiyani Telegram'da bekor qiladi va faylini o'chiradi |
+
+`tg:export` haqida:
+
+- Ochiq guruh: `@nom`, `t.me/nom` yoki `https://t.me/nom`. Yopiq guruh: avval akkaunt bilan qo'shiling, keyin `tg:dialogs` ko'rsatgan **id** ni yozing. Taklif havolasi (`t.me/+...`) qabul qilinmaydi.
+- 20 belgidan qisqa xabarlar ("ok", "rahmat") va takrorlar (fayldagilar bilan ham) tashlab ketiladi.
+- Fayl ustidan yozilmaydi, oxiriga qo'shiladi. Qayta ishga tushirsangiz, faqat yangi e'lonlar qo'shiladi.
+
+Keyin: `npm run parse -- --dry-run`, so'ng `npm run parse -- --limit 20`.
+
 ## Xavfsizlik
 
-- Alohida telefon raqamdagi akkaunt ishlating, shaxsiy akkauntingiz emas
+- Alohida telefon raqamdagi akkaunt ishlating, shaxsiy (Premium) akkauntingiz emas: bloklansa, asosiy akkaunt yo'qolmaydi
 - Faqat o'qing, hech narsa yozmang. Ko'p guruhga birdaniga qo'shilmang
-- Sessiya satri (`TG_SESSION`) parol bilan barobar, faqat `.env` faylda saqlanadi
+- `telegram.session` fayli (yoki `TG_SESSION`) = akkauntga to'liq kirish. U gitga tushmaydi (`*.session`), hech kimga bermang
+- Sessiya qo'lga tushdi deb o'ylasangiz: `npm run tg:logout` yoki Telegram → Settings → Devices → sessiyani yoping
 
-**Texnologiya:** Node.js + GramJS (`telegram` paketi)
+## Texnik eslatmalar
+
+- **Kutubxona:** GramJS (`telegram` paketi). 2026-yilda arxivlangan, davomi `teleproto` forki. Telegram bilan ishlaydigan butun kod `src/telegram.js` da, shuning uchun almashtirish oson.
+- **Port 443:** Node'da GramJS standart holatda 80-portdan ulanadi. Bizning tarmoqda 80-portdagi MTProto javobsiz qoladi va ulanish osilib turadi. Shuning uchun `useWSS: true` qo'yilgan: Node'da u TLS yoqmaydi, ulanishni 443-portga o'tkazadi, xolos.
+- `src/sources.js` (manzilni tekshirish) va `src/samples.js` (tozalash, takrorni olib tashlash) Telegram'siz test qilinadi: `npm test`.

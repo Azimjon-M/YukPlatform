@@ -27,12 +27,19 @@ Language: JavaScript (ES modules) by default since he knows JS; revisit TypeScri
 - Output: `{postType: yuk_bor|mashina_bor|boshqa, loads: [...]}`; `mashina_bor` posts reuse the load fields for the truck's route/capacity.
 - `test/parse.test.js` uses a fake client — tests never call the API.
 
+## Collector (apps/collector)
+- Phase 0 tool: `tg:login` / `tg:dialogs` / `tg:export -- <sources> [--limit N]` / `tg:logout` fill `data/samples/elonlar.txt` (append-only; drops posts < 20 chars and case/space-insensitive duplicates, also against what's already in the file). Phase 1 (live forwarding to `api`) not built yet.
+- GramJS `telegram` ^2.26 — archived in 2026; its npm deprecation points to the `teleproto` fork (single maintainer). Kept for now; ALL GramJS code lives in `src/telegram.js` so a swap touches one file.
+- **`useWSS: true` is required on his network:** in Node, GramJS connects on port 80 (hardcoded `useWSS ? 443 : 80`, session port ignored). Port 80 MTProto gets no reply here (raw req_pq probe 2026-11-04: 443 answers, 80 silent), so connect hangs at "New auth_key attempt". In Node `useWSS` only switches plain TCP to 443 — no TLS.
+- Session saved to `apps/collector/telegram.session` (gitignored `*.session`), or `TG_SESSION` env. **He runs `tg:login` himself** — never enter phone codes/2FA for him; recommend a separate-number account, not his main Premium one.
+- `src/sources.js` and `src/samples.js` are pure and unit-tested; nothing in tests touches Telegram.
+
 ## Key facts / decisions
 - Telegram inline URL buttons accept only `http(s)://` and `tg://` — **no `tel:`**. One-tap call inside Telegram = phone in text as `+998XXXXXXXXX` (auto-linked), or an https redirect page → `tel:` (also gives call analytics). Web/mobile use `tel:` directly.
 - Bot vs userbot are both real-time; difference is permission and ban risk, not speed. Bot must be admin to read channels; in groups it needs admin or privacy mode off. Userbot: separate phone number, read-only, don't join many groups at once; session string is a secret.
 - Same load is reposted in many groups → dedupe on phone + route + time window, or drivers will mute the bot.
 - Model category generic from day one (fura / yengil / pochta / yo'lovchi) but launch with fura only.
-- Phase 0 first: parser is the biggest technical risk. Phones via regex, the rest via Claude API; one post may hold several loads → output an array. Measure accuracy on 30–50 hand-checked posts.
+- Phase 0 first: parser is the biggest technical risk. Phones via regex, the rest via the AI provider (Gemini by default); one post may hold several loads → output an array. Measure accuracy on 30–50 hand-checked posts.
 
 ## Rules
 - Secrets live only in `.env` (see `.env.example`); never ask him to paste keys into chat.
