@@ -4,26 +4,48 @@ import assert from "node:assert/strict";
 import { ApiError } from "@google/genai";
 import { createParser, resolveSettings } from "../src/parse.js";
 import { gemini } from "../src/providers/gemini.js";
-import { POST_SCHEMA } from "../src/schema.js";
+import { LOAD_PROPERTIES, POST_SCHEMA } from "../src/schema.js";
 import { SYSTEM_PROMPT } from "../src/prompt.js";
 
 const LOAD = {
   category: "fura",
   fromCity: "Toshkent",
+  fromPlace: null,
   fromRegion: "toshkent_sh",
   fromCountry: "O'zbekiston",
   toCity: "Farg'ona",
+  toPlace: null,
   toRegion: "fargona",
   toCountry: "O'zbekiston",
   cargo: "sement",
   weightT: 20,
-  vehicle: "tent",
+  volumeM3: null,
+  pallets: null,
+  truckClass: null,
+  bodyType: "tent",
   vehicleCount: null,
+  loadingSides: [],
+  partial: false,
   price: 3500000,
+  priceUnit: "reys",
   currency: "UZS",
+  payment: null,
+  negotiable: false,
   when: null,
   note: null,
 };
+
+test("namunaviy yuk sxemadagi barcha maydonlarga ega", () => {
+  assert.deepEqual(Object.keys(LOAD).sort(), Object.keys(LOAD_PROPERTIES).sort());
+});
+
+test("ko'rsatmada haydovchi bilan kelishilgan asosiy qoidalar bor", () => {
+  for (const rule of ["LARGER number", "NEVER default to tent", "Never fill in the region's capital", "multiply by 1000", "fiyat"]) {
+    assert.ok(SYSTEM_PROMPT.includes(rule), rule);
+  }
+  // Ko'rsatma keshlanishi uchun o'zgarmas bo'lishi kerak: sana yoki vaqt qo'shilmagan
+  assert.ok(!/\d{4}-\d{2}-\d{2}/.test(SYSTEM_PROMPT));
+});
 const JSON_TEXT = JSON.stringify({ postType: "yuk_bor", loads: [LOAD] });
 const POST = "Тош-Фаргона 20т тент 90 123 45 67";
 

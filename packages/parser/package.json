@@ -9,6 +9,7 @@
   },
   "scripts": {
     "parse": "node --env-file-if-exists=../../.env src/cli.js",
+    "eval": "node src/eval.js",
     "test": "node --test"
   },
   "dependencies": {

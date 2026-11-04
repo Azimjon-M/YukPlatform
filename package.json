@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "parse": "npm run parse -w @yuk/parser --",
+    "parse:eval": "npm run eval -w @yuk/parser --",
     "tg:login": "npm run login -w @yuk/collector",
     "tg:dialogs": "npm run dialogs -w @yuk/collector",
     "tg:search": "npm run search -w @yuk/collector --",

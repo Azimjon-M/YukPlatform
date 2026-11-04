@@ -4,6 +4,7 @@
 //   npm run parse                     — hamma e'lonlarni tahlil qilish
 //   npm run parse -- --limit 10       — faqat birinchi 10 tasini (sinash uchun)
 //   npm run parse -- --skip 120       — birinchi 120 tasini o'tkazib yuborish (limit tugaganda davom etish)
+//   npm run parse -- --only 3,27,38   — faqat shu raqamli e'lonlar; --only gold — gold.jsonl dagilar (limitni tejaydi)
 //   npm run parse -- --dry-run        — AI'siz: e'lonlarni sanaydi va telefonlarni ajratadi (bepul)
 //   npm run parse -- --models         — kalitingiz bilan mavjud modellar ro'yxati
 import { appendFile, readFile, writeFile } from "node:fs/promises";
@@ -24,11 +25,16 @@ const { values: args } = parseArgs({
     out: { type: "string", default: path.join(ROOT, "data/samples/natija.jsonl") },
     limit: { type: "string" },
     skip: { type: "string", default: "0" },
+    only: { type: "string" },
     concurrency: { type: "string" },
     "dry-run": { type: "boolean", default: false },
     models: { type: "boolean", default: false },
   },
 });
+// npm -w buyruqni paket papkasida ishga tushiradi; nisbiy yo'llar foydalanuvchi turgan papkaga nisbatan (INIT_CWD)
+const here = (file) => path.resolve(process.env.INIT_CWD ?? process.cwd(), file);
+args.file = here(args.file);
+args.out = here(args.out);
 
 // Bitta e'lon uchun daqiqalik limitni necha marta kutamiz; undan keyin limit kunlik deb hisoblanadi
 const MAX_LIMIT_WAITS = 5;
@@ -58,8 +64,14 @@ async function main() {
     return;
   }
 
+  // Har bir e'lon fayldagi tartib raqami bilan: natijada ham shu raqam (index) saqlanadi
   const skip = Number(args.skip);
-  let posts = splitPosts(await readFile(args.file, "utf8")).slice(skip);
+  const all = splitPosts(await readFile(args.file, "utf8")).map((text, i) => ({ index: i + 1, text }));
+  let posts = all.slice(skip);
+  if (args.only) {
+    const wanted = await onlyIndexes(args.only);
+    posts = all.filter((p) => wanted.has(p.index));
+  }
   if (args.limit) posts = posts.slice(0, Number(args.limit));
 
   if (posts.length === 0) {
@@ -70,7 +82,7 @@ async function main() {
   }
 
   if (args["dry-run"]) {
-    dryRun(posts, skip);
+    dryRun(posts);
     return;
   }
 
@@ -91,12 +103,12 @@ async function main() {
   async function worker() {
     while (next < posts.length && !fatal) {
       const i = next++;
-      const base = { index: skip + i + 1, text: posts[i] };
+      const base = { index: posts[i].index, text: posts[i].text };
       for (let waits = 0; ; waits++) {
         if (pauseUntil > Date.now()) await sleep(pauseUntil - Date.now());
         if (fatal) return; // bu e'lon natijasiz qoladi va keyingi safar qayta yuboriladi
         try {
-          results[i] = { ...base, ...(await parser.parse(posts[i])) };
+          results[i] = { ...base, ...(await parser.parse(base.text)) };
           break;
         } catch (error) {
           // Daqiqalik limit: kutib, xuddi shu e'lonni qayta yuboramiz
@@ -137,19 +149,28 @@ async function main() {
     const firstMissing = results.findIndex((r) => !r);
     console.error(`\nTo'xtadi: ${provider.describeError(fatal)}`);
     // Davom ettirish maslahati faqat ish qisman bajarilganda foydali (masalan, kunlik limit tugaganda)
-    if (firstMissing >= 0 && finished.length) {
-      console.error(`Davom ettirish: npm run parse -- --skip ${skip + firstMissing}`);
+    if (firstMissing >= 0 && finished.length && !args.only) {
+      console.error(`Davom ettirish: npm run parse -- --skip ${posts[firstMissing].index - 1}`);
     }
     process.exitCode = 1;
   }
 }
 
-function dryRun(posts, skip) {
+// "--only 3,27,38" yoki "--only gold" (gold.jsonl dagi e'lonlar) → raqamlar to'plami
+async function onlyIndexes(value) {
+  if (value === "gold") {
+    const text = await readFile(path.join(ROOT, "data/samples/gold.jsonl"), "utf8");
+    return new Set(text.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l).index));
+  }
+  return new Set(value.split(",").map((s) => Number(s.trim())).filter(Number.isInteger));
+}
+
+function dryRun(posts) {
   let withPhone = 0;
-  posts.forEach((post, i) => {
-    const phones = extractPhones(post);
+  posts.forEach(({ index, text }) => {
+    const phones = extractPhones(text);
     if (phones.length) withPhone++;
-    console.log(`#${skip + i + 1} ${firstLine(post)}`);
+    console.log(`#${index} ${firstLine(text)}`);
     console.log(`    ${phones.length ? phones.join(", ") : "telefon topilmadi"}`);
   });
   console.log(`\n${posts.length} ta e'lon, telefon topilgani: ${withPhone} (${percent(withPhone, posts.length)})`);
@@ -169,9 +190,13 @@ function printSummary(results, provider) {
   console.log(`Turlari: ${Object.entries(types).map(([type, n]) => `${type} ${n}`).join(", ") || "—"}`);
   console.log(`Yuklar: ${loads.length}`);
   if (loads.length) {
-    const filled = (field) => percent(loads.filter((l) => l[field] !== null).length, loads.length);
-    console.log(`  qayerdan (viloyat): ${filled("fromRegion")} | qayerga (viloyat): ${filled("toRegion")}`);
-    console.log(`  mashina turi: ${filled("vehicle")} | og'irlik: ${filled("weightT")} | narx: ${filled("price")}`);
+    // Qiymati bor yuklar ulushi: massiv bo'lsa — bo'sh emas, mantiqiy (true/false) bo'lsa — true
+    const has = (value) => (Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined && value !== false);
+    const filled = (field) => percent(loads.filter((l) => has(l[field])).length, loads.length);
+    console.log(`  qayerdan: viloyat ${filled("fromRegion")}, shahar ${filled("fromCity")} | qayerga: viloyat ${filled("toRegion")}, shahar ${filled("toCity")}`);
+    console.log(`  mashina sinfi: ${filled("truckClass")} | kuzov: ${filled("bodyType")} | yuklash tomoni: ${filled("loadingSides")}`);
+    console.log(`  og'irlik: ${filled("weightT")} | kub: ${filled("volumeM3")} | palet: ${filled("pallets")} | dogruz: ${filled("partial")}`);
+    console.log(`  narx: ${filled("price")} | to'lov turi: ${filled("payment")} | kelishiladi: ${filled("negotiable")}`);
     console.log(`  telefon bor: ${percent(loads.filter((l) => l.phones.length).length, loads.length)}`);
   }
 
@@ -182,7 +207,9 @@ function printSummary(results, provider) {
       const from = `${l.fromCity ?? "?"} (${l.fromRegion ?? "?"})`;
       const to = `${l.toCity ?? "?"} (${l.toRegion ?? "?"})`;
       const weight = l.weightT === null ? "?" : `${l.weightT} t`;
-      console.log(`#${r.index} [${r.postType}] ${from} → ${to} | ${l.vehicle ?? "?"} | ${weight} | ${l.phones.join(", ") || "tel yo'q"}`);
+      const vehicle = `${l.truckClass ?? "?"}/${l.bodyType ?? "?"}`;
+      const price = l.price === null ? "narx ?" : `${l.price} ${l.currency ?? ""}/${l.priceUnit ?? "?"}`;
+      console.log(`#${r.index} [${r.postType}] ${from} → ${to} | ${vehicle} | ${weight} | ${price} | ${l.phones.join(", ") || "tel yo'q"}`);
     }
   }
 

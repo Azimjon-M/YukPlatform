@@ -22,3 +22,13 @@ Samarqanddan Moskvaga ref kerak, 22t meva
 - 3–5 ta har xil guruhdan jami 100–200 ta e'lon yig'ing
 - Har xil turdagi e'lonlar bo'lsin: kirill, lotin, ruscha; bitta e'londa bir nechta yuk; narxi yo'q; faqat telefon raqami bor va hokazo
 - Bu papka gitga tushmaydi, chunki ichida haqiqiy telefon raqamlari bor
+
+## Boshqa fayllar (hammasi gitga tushmaydi)
+
+| Fayl | Ichida |
+|---|---|
+| `gold.jsonl` | Qo'lda tekshirilgan to'g'ri javoblar: 32 ta e'lon, 52 ta yuk. Har qatorda `index` (e'lon raqami), `textStart` (birinchi 20 harf — fayl o'zgarsa, adashmaslik uchun), `postType`, `loads` |
+| `natija.jsonl` | `npm run parse` natijasi |
+| `natija-v1.jsonl` … `natija-v4.jsonl` | Prompt'ning har xil versiyalari natijasi — `npm run parse:eval` bilan solishtiriladi |
+
+`elonlar.txt` ga yangi e'lon qo'shsangiz, oxiriga qo'shing: `gold.jsonl` e'lonni tartib raqami bilan topadi.

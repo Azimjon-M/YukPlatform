@@ -26,6 +26,8 @@ const { values: args, positionals } = parseArgs({
   },
 });
 const [command, ...sourceArgs] = positionals;
+// npm -w buyruqni paket papkasida ishga tushiradi; nisbiy yo'l foydalanuvchi turgan papkaga nisbatan (INIT_CWD)
+args.out = path.resolve(process.env.INIT_CWD ?? process.cwd(), args.out);
 
 async function cmdLogin() {
   console.log("Telegram'ga kirish. Iloji bo'lsa, shaxsiy emas, ALOHIDA raqamdagi akkauntdan foydalaning.\n");
