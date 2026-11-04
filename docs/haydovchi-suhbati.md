@@ -82,3 +82,7 @@ Bu fayl parser, mashina profili va moslash (matching) qoidalarining asosi. Kod s
 - **Dogruz** (2.9) — haydovchidan tasdiqlash kerak.
 - **"+300 gpis"** nima ekanligi.
 - **Sana tartibi**: "10.11" — 10-noyabrmi yoki 11-oktyabrmi? Odatda kun.oy yoziladi.
+- **Takror muddati**: bir xil yuk (o'sha telefon, o'sha yo'nalish) necha kundan keyin yangi yuk hisoblanadi? Hozir 3 kun deb olindi (`packages/shared/src/dedupe.js`). Har kuni bir xil yo'nalishda yuk beradigan zavodlar bor-yo'qligini so'rash kerak.
+- **Yuklash tomoni**: e'londa "orqadan yoki yonidan" kabi bir nechta tomon yozilsa, birortasi yetadi deb olindi. "Ustidan va orqadan" (ikkalasi ham shart) degan e'lonlar uchraydimi?
+- **Kuzov almashinuvi**: "tent kerak" yukini ref (izoterm) mashina olib keta oladimi? Hozir kuzov aniq mos kelishi kerak.
+- **Yo'lakay**: yuklash joyi xaritada ko'rsatiladi (lokatsiya). Buning uchun manzilni koordinataga aylantirish kerak — keyingi bosqich.
