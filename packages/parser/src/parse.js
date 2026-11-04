@@ -1,6 +1,6 @@
 // Bitta e'lonni AI orqali JSON'ga aylantiradi.
 // Qaysi AI ishlashi .env dagi PARSER_PROVIDER ga bog'liq: gemini (standart, bepul) yoki claude.
-import { extractPhones } from "./phones.js";
+import { extractPhones, maskPhones } from "./phones.js";
 import { DEFAULT_PROVIDER, getProvider } from "./providers/index.js";
 
 export const DEFAULT_EFFORT = "low"; // qanchalik chuqur o'ylashi — hozircha faqat Claude'da ishlatiladi
@@ -22,7 +22,8 @@ export function createParser(options = {}) {
 
   async function parse(text) {
     const phones = extractPhones(text);
-    const result = await provider.generate(client, { text, model, effort });
+    // AI telefon raqamlarini ko'rmaydi — ular yuqorida regex bilan olingan
+    const result = await provider.generate(client, { text: maskPhones(text), model, effort });
     const meta = { model: result.model, usage: result.usage, phones };
     if (!result.ok) return { ok: false, error: result.error, ...meta };
 

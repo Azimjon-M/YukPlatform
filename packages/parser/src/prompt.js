@@ -43,7 +43,7 @@ ${categoryLines}
 - when: loading date or time as written, in Uzbek Latin ("bugun", "ertaga", "hozir", "05.11"). null if not stated.
 - note: other useful details in one short Uzbek Latin sentence (payment terms, loading method, special requirements). null if nothing.
 
-Never invent anything that is not in the post. Never put phone numbers in any field — they are extracted separately.
+Never invent anything that is not in the post. Phone numbers are already extracted and replaced with [telefon] in the text; never put them in any field.
 
 ## Regions
 ${regionLines}

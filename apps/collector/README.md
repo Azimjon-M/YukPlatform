@@ -28,6 +28,7 @@ Oddiy Telegram akkaunt orqali yuk guruhlari va kanallarini o'qiydi. Guruh admini
 |---|---|
 | `npm run tg:login` | Telegram'ga kirish (bir marta) |
 | `npm run tg:dialogs` | Akkaunt a'zo bo'lgan guruh/kanallar ro'yxati (manzil yoki id bilan) |
+| `npm run tg:search -- yuk "yuk markazi" груз` | Telegram qidiruvidan ochiq guruh/kanallarni topadi (qo'shilmasdan), a'zolar soni bo'yicha |
 | `npm run tg:export -- @guruh1 t.me/guruh2` | Har biridan oxirgi 100 ta xabarni `elonlar.txt` ga qo'shadi |
 | `npm run tg:export -- @guruh --limit 300` | Har bir chatdan 300 ta xabar |
 | `npm run tg:logout` | Sessiyani Telegram'da bekor qiladi va faylini o'chiradi |
@@ -51,4 +52,5 @@ Keyin: `npm run parse -- --dry-run`, so'ng `npm run parse -- --limit 20`.
 
 - **Kutubxona:** GramJS (`telegram` paketi). 2026-yilda arxivlangan, davomi `teleproto` forki. Telegram bilan ishlaydigan butun kod `src/telegram.js` da, shuning uchun almashtirish oson.
 - **Port 443:** Node'da GramJS standart holatda 80-portdan ulanadi. Bizning tarmoqda 80-portdagi MTProto javobsiz qoladi va ulanish osilib turadi. Shuning uchun `useWSS: true` qo'yilgan: Node'da u TLS yoqmaydi, ulanishni 443-portga o'tkazadi, xolos.
-- `src/sources.js` (manzilni tekshirish) va `src/samples.js` (tozalash, takrorni olib tashlash) Telegram'siz test qilinadi: `npm test`.
+- **Kirish:** `src/prompt.js` 2FA parolni yashirin o'qiydi (har belgi o'rniga `*`). `src/authErrors.js` qaysi xatoda qayta so'rashni (noto'g'ri kod yoki parol, ko'pi bilan 3 marta) va qaysi birida to'xtashni hal qiladi. Raqamda akkaunt bo'lmasa, yangi akkaunt ochilmaydi, kirish to'xtaydi.
+- `src/sources.js` (manzilni tekshirish), `src/samples.js` (tozalash, takrorni olib tashlash), `prompt.js` va `authErrors.js` Telegram'siz test qilinadi: `npm test`.

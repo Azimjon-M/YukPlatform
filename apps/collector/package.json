@@ -6,6 +6,7 @@
   "scripts": {
     "login": "node --env-file-if-exists=../../.env src/cli.js login",
     "dialogs": "node --env-file-if-exists=../../.env src/cli.js dialogs",
+    "search": "node --env-file-if-exists=../../.env src/cli.js search",
     "export": "node --env-file-if-exists=../../.env src/cli.js export",
     "logout": "node --env-file-if-exists=../../.env src/cli.js logout",
     "test": "node --test"

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Api, TelegramClient } from "telegram";
 import { Logger, LogLevel } from "telegram/extensions/Logger.js";
 import { StringSession } from "telegram/sessions/index.js";
+import { authErrorAction } from "./authErrors.js";
 
 // Sessiya fayli = akkauntga kirish kaliti. U gitga tushmaydi (.gitignore: *.session).
 export const SESSION_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../telegram.session");
@@ -66,12 +67,35 @@ export async function connectSaved() {
 // ask(savol, { hidden }) — terminaldan javob o'qiydigan funksiya (cli.js beradi)
 export async function login(ask) {
   const client = await createClient(await loadSession());
-  await client.start({
-    phoneNumber: () => ask("Telefon raqam (+998...): "),
-    phoneCode: () => ask("Telegram yuborgan kod: "),
-    password: (hint) => ask(`2FA parol${hint ? ` (eslatma: ${hint})` : ""}: `, { hidden: true }),
-    onError: (error) => console.error(`Xato: ${error.message}`),
-  });
+  let retries = 0;
+  let stopMessage = null;
+  try {
+    await client.start({
+      phoneNumber: () => ask("Telefon raqam (+998...): "),
+      phoneCode: () => ask("Telegram yuborgan kod: "),
+      password: (hint) => ask(`2FA parol${hint ? ` (eslatma: ${hint})` : ""}: `, { hidden: true }),
+      // Raqamda akkaunt bo'lmasa, GramJS o'zi "first name" nomli yangi akkaunt ochib yuboradi.
+      // Bunga yo'l qo'ymaymiz: xato berib, kirishni to'xtatamiz.
+      firstAndLastNames: async () => {
+        throw new Error("Bu raqamda Telegram akkaunt yo'q. Avval Telegram ilovasida ro'yxatdan o'ting.");
+      },
+      // false — savolni qayta beradi, true — kirishni to'xtatadi.
+      // Oldin bu yerda hech narsa qaytmas edi, shuning uchun GramJS xatoda cheksiz qayta urinardi.
+      onError: (error) => {
+        const action = authErrorAction(error, retries);
+        if (action.retry) {
+          retries += 1;
+          console.error(action.message);
+          return false;
+        }
+        stopMessage = action.message;
+        return true;
+      },
+    });
+  } catch (error) {
+    await client.disconnect();
+    throw new Error(stopMessage ?? authErrorAction(error).message);
+  }
   await saveSession(client);
   return client;
 }
@@ -92,6 +116,25 @@ export async function listChats(client) {
       username: dialog.entity?.username ?? null,
       type: dialog.isGroup ? "guruh" : "kanal",
       members: dialog.entity?.participantsCount ?? null,
+    });
+  }
+  return chats;
+}
+
+// Telegram global qidiruvi: nomida yoki manzilida `query` bo'lgan OCHIQ guruh/kanallar.
+// Qo'shilmasdan topadi; ochiq guruhni o'qish uchun ham qo'shilish shart emas.
+export async function searchPublicChats(client, query, { limit = 50 } = {}) {
+  const result = await client.invoke(new Api.contacts.Search({ q: query, limit }));
+  const chats = [];
+  for (const chat of result.chats) {
+    // Ba'zi chatlarda bir nechta manzil bo'ladi (usernames), asosiysi — faol bo'lgani
+    const username = chat.username ?? chat.usernames?.find((u) => u.active)?.username;
+    if (!username) continue; // manzilsiz = yopiq chat
+    chats.push({
+      username,
+      title: chat.title ?? "",
+      type: chat.broadcast ? "kanal" : "guruh",
+      members: chat.participantsCount ?? null,
     });
   }
   return chats;

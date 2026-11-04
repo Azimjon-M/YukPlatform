@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractPhones } from "../src/phones.js";
+import { extractPhones, maskPhones } from "../src/phones.js";
 
 const UZ = "+998901234567";
 
@@ -24,11 +24,21 @@ test("boshqa operator kodlari", () => {
   assert.deepEqual(extractPhones("33 123 45 67"), ["+998331234567"]);
   assert.deepEqual(extractPhones("tel 77-123-45-67"), ["+998771234567"]);
   assert.deepEqual(extractPhones("+998 71 234 56 78"), ["+998712345678"]);
+  // Haqiqiy e'lonlarda uchragan yangi kodlar
+  assert.deepEqual(extractPhones("Tent kerak 871234567"), ["+998871234567"]);
+  assert.deepEqual(extractPhones("87-123-45-67"), ["+998871234567"]);
+  assert.deepEqual(extractPhones("фура керак ,70 123 45 67"), ["+998701234567"]);
 });
 
 test("Rossiya / Qozog'iston raqamlari", () => {
   assert.deepEqual(extractPhones("+7 916 123 45 67"), ["+79161234567"]);
   assert.deepEqual(extractPhones("8 916 123-45-67"), ["+79161234567"]);
+  assert.deepEqual(extractPhones("+7 701 123 45 67"), ["+77011234567"]);
+});
+
+test("qo'shni davlatlar raqamlari", () => {
+  assert.deepEqual(extractPhones("Минск - Душанбе +992 88 800 12 34"), ["+992888001234"]);
+  assert.deepEqual(extractPhones("Бишкек +996 555 123 456"), ["+996555123456"]);
 });
 
 test("bitta e'londa bir nechta raqam", () => {
@@ -44,6 +54,14 @@ test("takrorlangan raqam bir marta olinadi", () => {
 test("raqam oldiga yopishgan son (tonna, sana) xalaqit bermaydi", () => {
   assert.deepEqual(extractPhones("Тош-Фаргона 20 90 123 45 67"), [UZ]);
   assert.deepEqual(extractPhones("Ertaga 05.11.2026 90 123 45 67"), [UZ]);
+});
+
+test("maskPhones: telefon yashiriladi, tonna va narx qoladi", () => {
+  assert.equal(maskPhones("Тош-Фаргона 20 90 123 45 67"), "Тош-Фаргона 20 [telefon]");
+  assert.equal(maskPhones("Tel: +998 90 123-45-67, 91 234 56 78"), "Tel: [telefon], [telefon]");
+  assert.equal(maskPhones("22 т, narx 3 500 000 so'm"), "22 т, narx 3 500 000 so'm");
+  assert.equal(maskPhones("Минск +992 88 800 12 34\nok"), "Минск [telefon]\nok");
+  assert.deepEqual(extractPhones(maskPhones("90 123 45 67 va +7 916 123 45 67")), [], "yashirilgandan keyin raqam qolmaydi");
 });
 
 test("narx, og'irlik, sana va karta raqami telefon deb olinmaydi", () => {

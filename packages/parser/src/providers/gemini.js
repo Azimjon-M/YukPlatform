@@ -16,6 +16,14 @@ function normalizeUsage(u = {}) {
   };
 }
 
+// 429 xatosi ichida Google qaysi limit tugaganini (daqiqalik yoki kunlik) va qancha kutishni yozadi
+function quotaInfo(error) {
+  const text = String(error?.message ?? "");
+  const quotaId = text.match(/"quotaId":\s*"([^"]+)"/)?.[1] ?? "";
+  const delay = text.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/)?.[1];
+  return { perDay: /PerDay/i.test(quotaId), delaySec: delay ? Number(delay) : null };
+}
+
 export const gemini = {
   id: "gemini",
   // "-latest" taxallusi Google'ning eng yangi Flash-Lite modeliga ishora qiladi (2026-11: gemini-3.5-flash-lite).
@@ -64,9 +72,18 @@ export const gemini = {
     return null; // bepul tarifda narx yo'q
   },
 
+  // Daqiqalik limit (429) tugasa — qancha kutib, keyin davom etish kerak (ms). Kunlik bo'lsa — null.
+  // Bepul tarifda daqiqasiga so'rovlar soni oz, 2026-11-04 da 16-so'rovda tugadi va bir daqiqada tiklandi.
+  retryAfterMs(error) {
+    if (!(error instanceof ApiError) || error.status !== 429) return null;
+    const { perDay, delaySec } = quotaInfo(error);
+    if (perDay) return null;
+    return Math.ceil((delaySec ?? 60) + 1) * 1000;
+  },
+
   // true — davom etishdan foyda yo'q, ish to'xtatiladi.
-  // 429 va 503 bu yerga SDK bir necha marta qayta urinib bo'lgandan keyin keladi:
-  // 429 — kunlik limit tugagan, 503 — model hozir band. Ikkalasida ham har bir e'lonni kutib o'tirmaymiz.
+  // 429 bu yerga daqiqalik kutishlar ham yordam bermaganda yoki kunlik limit tugaganda keladi,
+  // 503 — model hozir band. Ikkalasida ham har bir e'lonni kutib o'tirmaymiz.
   isFatal(error) {
     if (!(error instanceof ApiError)) return false;
     if ([401, 403, 404, 429, 503].includes(error.status)) return true;
@@ -75,7 +92,10 @@ export const gemini = {
 
   describeError(error) {
     if (!(error instanceof ApiError)) return error.message;
-    if (error.status === 429) return "Gemini bepul limiti tugadi (429). Biroz yoki ertagacha kuting, keyin --skip bilan davom eting.";
+    if (error.status === 429 && quotaInfo(error).perDay) {
+      return "Gemini'ning bugungi bepul limiti tugadi (429). Ertaga --skip bilan davom eting.";
+    }
+    if (error.status === 429) return "Gemini bepul limiti tugadi (429). Bir necha marta kutildi, lekin tiklanmadi. Keyinroq --skip bilan davom eting.";
     if (error.status === 503) return "Model hozir band (503). Keyinroq urinib ko'ring yoki .env da boshqa PARSER_MODEL tanlang (--models).";
     if (error.status === 404) return "Model topilmadi yoki yopilgan (404). Mavjud modellar: npm run parse -- --models";
     if (error.status === 403) return "Ruxsat yo'q (403): GEMINI_API_KEY ni tekshiring.";

@@ -8,6 +8,7 @@
 //   npm run parse -- --models         — kalitingiz bilan mavjud modellar ro'yxati
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { splitPosts } from "./posts.js";
@@ -28,6 +29,9 @@ const { values: args } = parseArgs({
     models: { type: "boolean", default: false },
   },
 });
+
+// Bitta e'lon uchun daqiqalik limitni necha marta kutamiz; undan keyin limit kunlik deb hisoblanadi
+const MAX_LIMIT_WAITS = 5;
 
 const firstLine = (text) => text.split("\n")[0].slice(0, 60);
 const percent = (part, total) => (total ? `${Math.round((part / total) * 100)}%` : "—");
@@ -80,23 +84,40 @@ async function main() {
   let next = 0;
   let done = 0;
   let fatal = null;
+  let pauseUntil = 0; // daqiqalik limit tugaganda hamma ishchi shu vaqtgacha birga kutadi
+  const progress = (text) => process.stdout.write(`\r${text}`.padEnd(60));
 
   // Bir vaqtda bir nechta so'rov yuboramiz (concurrency), lekin hammasini birdaniga emas
   async function worker() {
     while (next < posts.length && !fatal) {
       const i = next++;
       const base = { index: skip + i + 1, text: posts[i] };
-      try {
-        results[i] = { ...base, ...(await parser.parse(posts[i])) };
-      } catch (error) {
-        if (provider.isFatal(error)) {
-          fatal ??= error;
-          return; // bu e'lon natijasiz qoladi va keyingi safar qayta yuboriladi
+      for (let waits = 0; ; waits++) {
+        if (pauseUntil > Date.now()) await sleep(pauseUntil - Date.now());
+        if (fatal) return; // bu e'lon natijasiz qoladi va keyingi safar qayta yuboriladi
+        try {
+          results[i] = { ...base, ...(await parser.parse(posts[i])) };
+          break;
+        } catch (error) {
+          // Daqiqalik limit: kutib, xuddi shu e'lonni qayta yuboramiz
+          const wait = provider.retryAfterMs?.(error);
+          if (wait != null && waits < MAX_LIMIT_WAITS) {
+            if (Date.now() + wait > pauseUntil) {
+              pauseUntil = Date.now() + wait;
+              progress(`${done}/${posts.length} — daqiqalik limit, ${Math.round(wait / 1000)} s kutilmoqda...`);
+            }
+            continue;
+          }
+          if (provider.isFatal(error)) {
+            fatal ??= error;
+            return;
+          }
+          results[i] = { ...base, ok: false, error: provider.describeError(error) };
+          break;
         }
-        results[i] = { ...base, ok: false, error: provider.describeError(error) };
       }
       done++;
-      process.stdout.write(`\r${done}/${posts.length}`);
+      progress(`${done}/${posts.length}`);
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));

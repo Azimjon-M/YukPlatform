@@ -1,18 +1,19 @@
 // Collector buyruqlari (YukPlatform papkasida):
 //   npm run tg:login                               — Telegram'ga kirish (bir marta)
 //   npm run tg:dialogs                             — akkaunt a'zo bo'lgan guruh/kanallar
+//   npm run tg:search -- yuk "yuk markazi" груз     — ochiq guruh/kanallarni Telegram qidiruvidan topish
 //   npm run tg:export -- @guruh1 t.me/guruh2       — oxirgi xabarlarni elonlar.txt ga qo'shish
 //        --limit 200       har bir chatdan nechta xabar (standart 100)
 //        --min-length 20   bundan qisqa xabarlar tashlanadi
 //   npm run tg:logout                              — sessiyani bekor qilish va faylini o'chirish
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { ask } from "./prompt.js";
 import { appendPosts, selectNewPosts } from "./samples.js";
 import { normalizeSource } from "./sources.js";
-import { connectSaved, fetchTexts, listChats, login, logout } from "./telegram.js";
+import { connectSaved, fetchTexts, listChats, login, logout, searchPublicChats } from "./telegram.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -25,21 +26,6 @@ const { values: args, positionals } = parseArgs({
   },
 });
 const [command, ...sourceArgs] = positionals;
-
-// Terminaldan javob so'raydi. hidden: true — yozilgan belgilar ekranda ko'rinmaydi (parol uchun)
-async function ask(question, { hidden = false } = {}) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-  if (hidden) {
-    const write = rl._writeToOutput.bind(rl);
-    rl._writeToOutput = (text) => write(text.startsWith(question) ? question : "");
-  }
-  try {
-    return (await rl.question(question)).trim();
-  } finally {
-    if (hidden) process.stdout.write("\n");
-    rl.close();
-  }
-}
 
 async function cmdLogin() {
   console.log("Telegram'ga kirish. Iloji bo'lsa, shaxsiy emas, ALOHIDA raqamdagi akkauntdan foydalaning.\n");
@@ -61,6 +47,31 @@ async function cmdDialogs() {
     console.log(`${c.type.padEnd(5)} | ${address} | ${c.title}${members}`);
   }
   console.log("\nEksport: npm run tg:export -- <manzil yoki id> ...");
+}
+
+async function cmdSearch() {
+  const queries = sourceArgs;
+  if (queries.length === 0) {
+    throw new Error('Nima qidiramiz? Masalan: npm run tg:search -- yuk "yuk markazi" груз');
+  }
+  const client = await connectSaved();
+  const found = new Map(); // manzil → chat (bir nechta so'rovda chiqsa, bir marta)
+  try {
+    for (const query of queries) {
+      const chats = await searchPublicChats(client, query);
+      console.log(`"${query}": ${chats.length} ta ochiq chat`);
+      for (const chat of chats) found.set(chat.username.toLowerCase(), chat);
+    }
+  } finally {
+    await client.disconnect();
+  }
+  const sorted = [...found.values()].sort((a, b) => (b.members ?? 0) - (a.members ?? 0));
+  console.log(`\nJami ${sorted.length} ta (a'zolar soni bo'yicha):\n`);
+  for (const c of sorted) {
+    const members = c.members != null ? String(c.members).padStart(7) : "      ?";
+    console.log(`${members} | ${c.type.padEnd(5)} | @${c.username} | ${c.title}`);
+  }
+  console.log("\nEksport: npm run tg:export -- @manzil1 @manzil2 --limit 100");
 }
 
 async function cmdExport() {
@@ -102,7 +113,7 @@ async function cmdLogout() {
   console.log("Sessiya bekor qilindi va telegram.session o'chirildi.");
 }
 
-const COMMANDS = { login: cmdLogin, dialogs: cmdDialogs, export: cmdExport, logout: cmdLogout };
+const COMMANDS = { login: cmdLogin, dialogs: cmdDialogs, search: cmdSearch, export: cmdExport, logout: cmdLogout };
 
 try {
   const run = COMMANDS[command];

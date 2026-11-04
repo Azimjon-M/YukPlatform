@@ -67,6 +67,7 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | `npm test` | Barcha testlar |
 | `npm run tg:login` | Telegram'ga kirish (bir marta, o'z terminalingizda) |
 | `npm run tg:dialogs` | Akkaunt a'zo bo'lgan guruh/kanallar |
+| `npm run tg:search -- yuk "yuk markazi"` | Ochiq yuk guruhlarini Telegram qidiruvidan topadi |
 | `npm run tg:export -- @guruh1 @guruh2` | Guruhlardagi oxirgi xabarlarni `data/samples/elonlar.txt` ga qo'shadi |
 | `npm run parse -- --dry-run` | E'lonlarni sanaydi va telefonlarni ajratadi (AI'siz, bepul) |
 | `npm run parse -- --limit 10` | Birinchi 10 ta e'lonni AI bilan tahlil qiladi |

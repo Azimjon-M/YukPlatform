@@ -80,7 +80,7 @@ test("gemini: so'rov to'g'ri tuziladi", async () => {
   await createParser({ provider: "gemini", model: "gemini-test", client }).parse(POST);
   const req = client.calls[0];
   assert.equal(req.model, "gemini-test");
-  assert.equal(req.contents, POST);
+  assert.equal(req.contents, "Тош-Фаргона 20т тент [telefon]", "AI'ga telefon raqami yuborilmaydi");
   assert.equal(req.config.systemInstruction, SYSTEM_PROMPT);
   assert.equal(req.config.responseMimeType, "application/json");
   assert.equal(req.config.responseJsonSchema, POST_SCHEMA);
@@ -123,6 +123,16 @@ test("gemini: limit, kalit va model xatolari ishni to'xtatadi, boshqasi to'xtatm
   assert.equal(gemini.isFatal(new Error("tarmoq")), false);
 });
 
+test("gemini: daqiqalik limitda kutiladi, kunlik limitda to'xtaladi", () => {
+  const quota = (quotaId, retryDelay) =>
+    new ApiError({ status: 429, message: JSON.stringify({ error: { details: [{ violations: [{ quotaId }] }, { retryDelay }] } }) });
+  assert.equal(gemini.retryAfterMs(quota("GenerateRequestsPerMinutePerProjectPerModel-FreeTier", "37s")), 38000);
+  assert.equal(gemini.retryAfterMs(new ApiError({ status: 429, message: "Resource exhausted" })), 61000, "ma'lumot yo'q — 1 daqiqa");
+  assert.equal(gemini.retryAfterMs(quota("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "3600s")), null);
+  assert.match(gemini.describeError(quota("GenerateRequestsPerDayPerProjectPerModel-FreeTier")), /bugungi/);
+  assert.equal(gemini.retryAfterMs(new ApiError({ status: 500, message: "Internal" })), null);
+});
+
 // --- Claude ---
 
 test("claude: so'rov to'g'ri tuziladi: sxema, kesh, fallback", async () => {
@@ -130,6 +140,7 @@ test("claude: so'rov to'g'ri tuziladi: sxema, kesh, fallback", async () => {
   await createParser({ provider: "claude", model: "claude-opus-5-5", effort: "low", client }).parse(POST);
   const req = client.calls[0];
   assert.equal(req.model, "claude-opus-5-5");
+  assert.ok(!JSON.stringify(req.messages).includes("90 123 45 67"), "AI'ga telefon raqami yuborilmaydi");
   assert.equal(req.output_config.effort, "low");
   assert.equal(req.output_config.format.type, "json_schema");
   assert.deepEqual(req.system[0].cache_control, { type: "ephemeral" });
