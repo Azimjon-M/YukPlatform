@@ -56,6 +56,16 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 
 ## Sozlash
 
-1. `.env.example` faylidan nusxa olib, `.env` deb nomlang.
-2. Kalitlarni **o'zingiz** yozing.
-3. `.env` faylni hech qachon gitga yoki chatga yubormang.
+1. `npm install` — barcha paketlarni o'rnatadi (npm workspaces: `apps/*` va `packages/*` bitta buyruq bilan).
+2. `.env.example` faylidan nusxa olib, `.env` deb nomlang.
+3. Kalitlarni **o'zingiz** yozing. `.env` faylni hech qachon gitga yoki chatga yubormang.
+
+## Buyruqlar
+
+| Buyruq | Nima qiladi |
+|---|---|
+| `npm test` | Barcha testlar |
+| `npm run parse -- --dry-run` | E'lonlarni sanaydi va telefonlarni ajratadi (AI'siz, bepul) |
+| `npm run parse -- --limit 10` | Birinchi 10 ta e'lonni AI bilan tahlil qiladi |
+
+Batafsil: [packages/parser/README.md](packages/parser/README.md)

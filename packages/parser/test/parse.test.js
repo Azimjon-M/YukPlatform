@@ -1,0 +1,173 @@
+// Parser mantig'ini haqiqiy API'siz tekshiradi: soxta (fake) clientlar ishlatiladi.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { ApiError } from "@google/genai";
+import { createParser, resolveSettings } from "../src/parse.js";
+import { gemini } from "../src/providers/gemini.js";
+import { POST_SCHEMA } from "../src/schema.js";
+import { SYSTEM_PROMPT } from "../src/prompt.js";
+
+const LOAD = {
+  category: "fura",
+  fromCity: "Toshkent",
+  fromRegion: "toshkent_sh",
+  fromCountry: "O'zbekiston",
+  toCity: "Farg'ona",
+  toRegion: "fargona",
+  toCountry: "O'zbekiston",
+  cargo: "sement",
+  weightT: 20,
+  vehicle: "tent",
+  vehicleCount: null,
+  price: 3500000,
+  currency: "UZS",
+  when: null,
+  note: null,
+};
+const JSON_TEXT = JSON.stringify({ postType: "yuk_bor", loads: [LOAD] });
+const POST = "Тош-Фаргона 20т тент 90 123 45 67";
+
+function fakeClaude(response) {
+  const calls = [];
+  const create = async (request) => {
+    calls.push(request);
+    return { model: request.model, usage: { input_tokens: 10, output_tokens: 5 }, ...response };
+  };
+  return { calls, beta: { messages: { create } } };
+}
+
+function fakeGemini(response) {
+  const calls = [];
+  const generateContent = async (request) => {
+    calls.push(request);
+    return { usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, cachedContentTokenCount: 60 }, ...response };
+  };
+  return { calls, models: { generateContent } };
+}
+
+const claudeOk = {
+  stop_reason: "end_turn",
+  content: [
+    { type: "thinking", thinking: "" },
+    { type: "text", text: JSON_TEXT },
+  ],
+};
+const geminiOk = { text: JSON_TEXT, modelVersion: "gemini-x", candidates: [{ finishReason: "STOP" }] };
+
+// --- sozlamalar ---
+
+test("standart provayder — gemini, .env dagi bo'sh qiymatlar e'tiborga olinmaydi", () => {
+  const saved = { ...process.env };
+  process.env.PARSER_PROVIDER = "";
+  process.env.PARSER_MODEL = "";
+  try {
+    const s = resolveSettings();
+    assert.equal(s.provider.id, "gemini");
+    assert.equal(s.model, "gemini-flash-lite-latest");
+  } finally {
+    process.env = saved;
+  }
+});
+
+test("noma'lum provayder tushunarli xato beradi", () => {
+  assert.throws(() => resolveSettings({ provider: "gpt" }), /Noma'lum provayder/);
+});
+
+// --- Gemini ---
+
+test("gemini: so'rov to'g'ri tuziladi", async () => {
+  const client = fakeGemini(geminiOk);
+  await createParser({ provider: "gemini", model: "gemini-test", client }).parse(POST);
+  const req = client.calls[0];
+  assert.equal(req.model, "gemini-test");
+  assert.equal(req.contents, POST);
+  assert.equal(req.config.systemInstruction, SYSTEM_PROMPT);
+  assert.equal(req.config.responseMimeType, "application/json");
+  assert.equal(req.config.responseJsonSchema, POST_SCHEMA);
+});
+
+test("gemini: javob o'qiladi, telefonlar biriktiriladi, tokenlar normallashadi", async () => {
+  const result = await createParser({ provider: "gemini", client: fakeGemini(geminiOk) }).parse(POST);
+  assert.equal(result.ok, true);
+  assert.equal(result.postType, "yuk_bor");
+  assert.deepEqual(result.loads[0].phones, ["+998901234567"]);
+  assert.equal(result.model, "gemini-x");
+  assert.deepEqual(result.usage, { input: 40, output: 20, cacheRead: 60, cacheWrite: 0 });
+});
+
+test("gemini: bloklangan yoki bo'sh javob xato sifatida qaytadi", async () => {
+  const blocked = await createParser({
+    provider: "gemini",
+    client: fakeGemini({ promptFeedback: { blockReason: "SAFETY" } }),
+  }).parse(POST);
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error, /SAFETY/);
+
+  const cut = await createParser({
+    provider: "gemini",
+    client: fakeGemini({ text: '{"postType":', candidates: [{ finishReason: "MAX_TOKENS" }] }),
+  }).parse(POST);
+  assert.equal(cut.ok, false);
+});
+
+test("gemini: limit, kalit va model xatolari ishni to'xtatadi, boshqasi to'xtatmaydi", () => {
+  const err = (status, message) => new ApiError({ status, message });
+  assert.equal(gemini.isFatal(err(429, "Resource exhausted")), true);
+  assert.match(gemini.describeError(err(429, "Resource exhausted")), /--skip/);
+  assert.equal(gemini.isFatal(err(400, "API key not valid")), true);
+  assert.equal(gemini.isFatal(err(400, "User location is not supported")), true);
+  assert.equal(gemini.isFatal(err(404, "model not found")), true);
+  assert.equal(gemini.isFatal(err(503, "high demand")), true);
+  assert.match(gemini.describeError(err(503, "high demand")), /band/);
+  assert.equal(gemini.isFatal(err(500, "Internal")), false);
+  assert.equal(gemini.isFatal(new Error("tarmoq")), false);
+});
+
+// --- Claude ---
+
+test("claude: so'rov to'g'ri tuziladi: sxema, kesh, fallback", async () => {
+  const client = fakeClaude(claudeOk);
+  await createParser({ provider: "claude", model: "claude-opus-5-5", effort: "low", client }).parse(POST);
+  const req = client.calls[0];
+  assert.equal(req.model, "claude-opus-5-5");
+  assert.equal(req.output_config.effort, "low");
+  assert.equal(req.output_config.format.type, "json_schema");
+  assert.deepEqual(req.system[0].cache_control, { type: "ephemeral" });
+  assert.deepEqual(req.betas, ["server-side-fallback-2026-07-01"]);
+  assert.equal(req.fallbacks, "default");
+});
+
+test("claude: fallback'ni qo'llamaydigan modelda fallback yuborilmaydi", async () => {
+  const client = fakeClaude(claudeOk);
+  await createParser({ provider: "claude", model: "claude-haiku-5-5", client }).parse(POST);
+  assert.equal(client.calls[0].betas, undefined);
+  assert.equal(client.calls[0].fallbacks, undefined);
+});
+
+test("claude: javob o'qiladi va telefonlar biriktiriladi", async () => {
+  const result = await createParser({ provider: "claude", client: fakeClaude(claudeOk) }).parse(POST);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.loads[0].phones, ["+998901234567"]);
+  assert.equal(result.loads[0].toRegion, "fargona");
+});
+
+test("claude: refusal va max_tokens xato sifatida qaytadi", async () => {
+  const refused = await createParser({
+    provider: "claude",
+    client: fakeClaude({ stop_reason: "refusal", stop_details: { category: "cyber" }, content: [] }),
+  }).parse(POST);
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /cyber/);
+
+  const cut = await createParser({
+    provider: "claude",
+    client: fakeClaude({ stop_reason: "max_tokens", content: [{ type: "text", text: '{"postType":' }] }),
+  }).parse(POST);
+  assert.equal(cut.ok, false);
+});
+
+test("buzilgan JSON xato sifatida qaytadi, dastur yiqilmaydi", async () => {
+  const result = await createParser({ provider: "gemini", client: fakeGemini({ text: "{buzuq" }) }).parse(POST);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /JSON/);
+});

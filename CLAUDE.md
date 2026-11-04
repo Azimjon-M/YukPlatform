@@ -16,7 +16,16 @@ Aggregate cargo (yuk) posts from large Telegram groups/channels (10k–100k memb
 - `packages/shared` — regions (all spellings: Фаргона/Fargona/Farg'ona/Фарғона), vehicle types, load model
 - `data/samples/elonlar.txt` — real posts separated by `---`; contains real phone numbers → gitignored, never publish
 
-Language: JavaScript (ES modules) by default since he knows JS; revisit TypeScript once `packages/shared` grows.
+Language: JavaScript (ES modules) by default since he knows JS; revisit TypeScript once `packages/shared` grows. Code comments in Uzbek (he reads them to learn). npm workspaces from the root; `npm test` runs `node --test` per package. Node 24 — `.env` loaded via `node --env-file-if-exists`, no dotenv.
+
+## Parser (packages/parser)
+- **Budget: Azimjon has no money for paid APIs and won't borrow for testing — default provider is Gemini free tier** (AI Studio key, `GEMINI_API_KEY`). Don't steer him to paid usage; Claude stays as an optional provider for later.
+- Providers in `src/providers/{gemini,claude}.js`, same shape: `generate(client, {text, model, effort}) → {ok, json|error, model, usage}` with usage normalized to `{input, output, cacheRead, cacheWrite}`; plus `isFatal`, `describeError`, `cost`, `listModels`. `createParser({provider, model, client})` in `src/parse.js`; tests inject fake clients.
+- Gemini: `@google/genai` ^2.32, `models.generateContent` with `config.systemInstruction` + `responseMimeType: "application/json"` + `responseJsonSchema: POST_SCHEMA`; SDK retryOptions (4 attempts, 3→30 s) for 429/5xx; default model alias `gemini-flash-lite-latest` (→ gemini-3.5-flash-lite in 2026-11, ~1.5 s/post, schema followed). Tested 2026-11-04 with his key: `gemini-flash-latest` returned 503 "high demand", `gemini-2.5-flash` 404 "no longer available to new users". Model IDs drift — `npm run parse -- --models` lists what his key sees. Concurrency 2; 429 (daily quota) or 503 (overloaded) after retries → stop, save partial results, print `--skip N`.
+- Claude: `@anthropic-ai/sdk` ^1.4, `client.beta.messages.create` with `output_config.format` (json_schema) + `output_config.effort` (default `low`), cached system prompt, `fallbacks: "default"` + beta `server-side-fallback-2026-07-01` only for opus-5*/fable-5*/sonnet-5-5. Default model `claude-opus-5-5`.
+- Phones are NOT asked from the model: regex in `src/phones.js` (right-anchored group matching, rejects prices/cards/dates) and attached to every load of the post.
+- Output: `{postType: yuk_bor|mashina_bor|boshqa, loads: [...]}`; `mashina_bor` posts reuse the load fields for the truck's route/capacity.
+- `test/parse.test.js` uses a fake client — tests never call the API.
 
 ## Key facts / decisions
 - Telegram inline URL buttons accept only `http(s)://` and `tg://` — **no `tel:`**. One-tap call inside Telegram = phone in text as `+998XXXXXXXXX` (auto-linked), or an https redirect page → `tel:` (also gives call analytics). Web/mobile use `tel:` directly.

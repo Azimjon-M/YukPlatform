@@ -1,0 +1,16 @@
+{
+  "name": "yuk-platform",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "parse": "npm run parse -w @yuk/parser --",
+    "test": "npm test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
