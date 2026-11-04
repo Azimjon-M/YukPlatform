@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.expo/
+*.log
+
+# Kalitlar va sessiyalar
+.env
+.env.*
+!.env.example
+*.session
+
+# Haqiqiy e'lonlar (telefon raqamlari bor)
+data/samples/*
+!data/samples/README.md
