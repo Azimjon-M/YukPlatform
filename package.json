@@ -17,6 +17,8 @@
     "tg:live": "npm run live -w @yuk/collector --",
     "bot": "npm run start -w @yuk/bot --",
     "bot:check": "npm run check -w @yuk/bot",
+    "web": "npm run dev -w @yuk/web",
+    "web:build": "npm run build -w @yuk/web",
     "test": "npm test --workspaces --if-present"
   },
   "engines": {

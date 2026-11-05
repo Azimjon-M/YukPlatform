@@ -38,8 +38,8 @@ Bitta yuk 20 ta guruhga tashlanadi, shuning uchun takrorlar (telefon + yo'nalish
 | # | Bosqich | Nima qilinadi | Holati |
 |---|---|---|---|
 | 0 | Tadqiqot | 228 ta haqiqiy e'lon, AI parser, aniqlik 99% (32 ta qo'lda tekshirilgan e'londa) | ✅ |
-| 1 | MVP | collector → parser → baza → bot (filtr + shaxsiy xabar + qo'ng'iroq) + kanal @Yuk_Ekspert. 10–20 ta haydovchida sinov | ⏳ kod tayyor, sinov |
-| 2 | Mini App | React: e'lonlar ro'yxati, filtrlar, yuk egasi o'zi e'lon joylaydi | — |
+| 1 | MVP | collector → parser → baza → bot (pastki menyu, Mini App'da sozlamalar, shaxsiy xabar + qo'ng'iroq) + kanal @Yuk_Ekspert. 10–20 ta haydovchida sinov | ⏳ kod tayyor, sinov |
+| 2 | Mini App | ✅ sozlamalar formasi. Keyin: yuklar ro'yxati (API bilan), yuk egasi o'zi e'lon joylaydi | ⏳ |
 | 3 | Daromad | Guruh adminlari bilan hamkorlik, obuna (bepulda kechikish, pullida darhol) | — |
 | 4 | Kengayish | Web sayt, mobil ilova, pochta / yo'lovchi taksi | — |
 
@@ -54,7 +54,7 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | bot | Node.js + grammY |
 | collector | Node.js + GramJS (`telegram` paketi) |
 | parser | Gemini API (bepul tarif), ixtiyoriy: Claude API |
-| web | React + Vite + Tailwind |
+| web | React + Vite (Telegram Mini App) |
 | mobile | Expo (React Native) |
 
 ## Sozlash
@@ -77,5 +77,7 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | `npm run bot:check` | Bot tokeni va kanaldagi adminlikni tekshiradi |
 | `npm run bot` | Bot: haydovchilarni ro'yxatdan o'tkazadi, yuklarni kanalga va haydovchilarga yuboradi |
 | `npm run tg:live` | Guruhlardan yangi e'lonlarni bot navbatiga yig'adi |
+| `npm run web` | Mini App'ni kompyuterda sinash (http://localhost:5173) |
+| `npm run web:build` | Mini App'ni joylash uchun tayyorlaydi (`apps/web/dist`) |
 
-Batafsil: [apps/bot/README.md](apps/bot/README.md), [apps/collector/README.md](apps/collector/README.md), [packages/parser/README.md](packages/parser/README.md)
+Batafsil: [apps/bot/README.md](apps/bot/README.md), [apps/web/README.md](apps/web/README.md), [apps/collector/README.md](apps/collector/README.md), [packages/parser/README.md](packages/parser/README.md)

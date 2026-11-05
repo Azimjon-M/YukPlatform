@@ -1,4 +1,22 @@
-// .env dagi bot sozlamalari. Qiymatlar ekranga chiqarilmaydi — faqat bor-yo'qligi va ko'rinishi tekshiriladi.
+// .env dagi bot sozlamalari. Kalitlar ekranga chiqarilmaydi — faqat bor-yo'qligi va ko'rinishi tekshiriladi.
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+
+// Ixtiyoriy https manzil. Telegram Mini App faqat https bilan ochiladi.
+function optionalUrl(env, name) {
+  const value = env[name]?.trim();
+  if (!value) return null;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${name} to'liq manzil bo'lishi kerak, masalan: https://yuk-ekspert.pages.dev`);
+  }
+  if (url.protocol !== "https:") throw new Error(`${name} https:// bilan boshlanishi kerak (Telegram http manzilni ochmaydi).`);
+  return url.toString();
+}
 
 export function readConfig(env = process.env) {
   const token = env.BOT_TOKEN?.trim();
@@ -19,5 +37,15 @@ export function readConfig(env = process.env) {
     .filter(Boolean)
     .map(Number)
     .filter(Number.isSafeInteger);
-  return { token, channel, admins };
+
+  // Mini App (apps/web) joylangan manzil. Bo'lmasa, sozlamalar chatda savol-javob bilan bo'ladi.
+  const miniappUrl = optionalUrl(env, "MINIAPP_URL");
+  // "📱 Ilovalar" tugmasi: do'kon havolalari va Android o'rnatish fayli (yo'l YukPlatform papkasiga nisbatan)
+  const androidUrl = optionalUrl(env, "ANDROID_URL");
+  const iosUrl = optionalUrl(env, "IOS_URL");
+  const apk = env.APK_FILE?.trim();
+  if (apk && !/\.apk$/i.test(apk)) throw new Error("APK_FILE .apk fayl bo'lishi kerak, masalan: data/apk/yuk-ekspert.apk");
+  const apkFile = apk ? path.resolve(ROOT, apk) : null;
+
+  return { token, channel, admins, miniappUrl, androidUrl, iosUrl, apkFile };
 }

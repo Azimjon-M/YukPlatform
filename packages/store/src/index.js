@@ -98,6 +98,11 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     recentLoad: db.prepare("SELECT id FROM loads WHERE key = ? AND created_at > ? LIMIT 1"),
     insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, created_at) VALUES (?, ?, ?, ?)"),
     loadDelivery: db.prepare("UPDATE loads SET sent_to = ?, channel_message_id = ? WHERE id = ?"),
+    recentLoads: db.prepare(
+      `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at
+       FROM loads l JOIN posts p ON p.id = l.post_id
+       WHERE l.created_at > ? ORDER BY l.id DESC LIMIT ?`,
+    ),
     getDriver: db.prepare("SELECT * FROM drivers WHERE chat_id = ?"),
     insertDriver: db.prepare(
       "INSERT OR IGNORE INTO drivers (chat_id, name, username, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -155,6 +160,17 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
     setLoadDelivery(id, { sentTo = 0, channelMessageId = null }) {
       q.loadDelivery.run(sentTo, channelMessageId, id);
+    },
+
+    // Oxirgi yuklar, eng yangisi birinchi ("📋 Mos yuklar" tugmasi uchun).
+    // → [{ id, load, post: { source, link, postedAt }, createdAt }]
+    recentLoads({ sinceMs = 24 * 60 * 60 * 1000, limit = 500 } = {}) {
+      return q.recentLoads.all(now() - sinceMs, limit).map((row) => ({
+        id: row.id,
+        load: JSON.parse(row.data),
+        post: { source: row.source, link: row.link, postedAt: row.posted_at },
+        createdAt: row.created_at,
+      }));
     },
 
     // --- Haydovchilar ---

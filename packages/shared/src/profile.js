@@ -1,0 +1,133 @@
+// Haydovchi profili — bot (chatdagi savol-javob), Mini App (forma) va match.js uchun bitta qoidalar.
+// Mini App'dan kelgan ma'lumotga ishonib bo'lmaydi: sanitizeProfile har bir maydonni ro'yxat va chegaradan o'tkazadi.
+// Profil ko'rinishi: { vehicle: { truckClass, bodyType, capacityKg, body, loadingSides }, fromAreas, toAreas,
+//                      domestic, international, mode }
+import { COUNTRIES, REGIONS, REGION_IDS } from "./regions.js";
+import { BODY_TYPE_IDS, LOADING_SIDE_IDS, TRUCK_CLASS_IDS } from "./vehicles.js";
+
+// Sig'im tugmalari, tonna (do'stimiz aytgan odatdagi qiymatlar)
+export const CAPACITY_OPTIONS = {
+  fura: [20, 22, 24, 25, 26],
+  mini_fura: [9, 10, 12, 15],
+  isuzu: [5, 6, 7, 8, 9],
+  kichik: [1, 1.5, 2, 2.5, 3],
+  labo: [0.5, 0.7],
+};
+
+export const INTL_OPTIONS = {
+  yoq: { label: "Faqat O'zbekiston", domestic: true, international: false },
+  ham: { label: "O'zbekiston va xalqaro", domestic: true, international: true },
+  faqat: { label: "Faqat xalqaro", domestic: false, international: true },
+};
+
+export const MODE_OPTIONS = {
+  own: "Faqat mashinamga mos yuklar",
+  all: "Hamma yuklar",
+};
+
+export const SIDE_LABELS = { ust: "Ustidan", orqa: "Orqadan", yon: "Yonidan", chap: "Chapdan", ong: "O'ngdan" };
+
+// Ruxsat etilgan chegaralar (bundan tashqarisi — yozishda xato)
+export const CAPACITY_LIMITS_KG = [100, 60_000];
+export const BODY_LIMITS = { lengthM: [1, 20], widthM: [1, 3.2], heightM: [0.5, 4.5] };
+
+// Yo'nalish: viloyat kodi (REGIONS) yoki xorijiy davlat nomi (COUNTRIES) — match.js ikkalasini ham tushunadi
+const AREAS = new Set([...REGION_IDS, ...COUNTRIES.map((c) => c.name)]);
+
+// "Andijon vil.", "Qoraqalpog'iston", "Rossiya"
+export function regionLabel(id) {
+  const region = REGIONS.find((r) => r.id === id);
+  return region ? region.name.replace(" viloyati", " vil.").replace(" Respublikasi", "") : id;
+}
+
+export function intlOption(profile) {
+  return Object.entries(INTL_OPTIONS).find(([, o]) => o.domestic === profile.domestic && o.international === profile.international)?.[0] ?? "yoq";
+}
+
+export function emptyProfile() {
+  return {
+    vehicle: { truckClass: null, bodyType: null, capacityKg: null, body: null, loadingSides: [] },
+    fromAreas: [],
+    toAreas: [],
+    domestic: true,
+    international: false,
+    mode: "own",
+  };
+}
+
+const inRange = (value, [min, max]) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+const pick = (list, allowed) => (Array.isArray(list) ? [...new Set(list.filter((v) => typeof v === "string" && allowed.has(v)))] : []);
+
+// { lengthM, widthM, heightM } metrda, sm aniqlikda; noto'g'ri bo'lsa null
+export function sanitizeBody(body) {
+  if (!body || typeof body !== "object") return null;
+  const out = {};
+  for (const [key, limits] of Object.entries(BODY_LIMITS)) {
+    const value = Math.round(Number(body[key]) * 100) / 100;
+    if (!inRange(value, limits)) return null;
+    out[key] = value;
+  }
+  return out;
+}
+
+// Tashqaridan kelgan profilni tekshiradi. → { profile } yoki { error: "haydovchiga ko'rsatiladigan matn" }
+export function sanitizeProfile(input) {
+  if (!input || typeof input !== "object") return { error: "Ma'lumot kelmadi" };
+  const v = input.vehicle && typeof input.vehicle === "object" ? input.vehicle : {};
+  if (!TRUCK_CLASS_IDS.includes(v.truckClass)) return { error: "Mashina turini tanlang" };
+
+  // "Boshqa" kuzov — match.js uchun "aytilmagan" (null)
+  const bodyType = v.bodyType == null || v.bodyType === "boshqa" ? null : v.bodyType;
+  if (bodyType !== null && !BODY_TYPE_IDS.includes(bodyType)) return { error: "Kuzov turi noto'g'ri" };
+
+  const capacityKg = Math.round(Number(v.capacityKg));
+  if (!inRange(capacityKg, CAPACITY_LIMITS_KG)) return { error: "Necha tonna yuk ko'tarishini kiriting" };
+
+  let body = null;
+  if (v.body != null) {
+    body = sanitizeBody(v.body);
+    if (!body) return { error: "Kuzov o'lchami noto'g'ri (uzunligi 1–20, eni 1–3.2, balandligi 0.5–4.5 m)" };
+  }
+
+  const domestic = input.domestic !== false;
+  const international = input.international === true;
+  if (!domestic && !international) return { error: "O'zbekiston yoki xalqaro — bittasini tanlang" };
+
+  return {
+    profile: {
+      vehicle: { truckClass: v.truckClass, bodyType, capacityKg, body, loadingSides: pick(v.loadingSides, new Set(LOADING_SIDE_IDS)) },
+      fromAreas: pick(input.fromAreas, AREAS),
+      toAreas: pick(input.toAreas, AREAS),
+      domestic,
+      international,
+      mode: input.mode === "all" ? "all" : "own",
+    },
+  };
+}
+
+// --- Mini App manzilida (?p=...) profilni olib o'tish: forma haydovchining hozirgi sozlamalari bilan ochiladi ---
+function toBase64Url(text) {
+  let binary = "";
+  for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fromBase64Url(text) {
+  const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(base64 + "===".slice((base64.length + 3) % 4));
+  return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
+}
+
+export function encodeProfile(profile) {
+  return toBase64Url(JSON.stringify(profile));
+}
+
+// Noto'g'ri yoki buzilgan bo'lsa — null
+export function decodeProfile(text) {
+  if (!text) return null;
+  try {
+    return sanitizeProfile(JSON.parse(fromBase64Url(text))).profile ?? null;
+  } catch {
+    return null;
+  }
+}

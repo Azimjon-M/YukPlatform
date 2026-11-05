@@ -6,7 +6,7 @@ import { BODY_TYPES, LOADING_SIDES, PAYMENT_TYPES, REGIONS, TRUCK_CLASSES } from
 const TIME_ZONE = "Asia/Tashkent";
 
 export function escapeHtml(text) {
-  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 const regionName = (id) => REGIONS.find((r) => r.id === id)?.name;

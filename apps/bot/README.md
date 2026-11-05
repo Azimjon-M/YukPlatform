@@ -2,8 +2,18 @@
 
 **Bosqich:** 1 (MVP) ⏳ kod tayyor va testlardan o'tgan, haqiqiy haydovchilar bilan sinov kutilyapti
 
-- Haydovchini ro'yxatdan o'tkazadi: mashina turi, kuzov, sig'im, kuzov o'lchami, yuklash tomoni, qayerdan/qayerga, xalqaro, rejim
-- Navbatdagi e'lonlarni AI bilan tahlil qiladi, takrorni tashlaydi, yangi yukni **kanalga** joylaydi va **mos haydovchilarga** shaxsiy xabar qilib yuboradi
+- **Pastki menyu** — yozuv qatori ostida doim turadigan tugmalar (javob xabariga tugma yopishtirilmaydi):
+
+  | Tugma | Nima qiladi |
+  |---|---|
+  | 📋 Mos yuklar | Oxirgi 24 soatdagi mos yuklar (eng yangi 5 tasi) |
+  | 🚚 Ro'yxatdan o'tish / ⚙️ Sozlamalar | Mini App formasini ochadi (`MINIAPP_URL` bo'lsa). Bo'lmasa — chatda savol-javob |
+  | ⏸ Pauza / ▶️ Davom ettirish | Yuk yuborishni to'xtatadi yoki yoqadi. Tugma yozuvi holatga qarab almashadi |
+  | 📱 Ilovalar | Android/iPhone havolalari yoki APK fayl (bo'lmasa "tez orada") va kanal |
+  | ❓ Yordam | Yordam |
+
+- **Sozlamalar:** mashina turi, kuzov, sig'im, kuzov o'lchami, yuklash tomoni, qayerdan/qayerga (xalqaroda davlatlar ham), xalqaro, rejim. Mini App: [apps/web](../web/README.md)
+- Navbatdagi e'lonlarni AI bilan tahlil qiladi, takrorni tashlaydi, yangi yukni **kanalga** joylaydi va **mos haydovchilarga** shaxsiy xabar qilib yuboradi. Shaxsiy xabarda tugma yo'q: telefon raqami bosiladi, "📄 Asl e'lon" — matn ichidagi havola.
 - Admin bo'lgan guruhlardagi e'lonlarni ham navbatga qo'yadi (o'z kanalining nusxalaridan tashqari)
 
 ## Sozlash (bir marta)
@@ -16,6 +26,9 @@
    | `BOT_TOKEN` | — | BotFather bergan token. Chatga yozmang |
    | `CHANNEL_ID` | `@Yuk_Ekspert` | Yuklar joylanadigan kanal |
    | `ADMIN_IDS` | `123456789` | `/holat` buyrug'ini ko'ra oladiganlar. O'z id'ingizni botga `/id` yozib bilasiz |
+   | `MINIAPP_URL` | `https://yuk-ekspert.pages.dev` | Mini App manzili ([qanday joylash](../web/README.md)). Bo'sh bo'lsa — chatda savol-javob |
+   | `ANDROID_URL`, `IOS_URL` | `https://play.google.com/...` | Ixtiyoriy: «📱 Ilovalar» tugmasidagi havolalar |
+   | `APK_FILE` | `data/apk/yuk-ekspert.apk` | Ixtiyoriy: Android o'rnatish fayli (50 MB gacha), bot o'zi yuboradi |
 
 3. Botni kanalga **admin** qiling. Telefonda shu havolani oching va kanalni tanlang:
    <https://t.me/Yuk_Ekspert_agent?startchannel&admin=post_messages>
@@ -51,7 +64,7 @@ Alohida bazada sinash: buyruq oldidan `YUK_DB=data/sinov.db` (bash). Haqiqiy baz
 
 | Buyruq | Nima qiladi |
 |---|---|
-| `/start` | Salom va ro'yxatdan o'tish |
+| `/start` | Salom, pastki menyu (yo'qolsa ham qaytaradi) va ro'yxatdan o'tish |
 | `/sozlamalar` | Mashina va yo'nalishni o'zgartirish (eski javoblar belgilangan holda) |
 | `/pauza`, `/davom` | Yuk yuborishni to'xtatish / yoqish |
 | `/yordam` | Yordam |
@@ -84,8 +97,9 @@ guruh (bot admin)  ──┘    AI → takror? → baza             └─► mo
 |---|---|
 | `src/main.js` | Ishga tushirish, `--check`, `--dry-run` |
 | `src/config.js` | `.env` sozlamalarini tekshiradi (qiymatlarni ekranga chiqarmaydi) |
-| `src/bot.js` | grammY: buyruqlar, tugmalar, guruh xabarlari, kanalga va haydovchiga yuborish |
-| `src/wizard.js` | Ro'yxatdan o'tish savollari (Telegram'siz test qilinadi) |
+| `src/bot.js` | grammY: buyruqlar, pastki menyu tugmalari, Mini App ma'lumoti, guruh xabarlari, kanalga va haydovchiga yuborish |
+| `src/menu.js` | Pastki menyu (reply keyboard) va Mini App manzili |
+| `src/wizard.js` | Chatdagi savol-javob, Mini App bo'lmasa ishlatiladi (Telegram'siz test qilinadi) |
 | `src/format.js` | Yuk xabarining ko'rinishi |
 | `src/pipeline.js` | Navbat → AI → takror → yuborish; limitlarda kutish |
 

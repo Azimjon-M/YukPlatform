@@ -72,3 +72,17 @@ test("collector kursori", () => {
   store.setCursor("@a", 15);
   assert.equal(store.getCursor("@a"), 15);
 });
+
+test("oxirgi yuklar: eng yangisi birinchi, muddatdan eskisi tushmaydi", () => {
+  const clock = fakeClock();
+  const store = openStore({ file: ":memory:", now: clock.now });
+  const post = store.addPost({ source: "@a", messageId: 1, link: "https://t.me/a/1", text: "Toshkentdan Samarqandga 20 t", postedAt: 5 });
+  store.addLoad({ postId: post.id, key: "k1", load: { fromCity: "Toshkent" } });
+  clock.advance(10_000);
+  store.addLoad({ postId: post.id, key: "k2", load: { fromCity: "Andijon" } });
+  const all = store.recentLoads({ sinceMs: 60_000 });
+  assert.deepEqual(all.map((r) => r.load.fromCity), ["Andijon", "Toshkent"]);
+  assert.deepEqual(all[0].post, { source: "@a", link: "https://t.me/a/1", postedAt: 5 });
+  assert.deepEqual(store.recentLoads({ sinceMs: 5_000 }).map((r) => r.load.fromCity), ["Andijon"]);
+  assert.equal(store.recentLoads({ sinceMs: 60_000, limit: 1 }).length, 1);
+});

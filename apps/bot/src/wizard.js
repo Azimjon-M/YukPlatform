@@ -2,31 +2,22 @@
 // Har bir qadam: render (matn + tugmalar) va javobni qo'llash (tugma yoki yozilgan matn).
 // Tugma ma'lumoti: "w:<qadam>:<qiymat>" (Telegram 64 baytgacha ruxsat beradi).
 // Haydovchi bergan ma'lumotlar manbai: docs/haydovchi-suhbati.md (model, o'lcham, sig'im, yuklash eshiklari).
-import { BODY_TYPES, LOADING_SIDES, REGIONS, TRUCK_CLASSES, vehiclePallets, vehicleVolumeM3 } from "@yuk/shared";
+import {
+  BODY_LIMITS,
+  BODY_TYPES,
+  CAPACITY_OPTIONS,
+  INTL_OPTIONS,
+  LOADING_SIDES,
+  MODE_OPTIONS,
+  REGIONS,
+  SIDE_LABELS,
+  TRUCK_CLASSES,
+  regionLabel,
+  vehiclePallets,
+  vehicleVolumeM3,
+} from "@yuk/shared";
 
 export const STEPS = ["class", "body", "capacity", "size", "sides", "from", "to", "intl", "mode", "done"];
-
-// Sig'im tugmalari, tonna (do'stimiz aytgan odatdagi qiymatlar)
-const CAPACITY_OPTIONS = {
-  fura: [20, 22, 24, 25, 26],
-  mini_fura: [9, 10, 12, 15],
-  isuzu: [5, 6, 7, 8, 9],
-  kichik: [1, 1.5, 2, 2.5, 3],
-  labo: [0.5, 0.7],
-};
-
-const INTL_OPTIONS = {
-  yoq: { label: "Faqat O'zbekiston", domestic: true, international: false },
-  ham: { label: "O'zbekiston va xalqaro", domestic: true, international: true },
-  faqat: { label: "Faqat xalqaro", domestic: false, international: true },
-};
-
-const MODE_OPTIONS = {
-  own: "Faqat mashinamga mos yuklar",
-  all: "Hamma yuklar",
-};
-
-const SIDE_LABELS = { ust: "Ustidan", orqa: "Orqadan", yon: "Yonidan", chap: "Chapdan", ong: "O'ngdan" };
 
 export function newDraft(profile = null) {
   if (profile) {
@@ -52,8 +43,6 @@ export function newDraft(profile = null) {
 }
 
 const truckClass = (id) => TRUCK_CLASSES.find((t) => t.id === id);
-const regionLabel = (id) =>
-  REGIONS.find((r) => r.id === id)?.name.replace(" viloyati", " vil.").replace(" Respublikasi", "") ?? id;
 const button = (text, step, value) => ({ text, data: `w:${step}:${value}` });
 const rows = (buttons, perRow) => {
   const out = [];
@@ -235,8 +224,9 @@ export function parseBodySize(text) {
   const numbers = [...String(text).matchAll(/\d+(?:[.,]\d+)?/g)].map((m) => Number(m[0].replace(",", ".")));
   if (numbers.length !== 3) return null;
   const [lengthM, widthM, heightM] = numbers;
-  if (lengthM < 1 || lengthM > 20 || widthM < 1 || widthM > 3.2 || heightM < 0.5 || heightM > 4.5) return null;
-  return { lengthM, widthM, heightM };
+  const body = { lengthM, widthM, heightM };
+  const ok = Object.entries(BODY_LIMITS).every(([key, [min, max]]) => body[key] >= min && body[key] <= max);
+  return ok ? body : null;
 }
 
 // Haydovchi matn yozganda (sig'im va o'lcham qadamlarida). → { draft, error? }

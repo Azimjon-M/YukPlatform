@@ -10,6 +10,7 @@ Faktlar manbai: [docs/haydovchi-suhbati.md](../../docs/haydovchi-suhbati.md).
 | `categories.js` | Turlar (fura / yengil / pochta / yo'lovchi), e'lon turi, narx birligi, to'lov turi, valyuta; `cargoCategory` — toifani mashina sinfi yoki og'irlikdan (10 t va undan ortiq → fura) hisoblaydi |
 | `places.js` | Shahar nomini ro'yxatdan topish (`lookupCity`): viloyat va davlatni beradi; `normalizePlaces` — AI javobidagi viloyatni ro'yxat bo'yicha to'g'rilaydi, "Toshkent Nazarbek" kabi viloyat + shaharda shaharni oladi |
 | `match.js` | Yuk haydovchining mashinasi va yo'nalishiga mos keladimi (`matchLoad` → `{ok, reasons}`), yuk kimlarga yuboriladi (`findDrivers`) |
+| `profile.js` | Haydovchi profili: sig'im/xalqaro/rejim variantlari, `sanitizeProfile` (Mini App'dan kelgan ma'lumotni tekshiradi), `encodeProfile` / `decodeProfile` (Mini App manzilidagi `?p=`) — bot va web bir xil qoidalar bilan ishlaydi |
 | `dedupe.js` | Bitta yuk ko'p guruhda takrorlansa, uni bir marta yuborish uchun kalit (`loadKey`) va 3 kunlik xotira (`createDeduper`) |
 
 Test: `npm test` (YukPlatform papkasida).

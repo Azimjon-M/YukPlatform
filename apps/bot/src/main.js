@@ -2,6 +2,7 @@
 //   npm run bot          — bot + ishchi (navbatdagi e'lonlarni tahlil qilib yuboradi)
 //   npm run bot:check    — faqat tekshirish: token ishlayaptimi, bot kanalda adminmi
 //   npm run bot -- --dry-run — navbatdagi e'lonlarni tahlil qilib, Telegram'ga yubormasdan ekranga chiqarish
+import { existsSync, statSync } from "node:fs";
 import { createParser } from "@yuk/parser";
 import { openStore } from "@yuk/store";
 import { createBot } from "./bot.js";
@@ -37,6 +38,21 @@ async function checkLinkedGroup(bot, channel, links) {
   }
 }
 
+// Mini App va "📱 Ilovalar" tugmasi sozlamalari
+function checkApps(config) {
+  if (config.miniappUrl) console.log(`✅ Mini App: ${config.miniappUrl} — pastki menyudagi «Sozlamalar» tugmasi ochadi.`);
+  else console.log("ℹ️  MINIAPP_URL yozilmagan: sozlamalar chatda savol-javob bilan. Mini App'ni joylash: apps/web/README.md");
+  if (!config.apkFile) return;
+  if (!existsSync(config.apkFile)) {
+    console.log(`⚠️  APK_FILE topilmadi: ${config.apkFile}`);
+    return;
+  }
+  const mb = statSync(config.apkFile).size / 1024 / 1024;
+  // Bot Telegram'ga 50 MB gacha fayl yubora oladi
+  if (mb > 50) console.log(`⚠️  APK ${mb.toFixed(1)} MB — bot 50 MB dan kattasini yubora olmaydi. ANDROID_URL havolasini ishlating.`);
+  else console.log(`✅ APK: ${mb.toFixed(1)} MB, «📱 Ilovalar» tugmasida yuboriladi.`);
+}
+
 async function check(config) {
   const store = openStore();
   const { bot, init } = createBot({ token: config.token, store, config, log });
@@ -60,6 +76,7 @@ async function check(config) {
     }
     await checkLinkedGroup(bot, config.channel, links);
   }
+  checkApps(config);
   const s = store.stats();
   console.log(`Baza: ${s.drivers.total} haydovchi, navbatda ${s.posts.new ?? 0} ta e'lon.`);
   store.close();
