@@ -6,14 +6,18 @@
 //        --limit 200       har bir chatdan nechta xabar (standart 100)
 //        --min-length 20   bundan qisqa xabarlar tashlanadi
 //   npm run tg:logout                              — sessiyani bekor qilish va faylini o'chirish
+//   npm run tg:live -- @guruh1 @guruh2             — jonli rejim: yangi e'lonlarni bot navbatiga qo'yish
+//        (guruhlar berilmasa — .env dagi TG_SOURCES) --interval 60 (soniya)  --backfill 20 (boshida oxirgi 20 ta)
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { openStore } from "@yuk/store";
+import { runLive } from "./live.js";
 import { ask } from "./prompt.js";
 import { appendPosts, selectNewPosts } from "./samples.js";
 import { normalizeSource } from "./sources.js";
-import { connectSaved, fetchTexts, listChats, login, logout, searchPublicChats } from "./telegram.js";
+import { connectSaved, createReader, fetchTexts, listChats, login, logout, searchPublicChats } from "./telegram.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -23,6 +27,8 @@ const { values: args, positionals } = parseArgs({
     limit: { type: "string", default: "100" },
     "min-length": { type: "string", default: "20" },
     out: { type: "string", default: path.join(ROOT, "data/samples/elonlar.txt") },
+    interval: { type: "string", default: "60" },
+    backfill: { type: "string", default: "0" },
   },
 });
 const [command, ...sourceArgs] = positionals;
@@ -108,6 +114,36 @@ async function cmdExport() {
   console.log("Keyingi qadam: npm run parse -- --dry-run, keyin npm run parse -- --limit 20");
 }
 
+async function cmdLive() {
+  const list = sourceArgs.length ? sourceArgs : (process.env.TG_SOURCES ?? "").split(/[,\s]+/).filter(Boolean);
+  if (list.length === 0) {
+    throw new Error("Qaysi guruhlar? npm run tg:live -- @guruh1 @guruh2 yoki .env ga TG_SOURCES=@guruh1,@guruh2");
+  }
+  const sources = list.map(normalizeSource);
+  const intervalMs = Math.max(30, Number(args.interval)) * 1000; // 30 s dan tez so'rash — FLOOD_WAIT xavfi
+  const store = openStore();
+  const client = await connectSaved();
+  const controller = new AbortController();
+  process.once("SIGINT", () => controller.abort());
+  const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
+
+  console.log(`${sources.length} ta guruh kuzatilyapti, har ${intervalMs / 1000} s. E'lonlarni bot yuboradi (npm run bot). To'xtatish: Ctrl+C`);
+  try {
+    await runLive({
+      sources,
+      reader: createReader(client),
+      store,
+      intervalMs,
+      backfill: Number(args.backfill),
+      log: (message) => console.log(`[${time()}] ${message}`),
+      signal: controller.signal,
+    });
+  } finally {
+    await client.disconnect();
+    store.close();
+  }
+}
+
 async function cmdLogout() {
   const client = await connectSaved();
   await logout(client);
@@ -115,7 +151,7 @@ async function cmdLogout() {
   console.log("Sessiya bekor qilindi va telegram.session o'chirildi.");
 }
 
-const COMMANDS = { login: cmdLogin, dialogs: cmdDialogs, search: cmdSearch, export: cmdExport, logout: cmdLogout };
+const COMMANDS = { login: cmdLogin, dialogs: cmdDialogs, search: cmdSearch, export: cmdExport, live: cmdLive, logout: cmdLogout };
 
 try {
   const run = COMMANDS[command];

@@ -150,6 +150,30 @@ async function resolveEntity(client, source) {
   throw new Error(`id ${source.value} topilmadi: akkaunt bu chatga a'zo emas (npm run tg:dialogs)`);
 }
 
+// Jonli rejim (live.js) uchun o'quvchi. Guruh manzili bir marta aniqlanadi va eslab qolinadi:
+// Telegram manzil bo'yicha qidirishni (resolveUsername) qattiq cheklaydi, har daqiqada so'rash mumkin emas.
+export function createReader(client) {
+  const entities = new Map();
+  async function entityOf(source) {
+    if (!entities.has(source.value)) entities.set(source.value, await resolveEntity(client, source));
+    return entities.get(source.value);
+  }
+  return {
+    async latestId(source) {
+      const [message] = await client.getMessages(await entityOf(source), { limit: 1 });
+      return message?.id ?? null;
+    },
+    // minId dan keyingi xabarlar (eskisidan yangisiga). Daqiqada 200 tadan ko'p xabar yozilmaydi.
+    async since(source, minId, limit = 200) {
+      const messages = await client.getMessages(await entityOf(source), { minId, limit });
+      return messages
+        .filter((m) => m.message)
+        .map((m) => ({ id: m.id, text: m.message, date: m.date }))
+        .reverse();
+    },
+  };
+}
+
 // Chatdagi oxirgi `limit` ta xabarning matnlari (rasm/video izohi ham matn hisoblanadi)
 export async function fetchTexts(client, source, { limit }) {
   const entity = await resolveEntity(client, source);

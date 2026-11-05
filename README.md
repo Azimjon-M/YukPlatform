@@ -14,8 +14,10 @@ YukPlatform/
 │   └── mobile/         Android / iOS ilova (Expo)
 ├── packages/           ← bir nechta dastur birga ishlatadigan kod
 │   ├── parser/         AI parser: e'lon matni → JSON
-│   └── shared/         Viloyatlar, mashina turlari, e'lon modeli
-├── data/samples/       Namunaviy e'lonlar (gitga tushmaydi)
+│   ├── shared/         Viloyatlar, mashina turlari, moslash va takror qoidalari
+│   └── store/          Baza (SQLite): e'lonlar navbati, yuklar, haydovchilar
+├── data/               yuk.db (baza) va samples/ — namunaviy e'lonlar (gitga tushmaydi)
+├── docs/               Haydovchi bilan suhbat — domen faktlari manbai
 ├── .env.example        Kerakli kalitlar ro'yxati (qiymatsiz)
 └── CLAUDE.md           Claude uchun loyiha konteksti
 ```
@@ -35,8 +37,8 @@ Bitta yuk 20 ta guruhga tashlanadi, shuning uchun takrorlar (telefon + yo'nalish
 
 | # | Bosqich | Nima qilinadi | Holati |
 |---|---|---|---|
-| 0 | Tadqiqot | 100–200 ta haqiqiy e'lon, AI parser prototipi, aniqlikni o'lchash | ⏳ hozir |
-| 1 | MVP | collector → parser → baza → bot (filtr + shaxsiy xabar + qo'ng'iroq). 10–20 ta haydovchida sinov | — |
+| 0 | Tadqiqot | 228 ta haqiqiy e'lon, AI parser, aniqlik 99% (32 ta qo'lda tekshirilgan e'londa) | ✅ |
+| 1 | MVP | collector → parser → baza → bot (filtr + shaxsiy xabar + qo'ng'iroq) + kanal @Yuk_Ekspert. 10–20 ta haydovchida sinov | ⏳ kod tayyor, sinov |
 | 2 | Mini App | React: e'lonlar ro'yxati, filtrlar, yuk egasi o'zi e'lon joylaydi | — |
 | 3 | Daromad | Guruh adminlari bilan hamkorlik, obuna (bepulda kechikish, pullida darhol) | — |
 | 4 | Kengayish | Web sayt, mobil ilova, pochta / yo'lovchi taksi | — |
@@ -47,6 +49,7 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 
 | Qism | Texnologiya |
 |---|---|
+| baza | Hozir SQLite (`node:sqlite`, bepul); keyin api bilan PostgreSQL + Prisma |
 | api | Node.js, Express, PostgreSQL + Prisma |
 | bot | Node.js + grammY |
 | collector | Node.js + GramJS (`telegram` paketi) |
@@ -71,5 +74,8 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | `npm run tg:export -- @guruh1 @guruh2` | Guruhlardagi oxirgi xabarlarni `data/samples/elonlar.txt` ga qo'shadi |
 | `npm run parse -- --dry-run` | E'lonlarni sanaydi va telefonlarni ajratadi (AI'siz, bepul) |
 | `npm run parse -- --limit 10` | Birinchi 10 ta e'lonni AI bilan tahlil qiladi |
+| `npm run bot:check` | Bot tokeni va kanaldagi adminlikni tekshiradi |
+| `npm run bot` | Bot: haydovchilarni ro'yxatdan o'tkazadi, yuklarni kanalga va haydovchilarga yuboradi |
+| `npm run tg:live` | Guruhlardan yangi e'lonlarni bot navbatiga yig'adi |
 
-Batafsil: [apps/collector/README.md](apps/collector/README.md), [packages/parser/README.md](packages/parser/README.md)
+Batafsil: [apps/bot/README.md](apps/bot/README.md), [apps/collector/README.md](apps/collector/README.md), [packages/parser/README.md](packages/parser/README.md)

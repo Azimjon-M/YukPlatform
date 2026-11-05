@@ -14,9 +14,12 @@
     "tg:search": "npm run search -w @yuk/collector --",
     "tg:export": "npm run export -w @yuk/collector --",
     "tg:logout": "npm run logout -w @yuk/collector",
+    "tg:live": "npm run live -w @yuk/collector --",
+    "bot": "npm run start -w @yuk/bot --",
+    "bot:check": "npm run check -w @yuk/bot",
     "test": "npm test --workspaces --if-present"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   }
 }

@@ -9,10 +9,13 @@
     "search": "node --env-file-if-exists=../../.env src/cli.js search",
     "export": "node --env-file-if-exists=../../.env src/cli.js export",
     "logout": "node --env-file-if-exists=../../.env src/cli.js logout",
-    "test": "node --test"
+    "live": "node --env-file-if-exists=../../.env --disable-warning=ExperimentalWarning src/cli.js live",
+    "test": "node --disable-warning=ExperimentalWarning --test"
   },
   "dependencies": {
     "@yuk/parser": "*",
+    "@yuk/shared": "*",
+    "@yuk/store": "*",
     "telegram": "^2.26.22"
   }
 }

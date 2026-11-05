@@ -13,3 +13,7 @@ build/
 # Haqiqiy e'lonlar (telefon raqamlari bor)
 data/samples/*
 !data/samples/README.md
+
+# Baza (haydovchilar va e'lonlar)
+data/*.db
+data/*.db-*
