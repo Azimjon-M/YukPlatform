@@ -139,7 +139,7 @@ test("pastki menyu: /start Mini App tugmasi bilan, savol-javobsiz", async () => 
   assert.equal(markup.is_persistent, true);
   assert.equal(markup.resize_keyboard, true);
   const register = buttons(markup).find((b) => b.text === MENU.register);
-  assert.equal(register.web_app.url, MINIAPP);
+  assert.equal(register.web_app.url, `${MINIAPP}?v=sozlamalar`); // ilova darhol sozlamalar bilan ochiladi
   assert.deepEqual(buttons(markup).map((b) => b.text), [MENU.loads, MENU.register, MENU.pause, MENU.apps, MENU.help]);
 });
 

@@ -1,6 +1,6 @@
 // Haydovchilar: GET /api/drivers — kim, qanday mashina, qaysi yo'nalish, faolmi. Faol — unga yuk yuboriladi.
 import { useState } from "react";
-import { get, patch } from "../api.js";
+import { get, patch, post } from "../api.js";
 import { formatNumber, profileSummary } from "../format.js";
 import { useApi, useNow } from "../hooks.js";
 import { Async, Badge, Button, Empty, PageHeader, TimeAgo, Toggle, useTitle, useToast } from "../ui.jsx";
@@ -33,6 +33,34 @@ function ActiveToggle({ driver, onChanged }) {
     }
   }
   return <Toggle checked={checked} onChange={change} busy={busy} label={checked ? "Faol" : "Pauza"} />;
+}
+
+// Haydovchilar web'ini shu haydovchi nomidan ochadi (Telegram'siz sinash uchun; havola 12 soat amal qiladi)
+function OpenWebButton({ driver }) {
+  const notify = useToast();
+  const [busy, setBusy] = useState(false);
+  async function open() {
+    // Oyna darhol ochiladi (brauzer keyinroq ochilgan oynani bloklaydi), manzil javob kelgach qo'yiladi
+    const tab = window.open("about:blank", "_blank");
+    setBusy(true);
+    try {
+      const { url } = await post(`/api/drivers/${driver.chatId}/web-link`);
+      if (tab) {
+        tab.opener = null;
+        tab.location.href = url;
+      } else window.location.href = url;
+    } catch (e) {
+      tab?.close();
+      notify(e.message, "critical");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Button onClick={open} busy={busy} title={`Haydovchilar web'ini ${driver.name || "shu haydovchi"} nomidan ochish`}>
+      Web'da ochish
+    </Button>
+  );
 }
 
 export function DriversPage() {
@@ -68,6 +96,9 @@ export function DriversPage() {
                     <th scope="col">Yo'nalish</th>
                     <th scope="col">Holat</th>
                     <th scope="col">Yangilangan</th>
+                    <th scope="col">
+                      <span className="sr-only">Web</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -120,6 +151,9 @@ export function DriversPage() {
                         </td>
                         <td data-label="Yangilangan" className="nowrap">
                           <TimeAgo ts={d.updatedAt} now={now} />
+                        </td>
+                        <td data-label="Web">
+                          <OpenWebButton driver={d} />
                         </td>
                       </tr>
                     );

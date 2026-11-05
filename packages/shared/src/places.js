@@ -28,6 +28,9 @@ for (const region of REGIONS) {
 }
 for (const country of COUNTRIES) {
   for (const city of country.cities) add(city, { name: city, region: "xorij", country: country.name });
+  for (const [canonical, variants] of Object.entries(country.aliases ?? {})) {
+    for (const variant of variants) add(variant, { name: canonical, region: "xorij", country: country.name });
+  }
 }
 
 // Ro'yxatda aniq bitta joyda bo'lsa { name, region, country }, aks holda null

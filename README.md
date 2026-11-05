@@ -11,7 +11,7 @@ YukPlatform/
 │   ├── admin/          Boshqaruv markazi web'i (http://localhost:3000/admin)
 │   ├── bot/            Telegram bot: filtr sozlash, shaxsiy xabarlar
 │   ├── collector/      Userbot: guruh va kanallardan e'lon yig'adi
-│   ├── web/            Telegram Mini App (haydovchi sozlamalari), keyin ochiq sayt
+│   ├── web/            Haydovchilar ilovasi: Mini App + sayt (yuklar, xarita, sozlamalar)
 │   └── mobile/         Android / iOS ilova (Expo)
 ├── packages/           ← bir nechta dastur birga ishlatadigan kod
 │   ├── parser/         AI parser: e'lon matni → JSON
@@ -40,7 +40,7 @@ Bitta yuk 20 ta guruhga tashlanadi, shuning uchun takrorlar (telefon + yo'nalish
 |---|---|---|---|
 | 0 | Tadqiqot | 228 ta haqiqiy e'lon, AI parser, aniqlik 99% (32 ta qo'lda tekshirilgan e'londa) | ✅ |
 | 1 | MVP | collector → parser → baza → bot (pastki menyu, Mini App'da sozlamalar, shaxsiy xabar + qo'ng'iroq) + kanal @Yuk_Ekspert. 10–20 ta haydovchida sinov | ⏳ kod tayyor, sinov |
-| 2 | Mini App + boshqaruv markazi | ✅ sozlamalar formasi. ✅ Boshqaruv markazi (web): ko'rsatkichlar, yuklar, navbat, haydovchilar, manbalar, bot/collector'ni yoqish va loglar. ✅ AI kalitlari web'dan (shifrlangan) + bir nechta AI parallel. Keyin: haydovchilar uchun ochiq web, xarita | ⏳ |
+| 2 | Mini App + boshqaruv markazi | ✅ sozlamalar formasi. ✅ Boshqaruv markazi (web): ko'rsatkichlar, yuklar, navbat, haydovchilar, manbalar, bot/collector'ni yoqish va loglar. ✅ AI kalitlari web'dan (shifrlangan) + bir nechta AI parallel. ✅ Haydovchilar ilovasi: Telegram orqali kirish, yuklar lentasi, xarita. Keyin: internetga doimiy manzil | ⏳ |
 | 3 | Daromad | Guruh adminlari bilan hamkorlik, obuna (bepulda kechikish, pullida darhol) | — |
 | 4 | Kengayish | Web sayt, mobil ilova, pochta / yo'lovchi taksi | — |
 
@@ -56,7 +56,7 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | bot | Node.js + grammY |
 | collector | Node.js + GramJS (`telegram` paketi) |
 | parser | Gemini API (bepul tarif), ixtiyoriy: Claude API |
-| web | React + Vite (Telegram Mini App) |
+| web | React + Vite + Leaflet / OpenStreetMap (Telegram Mini App va sayt) |
 | mobile | Expo (React Native) |
 
 ## Sozlash
@@ -69,7 +69,7 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 
 | Buyruq | Nima qiladi |
 |---|---|
-| **`npm start`** | **Hammasi bitta buyruq bilan**: boshqaruv markazi http://localhost:3000/admin + bot + collector. To'xtatish: `Ctrl+C` |
+| **`npm start`** | **Hammasi bitta buyruq bilan**: boshqaruv markazi http://localhost:3000/admin + haydovchilar ilovasi http://localhost:3001 + bot + collector. To'xtatish: `Ctrl+C` |
 | `npm test` | Barcha testlar |
 | `npm run tg:login` | Telegram'ga kirish (bir marta, o'z terminalingizda) |
 | `npm run tg:dialogs` | Akkaunt a'zo bo'lgan guruh/kanallar |
@@ -80,9 +80,9 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | `npm run bot:check` | Bot tokeni va kanaldagi adminlikni tekshiradi |
 | `npm run bot` | Bot: haydovchilarni ro'yxatdan o'tkazadi, yuklarni kanalga va haydovchilarga yuboradi |
 | `npm run tg:live` | Guruhlardan yangi e'lonlarni bot navbatiga yig'adi (guruhlar ro'yxati — boshqaruv markazining «Manbalar» bo'limida) |
-| `npm run web` | Mini App'ni kompyuterda sinash (http://localhost:5173) |
-| `npm run web:build` | Mini App'ni joylash uchun tayyorlaydi (`apps/web/dist`) |
-| `npm run api` | Faqat boshqaruv markazi (bot va collector'ni web'dan yoqasiz) |
+| `npm run web` | Haydovchilar ilovasini dasturlash rejimida (http://localhost:5173; server ishlab turishi kerak) |
+| `npm run web:build` | Haydovchilar ilovasini yig'adi (`apps/web/dist`) |
+| `npm run api` | Faqat serverlar: boshqaruv markazi + haydovchilar ilovasi (bot va collector'ni web'dan yoqasiz) |
 | `npm run admin` | Boshqaruv markazi web'ini dasturlash rejimida (http://localhost:5174/admin/) |
 
 Batafsil: [apps/api/README.md](apps/api/README.md), [apps/bot/README.md](apps/bot/README.md), [apps/web/README.md](apps/web/README.md), [apps/collector/README.md](apps/collector/README.md), [packages/parser/README.md](packages/parser/README.md)

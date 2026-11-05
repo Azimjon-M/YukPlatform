@@ -134,12 +134,38 @@ export const HOME_COUNTRY = "O'zbekiston";
 export const NEIGHBOR_COUNTRIES = ["Qozog'iston", "Qirg'iziston", "Tojikiston", "Turkmaniston", "Afg'oniston"];
 
 // Xorijiy davlatlar (avval Osiyo) va yuk ko'p boradigan shaharlar. name — e'londa yoziladigan nom.
+// aliases — e'lonlardagi boshqa yozilishlar (Almaty, Алматы → Olmaota): places.js ularni bitta nomga keltiradi.
 export const COUNTRIES = [
-  { name: "Qozog'iston", cities: ["Olmaota", "Astana", "Shymkent", "Taraz", "Aqtobe", "Qarag'anda", "Atirau", "Aqtau", "Pavlodar", "Oral", "Qostanay", "Turkiston", "Saryag'och"] },
-  { name: "Qirg'iziston", cities: ["Bishkek", "O'sh", "Jalolobod", "Balikchi", "Qorako'l", "Tokmok", "Botken"] },
-  { name: "Tojikiston", cities: ["Dushanbe", "Xo'jand", "Kulob", "Bokhtar", "Panjikent", "Istaravshan"] },
-  { name: "Turkmaniston", cities: ["Ashxobod", "Turkmanobod", "Mari", "Dashoguz", "Turkmanboshi", "Farob"] },
-  { name: "Afg'oniston", cities: ["Mozori Sharif", "Hayraton", "Kobul", "Hirot", "Qunduz"] },
+  {
+    name: "Qozog'iston",
+    cities: ["Olmaota", "Astana", "Shymkent", "Taraz", "Aqtobe", "Qarag'anda", "Atirau", "Aqtau", "Pavlodar", "Oral", "Qostanay", "Turkiston", "Saryag'och"],
+    aliases: {
+      Olmaota: ["Almaty", "Almati", "Almatı", "Almata", "Алматы", "Алма-Ата", "Алмата"], Shymkent: ["Chimkent", "Shimkent", "Шымкент", "Чимкент"],
+      Astana: ["Астана"], Oral: ["Uralsk", "Уральск"], Aqtobe: ["Aktobe", "Актобе"], "Qarag'anda": ["Karaganda", "Караганда"],
+      Atirau: ["Atyrau", "Атырау"], Aqtau: ["Aktau", "Актау"], Qostanay: ["Kostanay", "Костанай"], Turkiston: ["Turkestan", "Туркестан"],
+      "Saryag'och": ["Saryagash", "Сарыагаш"],
+    },
+  },
+  {
+    name: "Qirg'iziston",
+    cities: ["Bishkek", "O'sh", "Jalolobod", "Balikchi", "Qorako'l", "Tokmok", "Botken"],
+    aliases: { Bishkek: ["Бишкек"], "O'sh": ["Osh", "Ош"], Jalolobod: ["Jalal-Abad", "Джалал-Абад"], Tokmok: ["Tokmak", "Токмок"], Botken: ["Batken", "Баткен"], "Qorako'l": ["Karakol", "Каракол"] },
+  },
+  {
+    name: "Tojikiston",
+    cities: ["Dushanbe", "Xo'jand", "Kulob", "Bokhtar", "Panjikent", "Istaravshan"],
+    aliases: { Dushanbe: ["Душанбе"], "Xo'jand": ["Khujand", "Xujand", "Худжанд"], Kulob: ["Kulyab", "Куляб"], Panjikent: ["Penjikent", "Пенджикент"] },
+  },
+  {
+    name: "Turkmaniston",
+    cities: ["Ashxobod", "Turkmanobod", "Mari", "Dashoguz", "Turkmanboshi", "Farob", "Saraxs"],
+    aliases: { Ashxobod: ["Ashgabat", "Ашхабад"], Turkmanobod: ["Turkmenabat", "Туркменабат"], Mari: ["Mary", "Мары"], Dashoguz: ["Дашогуз"], Farob: ["Farap", "Фараб"], Saraxs: ["Sarahs", "Серахс"] },
+  },
+  {
+    name: "Afg'oniston",
+    cities: ["Mozori Sharif", "Hayraton", "Kobul", "Hirot", "Qunduz"],
+    aliases: { "Mozori Sharif": ["Mazari Sharif", "Mazar-i-Sharif", "Мазари-Шариф"], Hayraton: ["Hairatan", "Хайратон"], Kobul: ["Kabul", "Кабул"], Hirot: ["Herat", "Герат"], Qunduz: ["Kunduz", "Кундуз"] },
+  },
   { name: "Eron", cities: ["Tehron", "Mashhad", "Bandar Abbos", "Tabriz"] },
   { name: "Turkiya", cities: ["Istanbul", "Mersin", "Ankara", "Izmir", "Bursa", "Trabzon"] },
   { name: "Xitoy", cities: ["Urumchi", "Qashg'ar", "Horgos", "Alashankou", "Manchjuriya", "Yiwu", "Guanchjou", "Bahti"] },

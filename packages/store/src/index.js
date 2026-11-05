@@ -269,6 +269,18 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       q.setCursor.run(source, messageId);
     },
 
+    // --- Kichik sozlamalar (kalit → matn): masalan, bot o'z username'ini yozadi, web uni o'qiydi ---
+    getSetting(key) {
+      return db.prepare("SELECT value FROM settings WHERE key = ?").get(key)?.value ?? null;
+    },
+
+    setSetting(key, value) {
+      db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(
+        key,
+        value == null ? null : String(value),
+      );
+    },
+
     // --- Hisobot (/holat) ---
     stats({ sinceMs = 24 * 60 * 60 * 1000 } = {}) {
       const posts = Object.fromEntries(q.postCounts.all().map((r) => [r.status, r.n]));

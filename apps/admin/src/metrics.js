@@ -64,5 +64,15 @@ export function configChecklist(config, aiTotals = null) {
     { id: "tg", label: "Telegram API (collector)", ok: Boolean(config.telegramApi), value: config.telegramApi ? "yozilgan" : "TG_API_ID / TG_API_HASH yo'q" },
     ...aiRows,
     { id: "miniapp", label: "Mini App manzili", ok: config.miniappUrl ? true : null, value: config.miniappUrl ?? "yo'q (botda oddiy savol-javob)" },
+    ...(config.publicUrl
+      ? [
+          {
+            id: "web",
+            label: "Haydovchilar web'i",
+            ok: config.publicTunnel ? true : null,
+            value: config.publicTunnel ? `${config.publicTunnel} (shu kompyuterda: ${config.publicUrl})` : `${config.publicUrl} — hozircha faqat shu kompyuterda`,
+          },
+        ]
+      : []),
   ];
 }

@@ -7,7 +7,7 @@
     "apps/*"
   ],
   "scripts": {
-    "start": "npm run admin:build && npm run start -w @yuk/api",
+    "start": "npm run admin:build && npm run web:build && npm run start -w @yuk/api",
     "api": "npm run start -w @yuk/api -- --no-autostart",
     "api:dev": "npm run dev -w @yuk/api",
     "admin": "npm run dev -w @yuk/admin",

@@ -18,12 +18,14 @@ export function normalizeSourceName(input) {
   return /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username) ? `@${username}` : null;
 }
 
-// .env haqida faqat bor-yo'qligi; kanal va Mini App manzili maxfiy emas
-export function configInfo(env) {
+// .env haqida faqat bor-yo'qligi; kanal, Mini App va haydovchilar web'i manzili maxfiy emas
+export function configInfo(env, { publicUrl = null } = {}) {
   return {
     botToken: Boolean(env.BOT_TOKEN),
     channel: env.CHANNEL_ID || null,
     miniappUrl: env.MINIAPP_URL || null,
+    publicUrl,
+    publicTunnel: env.PUBLIC_URL || null,
     telegramApi: Boolean(env.TG_API_ID && env.TG_API_HASH),
     parser: {
       provider: env.PARSER_PROVIDER || "gemini",
@@ -56,7 +58,8 @@ function validModels(value) {
 const validLabel = (value) => (value == null || String(value).trim() === "" ? null : String(value).trim().slice(0, 60));
 
 // ai — @yuk/parser bilan ishlaydigan yordamchilar (ai.js); secret — kalitlarni shifrlash kaliti (data/secret.key)
-export function createApp({ store, processes, env = process.env, adminDist = null, ai = createAiTools(), secret = null }) {
+// sessions — haydovchilar web'i tokenlari (telegramAuth.js), publicUrl — o'sha web manzili (server.js beradi)
+export function createApp({ store, processes, env = process.env, adminDist = null, ai = createAiTools(), secret = null, sessions = null, publicUrl = null }) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "100kb" }));
@@ -73,7 +76,7 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
   });
 
   api.get("/overview", (req, res) => {
-    res.json({ metrics: store.metrics(), processes: processes.list(), config: configInfo(env) });
+    res.json({ metrics: store.metrics(), processes: processes.list(), config: configInfo(env, { publicUrl }) });
   });
 
   // --- Yuklar va navbat ---
@@ -98,6 +101,15 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
     if (!driver) throw httpError(404, "Haydovchi topilmadi");
     if (active && !driver.profile) throw httpError(400, "Haydovchi hali ro'yxatdan o'tmagan");
     res.json(store.saveDriver(chatId, { active }));
+  });
+
+  // Haydovchilar web'ini shu haydovchi nomidan ochish (sinash uchun, Telegram'ga kirmasdan).
+  // Token manzilning # qismida — serverga va boshqa saytlarga bormaydi; 12 soat amal qiladi.
+  api.post("/drivers/:chatId/web-link", (req, res) => {
+    if (!sessions || !publicUrl) throw httpError(503, "Haydovchilar web'i ishga tushmagan");
+    const chatId = Number(req.params.chatId);
+    if (!store.getDriver(chatId)) throw httpError(404, "Haydovchi topilmadi");
+    res.json({ url: `${publicUrl}/#token=${sessions.issue(chatId, { ttl: 12 * 60 * 60 })}` });
   });
 
   // --- Manbalar (collector kuzatadigan guruhlar; o'zgarish keyingi aylanishda kuchga kiradi) ---

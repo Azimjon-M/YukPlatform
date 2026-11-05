@@ -1,17 +1,26 @@
 // Boshqaruv markazi: API + web + bot va collector'ni boshqarish. Ishga tushirish (YukPlatform papkasida):
-//   npm start        — web'ni yig'adi, shu serverni ochadi, bot va collector'ni o'zi yoqadi → http://localhost:3000/admin
-//   npm run api      — faqat API (bot va collector'ni yoqmaydi), web'dan yoqasiz; web dasturlash rejimida: `npm run admin`
-// Sozlamalar (.env, ixtiyoriy): API_PORT=3000, AUTOSTART=bot,collector (none — hech birini yoqmaydi)
+//   npm start        — web'larni yig'adi, serverlarni ochadi, bot va collector'ni o'zi yoqadi → http://localhost:3000/admin
+//   npm run api      — faqat serverlar (bot va collector'ni yoqmaydi), web'dan yoqasiz; web dasturlash rejimida: `npm run admin`
+// Sozlamalar (.env, ixtiyoriy): API_PORT=3000, PUBLIC_PORT=3001, AUTOSTART=bot,collector (none — hech birini yoqmaydi)
+//
+// Ikki server ochiladi, ikkalasi ham faqat shu kompyuterda (127.0.0.1):
+//   3000 — boshqaruv markazi (siz uchun; internetga HECH QACHON chiqarilmaydi)
+//   3001 — haydovchilar web'i va Mini App API'si (public.js; internetga tunnel orqali chiqariladi — README)
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSettings } from "@yuk/parser";
+import { routeScopeFrom } from "@yuk/shared";
 import { loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
 import { createProcessManager } from "./processes.js";
+import { createPublicApp } from "./public.js";
+import { createSessions } from "./telegramAuth.js";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const PORT = Number(process.env.API_PORT) || 3000;
-const HOST = "127.0.0.1"; // faqat shu kompyuter: internetdan va tarmoqdan ochilmaydi
+const PUBLIC_PORT = Number(process.env.PUBLIC_PORT) || 3001;
+const HOST = "127.0.0.1"; // faqat shu kompyuter: internetdan va tarmoqdan ochilmaydi (tunnel ham shu yerga ulanadi)
+const PUBLIC_LOCAL_URL = `http://localhost:${PUBLIC_PORT}`;
 
 const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
 const log = (message) => console.log(`[${time()}] ${message}`);
@@ -32,7 +41,31 @@ if (store.seedAiKeys([{ provider: provider.id, models: [model] }], process.env))
 const processes = createProcessManager({
   onLine: (name, line) => (line.stream === "err" ? console.error : console.log)(`[${name}] ${line.text}`),
 });
-const app = createApp({ store, processes, adminDist: path.join(ROOT, "apps/admin/dist"), secret: loadSecret() });
+const secret = loadSecret();
+const sessions = createSessions(secret);
+const app = createApp({
+  store,
+  processes,
+  adminDist: path.join(ROOT, "apps/admin/dist"),
+  secret,
+  sessions,
+  publicUrl: PUBLIC_LOCAL_URL,
+});
+const publicApp = createPublicApp({ store, sessions, scope: routeScopeFrom(), webDist: path.join(ROOT, "apps/web/dist") });
+
+function failed(port, name) {
+  return (error) => {
+    if (error.code === "EADDRINUSE") log(`${port}-port band (${name}): allaqachon ochiq emasmi? Boshqa port: .env da API_PORT / PUBLIC_PORT`);
+    else log(`Server xatosi (${name}): ${error.message}`);
+    process.exit(1);
+  };
+}
+
+const publicServer = publicApp.listen(PUBLIC_PORT, HOST, () => {
+  const tunnel = process.env.PUBLIC_URL?.trim();
+  log(`Haydovchilar web'i: ${PUBLIC_LOCAL_URL}${tunnel ? `  (internetda: ${tunnel})` : "  (internetga chiqarish: apps/api/README.md → «Internetga chiqarish»)"}`);
+});
+publicServer.on("error", failed(PUBLIC_PORT, "haydovchilar web'i"));
 
 const server = app.listen(PORT, HOST, () => {
   log(`Boshqaruv markazi: http://localhost:${PORT}/admin  (to'xtatish: Ctrl+C)`);
@@ -45,12 +78,7 @@ const server = app.listen(PORT, HOST, () => {
     }
   }
 });
-
-server.on("error", (error) => {
-  if (error.code === "EADDRINUSE") log(`${PORT}-port band: boshqaruv markazi allaqachon ochiq emasmi? Boshqa port: .env ga API_PORT=3001`);
-  else log(`Server xatosi: ${error.message}`);
-  process.exit(1);
-});
+server.on("error", failed(PORT, "boshqaruv markazi"));
 
 let closing = false;
 async function shutdown() {
@@ -59,6 +87,7 @@ async function shutdown() {
   log("To'xtatilyapti: bot va collector yumshoq to'xtatiladi...");
   await processes.shutdown();
   server.close();
+  publicServer.close();
   store.close();
   process.exit(0);
 }

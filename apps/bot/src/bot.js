@@ -331,6 +331,8 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
 
   async function init() {
     await bot.init();
+    // Haydovchilar web'idagi «Telegram bilan kirish» tugmasi bot username'ini shu yerdan oladi (apps/api public.js)
+    store.setSetting?.("bot_username", bot.botInfo.username);
     await bot.api.setMyCommands(COMMANDS);
     await syncProfileTexts().catch((error) => log(`Bot tavsifi yangilanmadi: ${error.description ?? error.message}`));
     if (config.channel?.startsWith("-100")) config.channelId = Number(config.channel);

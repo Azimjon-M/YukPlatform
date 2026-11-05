@@ -15,10 +15,12 @@ export const MENU = {
 };
 
 // Mini App manzili. Haydovchining hozirgi sozlamalari ?p= ichida — forma oldindan to'ldirilib ochiladi.
-// ?s= — yo'nalish doirasi (.env dagi ROUTE_SCOPE): forma faqat shu doiradagi davlatlarni ko'rsatadi
+// ?s= — yo'nalish doirasi (.env dagi ROUTE_SCOPE): forma faqat shu doiradagi davlatlarni ko'rsatadi.
+// ?v=sozlamalar — ilova yuklar ro'yxati emas, darhol sozlamalar bilan ochiladi
 export function miniAppUrl(base, profile, scope = null) {
   if (!base) return null;
   const url = new URL(base);
+  url.searchParams.set("v", "sozlamalar");
   if (profile) url.searchParams.set("p", encodeProfile(profile));
   if (scope) url.searchParams.set("s", scope);
   return url.toString();

@@ -2,13 +2,17 @@
 
 Bitta buyruq bilan hammasi: **`npm start`** (YukPlatform papkasida) →
 
-1. boshqaruv markazi web'ini yig'adi (`apps/admin`),
-2. shu serverni ochadi: **http://localhost:3000/admin**,
+1. boshqaruv markazi web'ini (`apps/admin`) va haydovchilar ilovasini (`apps/web`) yig'adi,
+2. ikkita server ochadi:
+   - **http://localhost:3000/admin** — boshqaruv markazi (siz uchun),
+   - **http://localhost:3001** — haydovchilar ilovasi: yuklar lentasi, xarita, sozlamalar (Telegram Mini App ham shu),
 3. bot va collector'ni o'zi ishga tushiradi (alohida jarayonlar; loglari web'da va shu oynada `[bot] ...`).
 
 To'xtatish: shu oynada `Ctrl+C` — bot va collector ham yumshoq to'xtaydi.
 
-Server faqat shu kompyuterdan ochiladi (`127.0.0.1`): tarmoqdan va internetdan kirib bo'lmaydi.
+Ikkala server ham faqat shu kompyuterdan ochiladi (`127.0.0.1`): tarmoqdan va internetdan kirib bo'lmaydi.
+Haydovchilar ilovasini internetga **tunnel** orqali chiqarasiz (pastda: «Internetga chiqarish»). Boshqaruv markazini
+(3000) hech qachon internetga chiqarmang.
 Bot va collector bilan bitta baza (`data/yuk.db`) ishlatiladi.
 
 ## Buyruqlar
@@ -25,7 +29,9 @@ Bot va collector bilan bitta baza (`data/yuk.db`) ishlatiladi.
 
 | O'zgaruvchi | Standart | Ma'nosi |
 |---|---|---|
-| `API_PORT` | `3000` | port |
+| `API_PORT` | `3000` | boshqaruv markazi porti |
+| `PUBLIC_PORT` | `3001` | haydovchilar ilovasi porti (tunnel shunga ulanadi) |
+| `PUBLIC_URL` | — | haydovchilar ilovasining internetdagi manzili (tunnel bergan https). Faqat ko'rsatish uchun: konsol va boshqaruv markazi |
 | `AUTOSTART` | `bot,collector` | `npm start` da nimalar o'zi yoqiladi; `AUTOSTART=none` — hech biri |
 | `PARSER_PARALLEL` | `8` | bot bir vaqtda nechta AI so'rovi yuboradi |
 
@@ -53,6 +59,7 @@ Kalit va tokenlar javoblarda hech qachon bo'lmaydi — faqat «yozilganmi» (`tr
 | `GET /api/posts?status&q&limit&offset` | navbatdagi e'lonlar (`new`, `done`, `failed`, `skipped`, `duplicate`) |
 | `POST /api/posts/:id/retry` · `POST /api/posts/retry-failed` | xatolilarni qayta navbatga |
 | `GET /api/drivers` · `PATCH /api/drivers/:chatId {active}` | haydovchilar, faol / pauza |
+| `POST /api/drivers/:chatId/web-link` | haydovchilar ilovasini shu haydovchi nomidan ochish havolasi (12 soat; Telegram'siz sinash uchun) |
 | `GET /api/sources` | collector kuzatadigan guruhlar + 24 soatlik statistika |
 | `POST /api/sources {name, note?}` | guruh qo'shish: `@nom`, `nom`, `https://t.me/nom`, `-100…` |
 | `PATCH /api/sources/:name {enabled}` · `DELETE /api/sources/:name` | o'chirib-yoqish, olib tashlash |
@@ -82,9 +89,68 @@ Bot ro'yxatni har 15 s da qayta o'qiydi — kalit qo'shgandan keyin botni qayta 
 | `src/app.js` | Express yo'llari, himoya, web fayllar |
 | `src/processes.js` | bot va collector jarayonlari: yoqish, to'xtatish, loglar, qayta ishga tushirish |
 | `src/ai.js` | «AI» bo'limi uchun: kalit bilan modellar ro'yxati, sinov so'rovi |
+| `src/public.js` | haydovchilar ilovasi serveri (3001): kirish, profil, yuklar lentasi, web fayllari |
+| `src/telegramAuth.js` | Telegram imzosini tekshirish (Mini App `initData`, saytdagi vidjet) va sessiya tokeni |
+
+## Haydovchilar ilovasi (3001-port)
+
+Bitta kod ikki joyda ishlaydi: **Telegram Mini App** (bot menyusidagi tugma) va **oddiy sayt** (brauzerda).
+Bo'limlari: 📋 Yuklar (menga mos / hammasi, bosib qo'ng'iroq), 🗺 Xarita, ⚙️ Sozlamalar. Kod: `apps/web`.
+
+**Kirish — faqat Telegram orqali, parolsiz.** Telegram foydalanuvchi ma'lumotini bot tokeni bilan imzolaydi;
+server imzoni tekshiradi (`telegramAuth.js`), shuning uchun hech kim boshqa odam nomidan kira olmaydi.
+- Telegram ichida: kirish o'zi bo'ladi (`initData`).
+- Saytda: «Telegram bilan kirish» tugmasi. U faqat BotFather'da ko'rsatilgan domenda ishlaydi:
+  @BotFather → `/setdomain` → botingiz → ilovaning internetdagi domeni (masalan `abc-def.trycloudflare.com`).
+  `localhost` da tugma o'rnida «Bot domain invalid» chiqadi — bu normal.
+- Sinash uchun (Telegram'siz): boshqaruv markazi → **Haydovchilar** → **Web'da ochish** — ilova o'sha haydovchi
+  nomidan ochiladi.
+
+Kirgandan keyin server o'z tokenini beradi (30 kun). Ilova uni har so'rovda `Authorization: Bearer ...` bilan yuboradi.
+
+| So'rov | Nima |
+|---|---|
+| `GET /pub/config` | bot username (vidjet uchun), yo'nalish doirasi |
+| `POST /pub/auth {initData}` yoki `{widget}` | kirish → `{ token, me }` |
+| `GET /pub/me` | haydovchi: ism, profil, faolmi |
+| `PUT /pub/me/profile {profile}` | sozlamalarni saqlash (bot bilan bir xil tekshiruv) — yuk yuborish yoqiladi |
+| `PATCH /pub/me {active}` | pauza / davom |
+| `GET /pub/loads?view=mine\|all&from&to&hours&limit&offset` | yuklar, e'lon vaqti bo'yicha eng yangisi birinchi; `mine` — bot yuboradigan mos yuklar |
+
+Kirmagan odamga `config` va `auth` dan boshqa hech narsa berilmaydi (401). Bir manzildan daqiqasiga 240 ta so'rov,
+kirishga 20 ta urinish. Telefon raqamlari faqat kirgan haydovchiga ko'rinadi.
+
+## Internetga chiqarish
+
+Bot, baza va server sizning kompyuteringizda, shuning uchun haydovchilar ilovasini internetga **tunnel** chiqaradi:
+tunnel kompyuteringizdan Cloudflare'ga ulanadi va unga https manzil beradi. Kompyuterda port ochish shart emas.
+
+**Sinash uchun (bepul, akkauntsiz):**
+
+1. `cloudflared` ni o'rnating (bir marta): `winget install --id Cloudflare.cloudflared`
+2. `npm start` ishlab turgan holda, **boshqa oynada**: `cloudflared tunnel --url http://localhost:3001`
+3. U bergan `https://....trycloudflare.com` manzilni `.env` ga o'zingiz yozing:
+   ```
+   PUBLIC_URL=https://....trycloudflare.com
+   MINIAPP_URL=https://....trycloudflare.com
+   ```
+4. @BotFather → `/setdomain` → shu domen (saytdagi «Telegram bilan kirish» uchun).
+5. `npm start` ni qayta ishga tushiring (Ctrl+C, keyin `npm start`).
+
+Kamchiligi: `cloudflared` har qayta ishga tushganda **manzil o'zgaradi** — 3–5-qadamlarni takrorlash kerak.
+Faqat sinov uchun.
+
+**Doimiy manzil:** o'z domeningiz (masalan `yukekspert.uz`) + Cloudflare'ning nomli tunneli (bepul) →
+`https://app.yukekspert.uz` o'zgarmaydi. Domen pullik (yiliga bir necha dollar), shuning uchun haydovchilar
+ko'paygach qilinadi.
+
+> Faqat **3001** ni tunnel qiling. 3000 (boshqaruv markazi) — sizning panelingiz, u internetga chiqmasligi kerak.
+
+Xarita OpenStreetMap rasmlarini ishlatadi (bepul, ko'p foydalanuvchi uchun mo'ljallanmagan). Haydovchilar
+ko'paysa — boshqa xarita xizmatiga o'tish kerak (MapTiler, Stadia — bepul limitli).
 
 ## Keyingi bosqichlar
 
-- **Haydovchilar uchun ochiq web**: Telegram orqali kirish, yuklar lentasi.
-- **Xarita** (Leaflet + OpenStreetMap, bepul): yuklar va yo'nalishlar xaritada.
+- ✅ Haydovchilar uchun web: Telegram orqali kirish, yuklar lentasi, xarita (yuqorida).
+- Doimiy internet manzil (domen + nomli tunnel) yoki server.
 - Serverga ko'chganda: PostgreSQL, parol bilan kirish, HTTPS.

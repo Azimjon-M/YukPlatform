@@ -6,3 +6,6 @@ export * from "./match.js";
 export * from "./dedupe.js";
 export * from "./profile.js";
 export * from "./scope.js";
+export * from "./loadText.js";
+export * from "./geo.js";
+export { CITY_COORDS, COUNTRY_COORDS, REGION_COORDS } from "./geoData.js";

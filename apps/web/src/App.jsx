@@ -1,253 +1,203 @@
-// Mini App: haydovchining mashinasi va yo'nalishi — bitta sahifali forma.
-// Bot formani o'z menyusidagi tugma bilan ochadi (hozirgi sozlamalar ?p= ichida), "Saqlash" ma'lumotni botga qaytaradi.
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  BODY_TYPES,
-  CAPACITY_OPTIONS,
-  LOADING_SIDES,
-  MODE_OPTIONS,
-  REGIONS,
-  SIDE_LABELS,
-  TRUCK_CLASSES,
-  decodeProfile,
-  intlChoices,
-  regionLabel,
-  scopeCountries,
-  validRouteScope,
-} from "@yuk/shared";
-import { classBody, formFromProfile, profileFromForm, selectClass, sizeSummary, toggle } from "./form.js";
-import { canSave, haptic, inTelegram, sendToBot, setUnsaved, showAlert, useMainButton } from "./telegram.js";
+// Haydovchilar ilovasi: Telegram Mini App va oddiy sayt — bitta kod.
+//   📋 Yuklar     — menga mos / hammasi, bosib qo'ng'iroq
+//   🗺 Xarita     — qayerda yuk ko'p, qayerga boradi
+//   ⚙️ Sozlamalar — mashina va yo'nalish (bot ham shu sozlamalar bo'yicha yuboradi)
+// Kirish: Telegram ichida — o'zi (initData), saytda — «Telegram bilan kirish». Server: apps/api public.js.
+import { useCallback, useEffect, useState } from "react";
+import { decodeProfile, validRouteScope } from "@yuk/shared";
+import { getConfig, logout, resume, setActive } from "./api.js";
+import { LoadsPage } from "./LoadsPage.jsx";
+import { LoginPage } from "./LoginPage.jsx";
+import { MapPage } from "./MapPage.jsx";
+import { SettingsPage } from "./SettingsPage.jsx";
+import { haptic, inTelegram, showAlert } from "./telegram.js";
+import { Notice, Spinner } from "./ui.jsx";
 
-const params = new URLSearchParams(window.location.search);
-// Yo'nalish doirasi (bot .env dagi ROUTE_SCOPE ni ?s= bilan beradi): qaysi davlatlarni tanlash mumkin
-const scope = validRouteScope(params.get("s"));
-const initialProfile = decodeProfile(params.get("p"), { scope });
-const fmt = (n) => String(n).replace(".", ",");
-const number = (text) => Number(String(text).trim().replace(",", "."));
-
-const CLASS_OPTIONS = TRUCK_CLASSES.map((t) => ({ id: t.id, label: t.name, sub: `${fmt(t.capacityT[0])}–${fmt(t.capacityT[1])} t` }));
-const BODY_OPTIONS = BODY_TYPES.map((b) => ({ id: b.id, label: b.name }));
-const SIDE_OPTIONS = LOADING_SIDES.map((s) => ({ id: s.id, label: SIDE_LABELS[s.id] }));
-const INTL = intlChoices(scope); // "ichki" doirada null — savol ko'rsatilmaydi
-const INTL_CHOICES = INTL ? Object.entries(INTL.options).map(([id, o]) => ({ id, label: o.label })) : [];
-const MODE_CHOICES = Object.entries(MODE_OPTIONS).map(([id, label]) => ({ id, label }));
-const REGION_OPTIONS = REGIONS.filter((r) => r.id !== "xorij").map((r) => ({ id: r.id, label: regionLabel(r.id) }));
-const COUNTRY_OPTIONS = [
-  { id: "xorij", label: scope === "hammasi" ? "Istalgan davlat" : "Istalgan qo'shni davlat" },
-  ...scopeCountries(scope).map((name) => ({ id: name, label: name })),
+const TABS = [
+  { id: "yuklar", icon: "📋", label: "Yuklar" },
+  { id: "xarita", icon: "🗺", label: "Xarita" },
+  { id: "sozlamalar", icon: "⚙️", label: "Sozlamalar" },
 ];
 
-function Section({ id, title, hint, error, children }) {
-  return (
-    <section id={id} className={`section${error ? " invalid" : ""}`}>
-      <h2>{title}</h2>
-      {hint && <p className="hint">{hint}</p>}
-      {children}
-      {error && <p className="error">{error}</p>}
-    </section>
-  );
-}
-
-// Tanlov tugmalari: selected(id) — tanlanganmi, onPick(id) — bosilganda
-function Chips({ options, selected, onPick, layout = "wrap" }) {
-  return (
-    <div className={`chips ${layout}`}>
-      {options.map((o) => {
-        const on = selected(o.id);
-        return (
-          <button
-            key={o.id}
-            type="button"
-            className={`chip${on ? " on" : ""}`}
-            aria-pressed={on}
-            onClick={() => {
-              haptic.select();
-              onPick(o.id);
-            }}
-          >
-            <span>{o.label}</span>
-            {o.sub && <small>{o.sub}</small>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// Viloyatlar (va xalqaro bo'lsa — doiradagi davlatlar). Hech biri tanlanmasa — hammasi.
-function Areas({ values, allLabel, international, onChange }) {
-  const pick = (id) => onChange(id === "*" ? [] : toggle(values, id));
-  const selected = (id) => (id === "*" ? values.length === 0 : values.includes(id));
-  return (
-    <>
-      <Chips options={[{ id: "*", label: allLabel }, ...REGION_OPTIONS]} selected={selected} onPick={pick} />
-      {international && (
-        <>
-          <p className="group">{scope === "hammasi" ? "Xorij" : "Qo'shni davlatlar"}</p>
-          <Chips options={COUNTRY_OPTIONS} selected={selected} onPick={pick} />
-        </>
-      )}
-    </>
-  );
-}
-
-function SizeInput({ label, value, onChange }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <input inputMode="decimal" placeholder="0,0" value={value} onChange={(e) => onChange(e.target.value)} />
-      <span className="unit">m</span>
-    </label>
-  );
-}
+const params = new URLSearchParams(window.location.search);
+// Bot sozlamalar tugmasida ?v=sozlamalar&p=<hozirgi profil>&s=<doira> beradi
+const requestedTab = TABS.some((t) => t.id === params.get("v")) ? params.get("v") : params.has("p") ? "sozlamalar" : null;
 
 export function App() {
-  const [form, setForm] = useState(() => formFromProfile(initialProfile));
-  const [problem, setProblem] = useState(null); // { field, error }
-  const [preview, setPreview] = useState(null);
-  const initial = useRef(JSON.stringify(form));
+  const [session, setSession] = useState({ status: "loading", me: null, error: null }); // loading | in | out | offline
+  const [config, setConfig] = useState(null);
+  const [tab, setTab] = useState(requestedTab ?? "yuklar");
+  const [view, setView] = useState("mine");
+  const [toast, setToast] = useState(null);
 
-  useEffect(() => setUnsaved(JSON.stringify(form) !== initial.current), [form]);
+  // Yo'nalish doirasi: botdan (?s=) yoki serverdan
+  const scope = validRouteScope(params.get("s") ?? config?.scope);
+  const me = session.me;
 
-  const update = (patch) => {
-    setProblem(null);
-    setForm((f) => ({ ...f, ...patch }));
-  };
-  const errorFor = (field) => (problem?.field === field ? problem.error : null);
-
-  const save = useCallback(() => {
-    const result = profileFromForm(form, scope);
-    if (result.error) {
-      haptic.error();
-      setProblem(result);
-      document.getElementById(result.field)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      if (inTelegram) showAlert(result.error);
-      return;
+  const connect = useCallback(async () => {
+    setSession({ status: "loading", me: null, error: null });
+    try {
+      const { me: found } = await resume();
+      if (!found) {
+        setSession({ status: "out", me: null, error: null });
+        return;
+      }
+      setSession({ status: "in", me: found, error: null });
+      if (!found.profile) {
+        setView("all");
+        if (!requestedTab) setTab("sozlamalar");
+      }
+    } catch (error) {
+      setSession({ status: "offline", me: null, error });
     }
-    if (canSave) {
+  }, []);
+
+  useEffect(() => {
+    connect();
+    getConfig()
+      .then(setConfig)
+      .catch(() => setConfig({}));
+    // Sahifa ochiq turganda boshqa haydovchi havolasi (#token=...) ochilsa — o'sha bilan qayta kiramiz
+    const onHash = () => /token=/.test(window.location.hash) && connect();
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [connect]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  // Token eskirdi: Telegram ichida qayta kiramiz, saytda — kirish sahifasi
+  const onAuthLost = useCallback(() => {
+    logout();
+    if (inTelegram) connect();
+    else setSession({ status: "out", me: null, error: null });
+  }, [connect]);
+
+  const onNeedProfile = useCallback(() => setTab("sozlamalar"), []);
+
+  const onSaved = useCallback((saved) => {
+    setSession({ status: "in", me: saved, error: null });
+    setView("mine");
+    setTab("yuklar");
+    setToast("✅ Saqlandi. Mos yuklar shu yerda va botda shaxsiy xabarda.");
+    window.scrollTo(0, 0);
+  }, []);
+
+  async function toggleActive() {
+    try {
+      const updated = await setActive(!me.active);
       haptic.success();
-      sendToBot({ type: "profile", profile: result.profile });
-    } else if (inTelegram) {
-      showAlert("Saqlash uchun formani botdagi pastki menyudan — «⚙️ Sozlamalar» tugmasi bilan oching.");
-    } else {
-      // Oddiy brauzer (sinov): botga ketadigan ma'lumotni ko'rsatamiz
-      setPreview(result.profile);
+      setSession((s) => ({ ...s, me: updated }));
+      setToast(updated.active ? "▶️ Botda yuk yuborish yoqildi" : "⏸ Botda yuk yuborish to'xtatildi");
+    } catch (error) {
+      showAlert(error.message);
     }
-  }, [form]);
+  }
 
-  useMainButton("Saqlash", save);
+  if (session.status === "loading") {
+    return (
+      <div className="center">
+        <Spinner />
+      </div>
+    );
+  }
+  if (session.status === "out") {
+    return <LoginPage config={config} onLogin={(found) => setSession({ status: "in", me: found, error: null })} />;
+  }
+  // Saytda server bilan aloqa yo'q — faqat qayta urinish. Telegram ichida sozlamalar botga sendData bilan saqlanadi.
+  if (session.status === "offline" && !inTelegram) {
+    return (
+      <div className="center">
+        <Notice
+          title="Server bilan aloqa yo'q"
+          action={
+            <button type="button" className="primary" onClick={connect}>
+              Qayta urinish
+            </button>
+          }
+        >
+          {session.error?.message}
+        </Notice>
+      </div>
+    );
+  }
 
-  const standard = classBody(form.truckClass);
-  const summary = sizeSummary(form);
-  const international = Boolean(INTL?.options[form.intl]?.international);
+  const online = session.status === "in";
+  const switchTab = (id) => {
+    haptic.select();
+    setTab(id);
+    window.scrollTo(0, 0);
+  };
 
   return (
-    <main>
+    <div className="app">
       <header className="top">
-        <h1>🚛 Yuk Ekspert</h1>
-        <p>
-          {initialProfile
-            ? "Sozlamalarni o'zgartiring va «Saqlash» ni bosing."
-            : "Mashinangiz va yo'nalishingizni belgilang — mos yuklarni shaxsiy xabarda yuboramiz."}
-        </p>
+        <div>
+          <h1>🚛 Yuk Ekspert</h1>
+          {me?.name && <p>{me.name}</p>}
+        </div>
+        <div className="top-actions">
+          {me?.profile && (
+            <button type="button" className={`pill${me.active ? "" : " paused"}`} onClick={toggleActive} title="Botdagi shaxsiy xabarlar">
+              {me.active ? "⏸ Pauza" : "▶️ Yoqish"}
+            </button>
+          )}
+          {!inTelegram && (
+            <button
+              type="button"
+              className="pill ghost"
+              onClick={() => {
+                logout();
+                setSession({ status: "out", me: null, error: null });
+              }}
+            >
+              Chiqish
+            </button>
+          )}
+        </div>
       </header>
 
-      {!inTelegram && (
-        <div className="notice">Bu forma Telegram ichida, botning pastki menyusidan ochiladi. Hozir sinov rejimi.</div>
-      )}
-      {inTelegram && !canSave && (
-        <div className="notice">Saqlash uchun formani botdagi pastki menyudan — «⚙️ Sozlamalar» tugmasi bilan oching.</div>
-      )}
-
-      <Section id="class" title="🚚 Mashina turi" error={errorFor("class")}>
-        <Chips
-          layout="list"
-          options={CLASS_OPTIONS}
-          selected={(id) => form.truckClass === id}
-          onPick={(id) => {
-            setProblem(null);
-            setForm((f) => selectClass(f, id));
-          }}
-        />
-      </Section>
-
-      <Section id="body" title="📦 Kuzov turi" error={errorFor("body")}>
-        <Chips layout="grid" options={BODY_OPTIONS} selected={(id) => form.bodyType === id} onPick={(id) => update({ bodyType: id })} />
-      </Section>
-
-      <Section id="capacity" title="⚖️ Necha tonna ko'taradi?" error={errorFor("capacity")}>
-        {form.truckClass ? (
-          <>
-            <Chips
-              options={(CAPACITY_OPTIONS[form.truckClass] ?? []).map((t) => ({ id: String(t), label: `${fmt(t)} t` }))}
-              selected={(id) => number(form.capacity) === Number(id)}
-              onPick={(id) => update({ capacity: id })}
-            />
-            <label className="field">
-              <span>Boshqa son</span>
-              <input inputMode="decimal" placeholder="masalan: 7,5" value={fmt(form.capacity)} onChange={(e) => update({ capacity: e.target.value })} />
-              <span className="unit">t</span>
-            </label>
-          </>
+      <main>
+        {me && !me.active && me.profile && tab !== "sozlamalar" && (
+          <div className="notice">⏸ Pauzadasiz: botga yangi yuklar kelmaydi. Bu yerda ko'rish mumkin.</div>
+        )}
+        {tab === "sozlamalar" ? (
+          <SettingsPage key={me?.chatId ?? "offline"} me={me} initialProfile={decodeProfile(params.get("p"), { scope })} scope={scope} onSaved={onSaved} />
+        ) : !online ? (
+          <Notice
+            title="Server bilan aloqa yo'q"
+            action={
+              <button type="button" className="primary" onClick={connect}>
+                Qayta urinish
+              </button>
+            }
+          >
+            Yuklar ro'yxati hozir ochilmaydi. Sozlamalarni baribir o'zgartirishingiz mumkin — ular botga yuboriladi.
+          </Notice>
+        ) : tab === "xarita" ? (
+          <MapPage view={view} onView={setView} onNeedProfile={onNeedProfile} onAuthLost={onAuthLost} />
         ) : (
-          <p className="hint">Avval mashina turini tanlang.</p>
+          <LoadsPage scope={scope} view={view} onView={setView} onNeedProfile={onNeedProfile} onAuthLost={onAuthLost} />
         )}
-      </Section>
+      </main>
 
-      <Section id="size" title="📏 Kuzov ichki o'lchami" hint="Kub va paletni hisoblash uchun. Bilmasangiz — o'tkazib yuboring." error={errorFor("size")}>
-        <Chips
-          options={[
-            ...(standard ? [{ id: "std", label: "Standart", sub: `${fmt(standard.lengthM)} × ${fmt(standard.widthM)} × ${fmt(standard.heightM)} m` }] : []),
-            { id: "custom", label: "O'zim yozaman" },
-            { id: "none", label: "Bilmayman" },
-          ]}
-          selected={(id) => form.sizeMode === id}
-          onPick={(id) => update({ sizeMode: id })}
-        />
-        {form.sizeMode === "custom" && (
-          <div className="sizes">
-            <SizeInput label="Uzunligi" value={form.size.lengthM} onChange={(v) => update({ size: { ...form.size, lengthM: v } })} />
-            <SizeInput label="Eni" value={form.size.widthM} onChange={(v) => update({ size: { ...form.size, widthM: v } })} />
-            <SizeInput label="Balandligi" value={form.size.heightM} onChange={(v) => update({ size: { ...form.size, heightM: v } })} />
-          </div>
-        )}
-        {summary && (
-          <p className="summary">
-            ≈ {fmt(summary.volumeM3)} kub · {summary.pallets} palet
-          </p>
-        )}
-      </Section>
-
-      <Section id="sides" title="↕️ Qaysi tomondan yuklanadi?" hint="Bir nechtasini tanlang. Chap va o'ng — mashinaga orqasidan qaraganda.">
-        <Chips options={SIDE_OPTIONS} selected={(id) => form.loadingSides.includes(id)} onPick={(id) => update({ loadingSides: toggle(form.loadingSides, id) })} />
-      </Section>
-
-      {INTL && (
-        <Section id="intl" title="🌍 Qayerda ishlaysiz?" hint={INTL.question}>
-          <Chips layout="list" options={INTL_CHOICES} selected={(id) => form.intl === id} onPick={(id) => update({ intl: id })} />
-        </Section>
-      )}
-
-      <Section id="from" title="📍 Qayerdan yuk olasiz?" hint="Bir nechtasini tanlash mumkin.">
-        <Areas values={form.fromAreas} allLabel="Hamma joy" international={international} onChange={(fromAreas) => update({ fromAreas })} />
-      </Section>
-
-      <Section id="to" title="🏁 Qayerga borasiz?" hint="Masalan, uyga qaytish yuki uchun o'z viloyatingiz.">
-        <Areas values={form.toAreas} allLabel="Istalgan joy" international={international} onChange={(toAreas) => update({ toAreas })} />
-      </Section>
-
-      <Section id="mode" title="👁 Qaysi yuklarni yuboraylik?">
-        <Chips layout="list" options={MODE_CHOICES} selected={(id) => form.mode === id} onPick={(id) => update({ mode: id })} />
-      </Section>
-
-      {!inTelegram && (
-        <div className="footer">
-          <button type="button" className="save" onClick={save}>
-            Saqlash
-          </button>
-          {preview && <pre className="preview">{JSON.stringify(preview, null, 2)}</pre>}
+      {toast && (
+        <div className="toast" role="status">
+          {toast}
         </div>
       )}
-    </main>
+
+      <nav className="tabs" aria-label="Bo'limlar">
+        {TABS.map((t) => (
+          <button key={t.id} type="button" className={tab === t.id ? "on" : ""} aria-current={tab === t.id ? "page" : undefined} onClick={() => switchTab(t.id)}>
+            <span aria-hidden="true">{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
+      </nav>
+    </div>
   );
 }

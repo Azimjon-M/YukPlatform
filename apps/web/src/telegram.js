@@ -1,19 +1,31 @@
-// Telegram Mini App bilan aloqa (telegram-web-app.js). Oddiy brauzerda ochilsa, tg bo'sh — forma baribir ishlaydi (sinov uchun).
+// Telegram Mini App bilan aloqa (telegram-web-app.js). Oddiy brauzerda ochilsa, tg bo'sh — ilova sayt bo'lib ishlaydi.
 import { useEffect } from "react";
 
 const tg = window.Telegram?.WebApp ?? null;
 
 export const inTelegram = Boolean(tg?.initData);
+// Imzolangan ma'lumot: server uni bot tokeni bilan tekshirib, haydovchini taniydi (apps/api telegramAuth.js)
+export const initData = tg?.initData ?? "";
 // sendData faqat botning pastki menyusidagi tugmadan ochilganda ishlaydi.
-// Menyu tugmasi yoki havoladan ochilsa, Telegram query_id beradi — u holda saqlab bo'lmaydi.
-export const canSave = inTelegram && !tg.initDataUnsafe?.query_id;
+// Menyu tugmasi yoki havoladan ochilsa, Telegram query_id beradi — u holda botga yuborib bo'lmaydi
+// (server bilan aloqa bo'lsa, sozlamalar server orqali saqlanadi — bu cheklov u yerda yo'q).
+export const canSendData = inTelegram && !tg.initDataUnsafe?.query_id;
 const atLeast = (version) => Boolean(tg?.isVersionAtLeast?.(version));
 
+// Yorug' / qorong'i: Telegram mavzusidan, brauzerda — tizim sozlamasidan (xarita rasmlari shunga qarab)
+function applyScheme() {
+  const dark = inTelegram ? tg.colorScheme === "dark" : window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.scheme = dark ? "dark" : "light";
+}
+
 export function start() {
+  applyScheme();
+  window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", applyScheme);
   if (!tg) return;
+  tg.onEvent?.("themeChanged", applyScheme);
   tg.ready();
   tg.expand();
-  // Formani pastga surganda ilova yopilib ketmasin
+  // Ro'yxatni pastga surganda ilova yopilib ketmasin
   if (atLeast("7.7")) tg.disableVerticalSwipes();
 }
 
@@ -41,13 +53,24 @@ export function sendToBot(payload) {
   tg.sendData(JSON.stringify(payload));
 }
 
-// Telegram'ning pastdagi katta tugmasi (MainButton)
+// t.me havolasi Telegram ichida chatning o'zida ochilsin (brauzerga chiqib ketmasin)
+export function openLink(url, event) {
+  if (!inTelegram) return;
+  event?.preventDefault();
+  if (/^https:\/\/t\.me\//.test(url) && atLeast("6.1")) tg.openTelegramLink(url);
+  else tg.openLink(url);
+}
+
+// Telegram'ning pastdagi katta tugmasi (MainButton). visible=false — yashiriladi
 export function useMainButton(text, onClick, visible = true) {
   useEffect(() => {
     if (!inTelegram) return undefined;
     const button = tg.MainButton;
     button.setParams({ text, is_visible: visible, is_active: true });
     button.onClick(onClick);
-    return () => button.offClick(onClick);
+    return () => {
+      button.offClick(onClick);
+      button.hide();
+    };
   }, [text, onClick, visible]);
 }
