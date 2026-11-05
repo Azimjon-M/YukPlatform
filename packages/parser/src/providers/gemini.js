@@ -44,15 +44,16 @@ export const gemini = {
     });
   },
 
-  async generate(client, { text, model }) {
+  // system/schema — bir nechta e'lonni bitta so'rovda yuborishda (batch) boshqa ko'rsatma va sxema beriladi
+  async generate(client, { text, model, system = SYSTEM_PROMPT, schema = POST_SCHEMA }) {
     // Takrorlanadigan ko'rsatmani Gemini o'zi keshlaydi (implicit caching), sozlash shart emas
     const response = await client.models.generateContent({
       model,
       contents: text,
       config: {
-        systemInstruction: SYSTEM_PROMPT,
+        systemInstruction: system,
         responseMimeType: "application/json",
-        responseJsonSchema: POST_SCHEMA,
+        responseJsonSchema: schema,
       },
     });
     const base = { model: response.modelVersion ?? model, usage: normalizeUsage(response.usageMetadata) };

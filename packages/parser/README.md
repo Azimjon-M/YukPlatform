@@ -15,11 +15,14 @@ npm run parse -- --limit 10        # birinchi 10 ta e'lonni AI bilan tahlil qili
 npm run parse                      # hammasini
 npm run parse -- --skip 120        # limit tugab qolsa, 121-e'londan davom etish
 npm run parse -- --only 3,27,38    # faqat shu raqamli e'lonlar
+npm run parse -- --batch 1         # har e'lon alohida so'rov (standart: 10 ta e'lon bitta so'rovda)
 ```
 
 Natija `data/samples/natija.jsonl` fayliga yoziladi (gitga tushmaydi), terminalda esa qisqa hisobot chiqadi: qancha e'lon, qaysi maydonlar necha foiz to'ldirildi, token sarfi va taxminiy narx.
 
-Qo'shimcha parametrlar: `--file <yo'l>`, `--out <yo'l>`, `--concurrency <son>`.
+Qo'shimcha parametrlar: `--file <yo'l>`, `--out <yo'l>`, `--concurrency <son>`, `--batch <son>`.
+
+⚠️ `--out` fayli har safar **ustidan yoziladi**. Solishtirish uchun har bir yugurishga alohida nom bering (`natija-v6.jsonl`, `natija-v6-b10.jsonl`...).
 
 ## Aniqlikni tekshirish
 
@@ -41,6 +44,31 @@ npm run parse:eval -- --results data/samples/natija-v3.jsonl --results data/samp
 
 Bir xil prompt ikki marta ishga tushirilsa ham natija 1–2 maydonga farq qilishi mumkin. Shuning uchun faqat jami foizga emas, har bir maydon jadvaliga qarang.
 
+## Bir so'rovda bir nechta e'lon (batch)
+
+Bepul Gemini kuniga **500 ta so'rov** beradi (2026-11-05 da 429 javobidan o'qildi: `gemini-3.5-flash-lite`, har bir model uchun alohida). Har e'longa bitta so'rov bo'lsa — kuniga 500 ta e'lon. Guruhlar esa daqiqasiga ~15 ta yangi e'lon tashlaydi. Shuning uchun bot e'lonlarni **10 tadan bitta so'rovda** yuboradi:
+
+- E'lonlar matnda `=== POST 1 ===`, `=== POST 2 ===` sarlavhalari bilan ajratiladi, telefonlar har birida oldindan `[telefon]` qilinadi.
+- AI har bir e'lon javobini o'sha raqam (`id`) bilan qaytaradi; kod javobni raqami bo'yicha e'loniga qaytaradi va telefonni o'sha e'londan biriktiradi.
+- Javob ishonchsiz bo'lsa (JSON buzuq, e'lon tushib qolgan yoki ikki marta kelgan, noma'lum raqam, javob uzilgan, bloklangan) — guruh **ikkiga bo'linib** qayta yuboriladi (10 → 5 + 5 → ... → bittadan). Raqam adashsa bir e'londagi yo'nalish boshqa e'lon telefoniga yopishib qolishi mumkin, shuning uchun bunday javobning hech bir qismi ishlatilmaydi.
+- Limit (429) yoki model band (503) bo'lsa — xato chaqiruvchiga qaytadi, bot kutadi, e'lonlar navbatda qoladi.
+- Ko'rsatma (`BATCH_SYSTEM_PROMPT`) oddiy ko'rsatma + oxirida batch qoidasi; boshi bir xil bo'lgani uchun Gemini uni keshlaydi.
+
+Aniqlik (gold, 32 e'lon / 424 maydon, 2026-11-05). Asosiy model limiti tugagani uchun taqqoslash alohida limitli `gemini-3.1-flash-lite` da qilindi:
+
+| Bir so'rovda | So'rovlar | Aniqlik | Vaqt (ketma-ket) |
+|---|---|---|---|
+| 1 (eski usul) | 32 | 98.6% (418) | — |
+| 10 (standart) | 4 | 97.9% (415, 415) | ~30 s |
+| 16 | 2 | 97.4–98.3% (413, 417) | ~26 s |
+| 32 | 1 | 96.2–97.6% (408, 414) | ~27 s |
+
+- Batch'da AI eng yangi qoidalarni biroz yomonroq eslaydi: "tent kerak" → fura, faqat davlat yozilgan bo'lsa poytaxt ("Berlin"), ikki kuzov variantida "tent". 32 talikda bir marta 5 ta yukda narx ×1000 qilinmay qoldi — shuning uchun standart 10.
+- Asosiy model (`gemini-3.5-flash-lite`) da limit tugaguncha 10 talik bitta guruh o'lchandi: 178/180, xuddi shu 10 e'londa v5 (bittadan) 180/180.
+- Kiruvchi tokenlar e'lon boshiga ~5 600 → ~800 (ko'rsatma bir marta yuboriladi).
+
+Bot navbatda 10 tadan kam e'lon bo'lsa, eng eski e'lon joylanganidan 60 soniya o'tguncha ko'proq yig'ilishini kutadi (`PARSER_BATCH_WAIT`) — aks holda navbat bo'sh paytda har 1–2 e'lon uchun alohida so'rov ketardi.
+
 ## AI provayderlari
 
 | Provayder | Narxi | Kalit | Standart model |
@@ -49,7 +77,7 @@ Bir xil prompt ikki marta ishga tushirilsa ham natija 1–2 maydonga farq qilish
 | `claude` | Pullik | console.anthropic.com → API Keys | `claude-opus-5-5` |
 
 **Gemini bepul tarifi haqida:**
-- Daqiqalik va kunlik so'rovlar soni cheklangan, aniq limit modelga bog'liq. Gemini bir vaqtda faqat 2 ta so'rov yuboradi.
+- Daqiqalik (~15) va kunlik (**500**, `gemini-3.5-flash-lite`) so'rovlar soni cheklangan; har bir modelning limiti alohida. Kunlik limit Toshkent vaqti bilan **13:00 da** yangilanadi (Tinch okeani vaqti yarim tunda). Gemini bir vaqtda faqat 2 ta so'rov yuboradi.
 - Daqiqalik limitga urilsa (taxminan 16 ta so'rovdan keyin), dastur Google aytgan vaqtcha kutadi va o'sha e'londan davom etadi.
 - Kunlik limit tugasa yoki model band bo'lsa (503), ish to'xtaydi, tayyor natijalar saqlanadi va qaysi `--skip` bilan davom etish kerakligi ko'rsatiladi.
 - Google bepul tarifda yuborilgan matnlardan o'z mahsulotlarini yaxshilash uchun foydalanishi mumkin. Shuning uchun telefon raqamlari AI'ga yuborilmaydi: ular oldin `[telefon]` bilan almashtiriladi.
@@ -63,6 +91,8 @@ Bir xil prompt ikki marta ishga tushirilsa ham natija 1–2 maydonga farq qilish
 | `ANTHROPIC_API_KEY` | — | Claude uchun |
 | `PARSER_MODEL` | provayderga qarab | `--models` ro'yxatidan tanlanadi |
 | `PARSER_EFFORT` | `low` | Faqat Claude: `low` / `medium` / `high` |
+| `PARSER_BATCH` | `10` | Bitta so'rovdagi e'lonlar soni (bot va `npm run parse`). `1` — har e'lon alohida |
+| `PARSER_BATCH_WAIT` | `60` | Soniya: navbatda batch'dan kam e'lon bo'lsa, bot eng eski e'lon shuncha "eskirguncha" yig'ilishini kutadi. `0` — kutmaydi |
 
 ## Natija ko'rinishi
 
@@ -100,7 +130,8 @@ Bir xil prompt ikki marta ishga tushirilsa ham natija 1–2 maydonga farq qilish
 | `src/prompt.js` | AI uchun ko'rsatma (o'zgarmas — shuning uchun keshlanadi) |
 | `src/schema.js` | Javobning JSON sxemasi (ikkala provayder ham javobni majburan shu shaklda beradi) |
 | `src/providers/` | Har bir AI uchun alohida fayl: `gemini.js`, `claude.js` |
-| `src/parse.js` | Provayderni tanlaydi, telefonlarni biriktiradi, joylarni ro'yxat bo'yicha tekshiradi |
+| `src/parse.js` | Provayderni tanlaydi, telefonlarni biriktiradi, joylarni ro'yxat bo'yicha tekshiradi; `parseBatch` — bir nechta e'lon bitta so'rovda |
+| `src/batch.js` | Batch so'rov matnini tuzadi (`=== POST n ===`) va javobni e'lonlarga raqami bo'yicha qaytaradi |
 | `src/cli.js` | Fayldagi e'lonlarni tahlil qilib, hisobot chiqaradi |
 | `src/eval.js` | Natijani `gold.jsonl` bilan solishtiradi |
 

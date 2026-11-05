@@ -34,16 +34,17 @@ export const claude = {
     return new Anthropic({ maxRetries: 4 });
   },
 
-  async generate(client, { text, model, effort }) {
+  // system/schema — bir nechta e'lonni bitta so'rovda yuborishda (batch) boshqa ko'rsatma va sxema beriladi
+  async generate(client, { text, model, effort, system = SYSTEM_PROMPT, schema = POST_SCHEMA }) {
     const request = {
       model,
       max_tokens: 16000,
       output_config: {
         effort,
-        format: { type: "json_schema", schema: POST_SCHEMA },
+        format: { type: "json_schema", schema },
       },
       // Ko'rsatma keshlanadi: har bir e'londa qaytadan to'liq narxda o'qilmaydi
-      system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: text }],
     };
     if (SUPPORTS_FALLBACK.test(model)) {

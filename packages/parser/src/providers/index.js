@@ -1,5 +1,6 @@
 // AI provayderlari. Har biri bir xil "shaklga" ega:
-//   generate(client, { text, model, effort }) → { ok, json | error, model, usage }
+//   generate(client, { text, model, effort, system?, schema? }) → { ok, json | error, model, usage }
+//   (system/schema berilmasa — bitta e'lon uchun ko'rsatma va sxema; batch'da — BATCH_* lar)
 // shuning uchun parse.js va cli.js qaysi AI ishlayotganini bilishi shart emas.
 // Yangi provayder qo'shish = shu papkaga yangi fayl + quyidagi ro'yxatga bitta qator.
 import { claude } from "./claude.js";

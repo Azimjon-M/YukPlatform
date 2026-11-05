@@ -94,6 +94,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     ),
     recentSameText: db.prepare("SELECT id FROM posts WHERE text_key = ? AND posted_at > ? LIMIT 1"),
     newPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY id LIMIT ?"),
+    newestPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY posted_at DESC, id DESC LIMIT ?"),
     finishPost: db.prepare("UPDATE posts SET status = ?, error = ? WHERE id = ?"),
     recentLoad: db.prepare("SELECT id FROM loads WHERE key = ? AND created_at > ? LIMIT 1"),
     insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, created_at) VALUES (?, ?, ?, ?)"),
@@ -133,8 +134,10 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       return { id: Number(result.lastInsertRowid), status };
     },
 
-    takeNewPosts(limit = 10) {
-      return q.newPosts.all(limit).map((row) => ({
+    // newest: true — eng yangi joylangan e'lonlar birinchi (bot shunday oladi: navbat to'lib qolsa ham yangi yuk
+    // darhol chiqadi, bir soatlik yukni esa odatda allaqachon olib bo'lishgan). Standart — navbat tartibida.
+    takeNewPosts(limit = 10, { newest = false } = {}) {
+      return (newest ? q.newestPosts : q.newPosts).all(limit).map((row) => ({
         id: row.id,
         source: row.source,
         messageId: row.message_id,

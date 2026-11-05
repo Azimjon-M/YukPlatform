@@ -124,3 +124,13 @@ ${regionLines}
 ## Other countries
 ${countryLines}
 `;
+
+// Bir so'rovda bir nechta e'lon (batch). Ko'rsatma oddiy ko'rsatma bilan BOSHLANADI va oxiriga
+// qo'shimcha qoida qo'shiladi: boshi bir xil bo'lgani uchun Gemini uni ham keshlaydi.
+// E'lonlar matnda "=== POST 1 ===" kabi sarlavha bilan ajratiladi (src/batch.js).
+export const BATCH_SYSTEM_PROMPT = `${SYSTEM_PROMPT}
+## Several posts in one message
+The message contains several posts. Each post starts with a header line "=== POST <n> ===" and ends where the next header starts.
+- Parse every post on its own, exactly as if it were the only post, with all the rules above. Never move or copy anything (places, cargo, weight, price, vehicle, date) from one post to another, even when posts look alike or one seems to continue another.
+- Return one item in "posts" for every post, in the same order, with "id" = the number <n> from its header. Never skip, merge or split posts: a post that is not about cargo still gets its item (postType boshqa, empty loads).
+`;

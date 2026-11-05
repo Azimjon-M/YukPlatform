@@ -5,6 +5,7 @@
 //   npm run parse -- --limit 10       — faqat birinchi 10 tasini (sinash uchun)
 //   npm run parse -- --skip 120       — birinchi 120 tasini o'tkazib yuborish (limit tugaganda davom etish)
 //   npm run parse -- --only 3,27,38   — faqat shu raqamli e'lonlar; --only gold — gold.jsonl dagilar (limitni tejaydi)
+//   npm run parse -- --batch 1        — har e'lon alohida so'rov (standart: PARSER_BATCH yoki 10 ta e'lon bitta so'rovda)
 //   npm run parse -- --dry-run        — AI'siz: e'lonlarni sanaydi va telefonlarni ajratadi (bepul)
 //   npm run parse -- --models         — kalitingiz bilan mavjud modellar ro'yxati
 import { appendFile, readFile, writeFile } from "node:fs/promises";
@@ -27,6 +28,7 @@ const { values: args } = parseArgs({
     skip: { type: "string", default: "0" },
     only: { type: "string" },
     concurrency: { type: "string" },
+    batch: { type: "string" },
     "dry-run": { type: "boolean", default: false },
     models: { type: "boolean", default: false },
   },
@@ -36,7 +38,7 @@ const here = (file) => path.resolve(process.env.INIT_CWD ?? process.cwd(), file)
 args.file = here(args.file);
 args.out = here(args.out);
 
-// Bitta e'lon uchun daqiqalik limitni necha marta kutamiz; undan keyin limit kunlik deb hisoblanadi
+// Bitta so'rov uchun daqiqalik limitni necha marta kutamiz; undan keyin limit kunlik deb hisoblanadi
 const MAX_LIMIT_WAITS = 5;
 
 const firstLine = (text) => text.split("\n")[0].slice(0, 60);
@@ -87,10 +89,13 @@ async function main() {
   }
 
   if (!requireKey(provider)) return;
-  const parser = createParser();
+  const parser = createParser({ batchSize: args.batch });
   const concurrency = Number(args.concurrency ?? provider.defaultConcurrency);
+  const batchSize = parser.batchSize;
   const effortNote = provider.id === "claude" ? ` | effort: ${parser.effort}` : "";
-  console.log(`${posts.length} ta e'lon | ${provider.id} | model: ${parser.model}${effortNote} | bir vaqtda: ${concurrency}\n`);
+  console.log(
+    `${posts.length} ta e'lon | ${provider.id} | model: ${parser.model}${effortNote} | bir so'rovda: ${batchSize} | bir vaqtda: ${concurrency}\n`,
+  );
 
   const results = new Array(posts.length);
   let next = 0;
@@ -99,19 +104,22 @@ async function main() {
   let pauseUntil = 0; // daqiqalik limit tugaganda hamma ishchi shu vaqtgacha birga kutadi
   const progress = (text) => process.stdout.write(`\r${text}`.padEnd(60));
 
-  // Bir vaqtda bir nechta so'rov yuboramiz (concurrency), lekin hammasini birdaniga emas
+  // Bir vaqtda bir nechta so'rov yuboramiz (concurrency), lekin hammasini birdaniga emas.
+  // Har bir so'rovda batchSize ta e'lon (oxirgisida kamroq bo'lishi mumkin).
   async function worker() {
     while (next < posts.length && !fatal) {
-      const i = next++;
-      const base = { index: posts[i].index, text: posts[i].text };
+      const start = next;
+      next = Math.min(start + batchSize, posts.length);
+      const chunk = posts.slice(start, next);
+      const save = (k, result) => (results[start + k] = { index: chunk[k].index, text: chunk[k].text, ...result });
       for (let waits = 0; ; waits++) {
         if (pauseUntil > Date.now()) await sleep(pauseUntil - Date.now());
-        if (fatal) return; // bu e'lon natijasiz qoladi va keyingi safar qayta yuboriladi
+        if (fatal) return; // bu e'lonlar natijasiz qoladi va keyingi safar qayta yuboriladi
         try {
-          results[i] = { ...base, ...(await parser.parse(base.text)) };
+          (await parser.parseBatch(chunk.map((p) => p.text))).forEach((result, k) => save(k, result));
           break;
         } catch (error) {
-          // Daqiqalik limit: kutib, xuddi shu e'lonni qayta yuboramiz
+          // Daqiqalik limit: kutib, xuddi shu e'lonlarni qayta yuboramiz
           const wait = provider.retryAfterMs?.(error);
           if (wait != null && waits < MAX_LIMIT_WAITS) {
             if (Date.now() + wait > pauseUntil) {
@@ -124,11 +132,11 @@ async function main() {
             fatal ??= error;
             return;
           }
-          results[i] = { ...base, ok: false, error: provider.describeError(error) };
+          chunk.forEach((_, k) => save(k, { ok: false, error: provider.describeError(error) }));
           break;
         }
       }
-      done++;
+      done += chunk.length;
       progress(`${done}/${posts.length}`);
     }
   }
@@ -216,6 +224,15 @@ function printSummary(results, provider) {
   if (failed.length) {
     console.log("\nXatolar:");
     for (const r of failed.slice(0, 5)) console.log(`#${r.index}: ${r.error}`);
+  }
+
+  // Batch: nechta e'lon bitta so'rovda tahlil qilindi, nechtasi javob yaroqsiz bo'lgani uchun bittadan qayta yuborildi
+  const batched = results.filter((r) => r.batch);
+  const fallback = results.filter((r) => r.fallback);
+  if (batched.length || fallback.length) {
+    const requests = batched.filter((r) => r.usage).length;
+    console.log(`\nBatch: ${batched.length} ta e'lon ${requests} ta so'rovda | bittadan qayta: ${fallback.length} ta`);
+    for (const reason of new Set(fallback.map((r) => r.fallback))) console.log(`  sabab: ${reason}`);
   }
 
   const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };

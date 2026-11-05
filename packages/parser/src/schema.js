@@ -49,20 +49,41 @@ export const LOAD_PROPERTIES = {
   note: text,
 };
 
+const POST_PROPERTIES = {
+  postType: { type: "string", enum: POST_TYPE_IDS },
+  loads: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: LOAD_PROPERTIES,
+      required: Object.keys(LOAD_PROPERTIES),
+      additionalProperties: false,
+    },
+  },
+};
+
 export const POST_SCHEMA = {
   type: "object",
+  properties: POST_PROPERTIES,
+  required: ["postType", "loads"],
+  additionalProperties: false,
+};
+
+// Bir so'rovda bir nechta e'lon (batch): har bir e'lonning javobi o'z raqami (id) bilan qaytadi.
+// id birinchi turadi — model avval raqamni yozadi, keyin o'sha e'lonni tahlil qiladi.
+export const BATCH_SCHEMA = {
+  type: "object",
   properties: {
-    postType: { type: "string", enum: POST_TYPE_IDS },
-    loads: {
+    posts: {
       type: "array",
       items: {
         type: "object",
-        properties: LOAD_PROPERTIES,
-        required: Object.keys(LOAD_PROPERTIES),
+        properties: { id: { type: "integer" }, ...POST_PROPERTIES },
+        required: ["id", "postType", "loads"],
         additionalProperties: false,
       },
     },
   },
-  required: ["postType", "loads"],
+  required: ["posts"],
   additionalProperties: false,
 };
