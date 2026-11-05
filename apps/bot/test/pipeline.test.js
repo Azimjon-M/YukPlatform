@@ -43,7 +43,7 @@ test("yuk kanalga va faqat mos, faol haydovchiga boradi", async () => {
   const { store, deps, published, delivered, add } = setup([{ ok: true, postType: "yuk_bor", loads: [LOAD] }]);
   add(1);
   const result = await processPost(store.takeNewPosts()[0], deps);
-  assert.deepEqual(result, { status: "done", loads: 1, fresh: 1, sent: 1 });
+  assert.deepEqual(result, { status: "done", loads: 1, outOfScope: 0, fresh: 1, sent: 1 });
   assert.equal(published.length, 1);
   assert.deepEqual(delivered, [1], "Isuzu (5 t) va pauzadagi haydovchiga bormaydi");
   assert.equal(store.takeNewPosts().length, 0);
@@ -58,6 +58,30 @@ test("boshqa guruhdagi o'sha yuk (boshqacha matn) ikkinchi marta yuborilmaydi", 
   for (const post of store.takeNewPosts()) await processPost(post, deps);
   assert.equal(published.length, 1);
   assert.deepEqual(delivered, [1]);
+});
+
+test("yo'nalish doirasi: Rossiya yuki chiqmaydi, Qozog'iston yuki chiqadi; ROUTE_SCOPE=hammasi — hammasi", async () => {
+  const russia = { ...LOAD, fromCity: "Moskva", fromRegion: "xorij", fromCountry: "Rossiya" };
+  const kazakh = { ...LOAD, fromCity: "Olmaota", fromRegion: "xorij", fromCountry: "Qozog'iston", toCity: "Qo'qon", toRegion: "fargona" };
+  const { store, deps, published, add } = setup([
+    { ok: true, postType: "yuk_bor", loads: [russia] },
+    { ok: true, postType: "yuk_bor", loads: [russia, kazakh] },
+  ]);
+  add(1);
+  add(2);
+  const [first, second] = store.takeNewPosts();
+  assert.deepEqual(await processPost(first, deps), { status: "skipped", reason: "route", outOfScope: 1 });
+  assert.equal(store.listPosts({ status: "done" }).items.find((p) => p.id === first.id).error, "Boshqa yo'nalish: Rossiya → O'zbekiston");
+  const mixed = await processPost(second, deps);
+  assert.deepEqual([mixed.status, mixed.loads, mixed.outOfScope, mixed.fresh], ["done", 1, 1, 1]);
+  assert.deepEqual(published.map((l) => l.fromCountry), ["Qozog'iston"], "faqat doiradagisi kanalga");
+  assert.equal(store.listLoads({}).total, 1, "doiradan tashqaridagi yuk bazaga yozilmaydi");
+
+  const all = setup([{ ok: true, postType: "yuk_bor", loads: [russia] }]);
+  all.add(1);
+  const outcome = await processPost(all.store.takeNewPosts()[0], { ...all.deps, routeScope: "hammasi" });
+  assert.equal(outcome.status, "done");
+  assert.equal(all.published.length, 1);
 });
 
 test("reklama, mashina bo'sh e'loni va AI xatosi", async () => {

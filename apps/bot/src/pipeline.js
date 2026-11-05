@@ -5,12 +5,13 @@
 // Telegram va AI tashqaridan beriladi (deps), shuning uchun testda soxtasi qo'yiladi.
 import { setTimeout as wait } from "node:timers/promises";
 import { poolFromParser } from "@yuk/parser";
-import { DEFAULT_DEDUPE_WINDOW_MS, loadKeys, matchLoad } from "@yuk/shared";
+import { DEFAULT_DEDUPE_WINDOW_MS, DEFAULT_ROUTE_SCOPE, loadKeys, matchLoad, routeInScope, routeText } from "@yuk/shared";
 
-// AI natijasi tayyor bo'lgan bitta e'lon: takrorni tashlash → bazaga yozish → kanal → haydovchilar.
-// deps: { store, publish?(load, post) → kanal xabar id | null, deliver(chatId, load, post) → true/false, windowMs }
+// AI natijasi tayyor bo'lgan bitta e'lon: yo'nalish doirasi → takrorni tashlash → bazaga yozish → kanal → haydovchilar.
+// deps: { store, publish?(load, post) → kanal xabar id | null, deliver(chatId, load, post) → true/false, windowMs,
+//         routeScope — @yuk/shared ROUTE_SCOPES kodi (.env dagi ROUTE_SCOPE; standart "qoshni") }
 export async function handleParsed(post, result, deps) {
-  const { store, windowMs = DEFAULT_DEDUPE_WINDOW_MS } = deps;
+  const { store, windowMs = DEFAULT_DEDUPE_WINDOW_MS, routeScope = DEFAULT_ROUTE_SCOPE } = deps;
   if (!result.ok) {
     store.finishPost(post.id, "failed", result.error);
     return { status: "failed", error: result.error };
@@ -21,11 +22,20 @@ export async function handleParsed(post, result, deps) {
     return { status: "skipped", postType: result.postType };
   }
 
+  // Faqat doiradagi yo'nalishlar (boshlanishiga: O'zbekiston ichi va chegaradosh davlatlar bilan).
+  // E'londagi hamma yuk doiradan tashqarida bo'lsa — e'lon izoh bilan yopiladi (boshqaruv markazida ko'rinadi)
+  const loads = result.loads.filter((load) => routeInScope(load, routeScope));
+  if (loads.length === 0) {
+    const routes = [...new Set(result.loads.map(routeText))];
+    store.finishPost(post.id, "done", `Boshqa yo'nalish: ${routes.slice(0, 3).join(", ")}${routes.length > 3 ? "…" : ""}`);
+    return { status: "skipped", reason: "route", outOfScope: result.loads.length };
+  }
+
   // Avval hamma yangi yuklarni bazaga yozamiz, keyin yuboramiz:
   // yuborish o'rtasida dastur to'xtasa ham, o'sha yuk ikkinchi marta yuborilmaydi
-  const keys = loadKeys(result.loads);
+  const keys = loadKeys(loads);
   const fresh = [];
-  result.loads.forEach((load, i) => {
+  loads.forEach((load, i) => {
     if (store.hasRecentLoad(keys[i], windowMs)) return;
     fresh.push({ id: store.addLoad({ postId: post.id, key: keys[i], load }), load });
   });
@@ -43,7 +53,7 @@ export async function handleParsed(post, result, deps) {
     sent += count;
   }
   store.finishPost(post.id, "done");
-  return { status: "done", loads: result.loads.length, fresh: fresh.length, sent };
+  return { status: "done", loads: loads.length, outOfScope: result.loads.length - loads.length, fresh: fresh.length, sent };
 }
 
 // Bitta e'lon: AI (alohida so'rov) + handleParsed.
@@ -154,7 +164,10 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
           // To'xtatilsa — qolganlari "new" bo'lib qoladi va keyingi safar qayta tahlil qilinadi
           if (controller.signal.aborted) continue;
           const outcome = await handleParsed(post, results[i], deps);
-          if (outcome.status === "done") log(`#${post.id} ${post.source}: ${outcome.fresh}/${outcome.loads} yangi yuk, ${outcome.sent} ta haydovchiga`);
+          if (outcome.status === "done") {
+            const other = outcome.outOfScope ? ` (+${outcome.outOfScope} tasi boshqa yo'nalish)` : "";
+            log(`#${post.id} ${post.source}: ${outcome.fresh}/${outcome.loads} yangi yuk${other}, ${outcome.sent} ta haydovchiga`);
+          }
           else if (outcome.status === "failed") log(`#${post.id}: xato — ${outcome.error}`);
         } catch (error) {
           const message = error.description ?? error.message;

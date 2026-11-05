@@ -129,6 +129,10 @@ export const TASHKENT_DISTRICTS = [
   "Yakkasaroy", "Yashnobod", "Yunusobod", "Yangihayot",
 ];
 
+export const HOME_COUNTRY = "O'zbekiston";
+// O'zbekiston bilan chegaradosh davlatlar (yo'nalish doirasi uchun: scope.js)
+export const NEIGHBOR_COUNTRIES = ["Qozog'iston", "Qirg'iziston", "Tojikiston", "Turkmaniston", "Afg'oniston"];
+
 // Xorijiy davlatlar (avval Osiyo) va yuk ko'p boradigan shaharlar. name — e'londa yoziladigan nom.
 export const COUNTRIES = [
   { name: "Qozog'iston", cities: ["Olmaota", "Astana", "Shymkent", "Taraz", "Aqtobe", "Qarag'anda", "Atirau", "Aqtau", "Pavlodar", "Oral", "Qostanay", "Turkiston", "Saryag'och"] },

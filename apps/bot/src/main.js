@@ -4,6 +4,7 @@
 //   npm run bot -- --dry-run — navbatdagi e'lonlarni tahlil qilib, Telegram'ga yubormasdan ekranga chiqarish
 import { existsSync, statSync } from "node:fs";
 import { createParser, createParserPool, resolveSettings } from "@yuk/parser";
+import { ROUTE_SCOPES, routeScopeFrom } from "@yuk/shared";
 import { acquireRunLock, loadSecret, openStore } from "@yuk/store";
 import { createBot } from "./bot.js";
 import { readConfig } from "./config.js";
@@ -89,6 +90,7 @@ async function check(config) {
     await checkLinkedGroup(bot, config.channel, links);
   }
   checkApps(config);
+  console.log(`✅ Yo'nalishlar: ${ROUTE_SCOPES[routeScopeFrom()].title}.`);
   const ai = createAiPool(store).list();
   if (ai.length) console.log(`✅ AI: ${ai.length} ta ulanish (${ai.map((s) => s.label).join(", ")})`);
   else console.log("⚠️  AI ulanishi yo'q: boshqaruv markazining «AI» bo'limida kalit qo'shing (yoki .env ga GEMINI_API_KEY).");
@@ -111,7 +113,7 @@ async function dryRun() {
     console.log(`   → haydovchi ${chatId}`);
     return true;
   };
-  const worker = createWorker({ parser, store, publish, deliver }, { log });
+  const worker = createWorker({ parser, store, publish, deliver, routeScope: routeScopeFrom() }, { log });
   while ((await worker.runOnce()) > 0);
   const s = store.stats();
   console.log(`\nTayyor. E'lonlar: ${Object.entries(s.posts).map(([k, v]) => `${k} ${v}`).join(", ")}; yangi yuk: ${s.loads24h.total}`);
@@ -129,7 +131,8 @@ async function main() {
   const pool = createAiPool(store);
   const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log });
   await init();
-  const worker = createWorker({ pool, store, publish, deliver }, { log });
+  const routeScope = routeScopeFrom();
+  const worker = createWorker({ pool, store, publish, deliver, routeScope }, { log });
 
   const stop = async () => {
     log("To'xtatilyapti...");
@@ -144,6 +147,7 @@ async function main() {
   process.on("message", (message) => message === "stop" && stop());
 
   log(`Bot ishga tushdi: @${bot.botInfo.username}${config.channel ? `, kanal ${config.channel}` : ""}. To'xtatish: Ctrl+C`);
+  log(`Yo'nalishlar: ${ROUTE_SCOPES[routeScope].title} (.env: ROUTE_SCOPE=${routeScope})`);
   worker.start();
   await bot.start({ allowed_updates: ["message", "channel_post", "callback_query"] });
 }
