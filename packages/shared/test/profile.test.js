@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeProfile, emptyProfile, encodeProfile, intlOption, matchLoad, regionLabel, sanitizeProfile } from "../src/index.js";
+import { decodeProfile, emptyProfile, encodeProfile, intlChoices, intlLabel, intlOption, matchLoad, regionLabel, sanitizeProfile } from "../src/index.js";
 
 const PROFILE = {
   vehicle: { truckClass: "isuzu", bodyType: "tent", capacityKg: 5000, body: { lengthM: 4.85, widthM: 2.15, heightM: 1.95 }, loadingSides: ["orqa", "yon"] },
@@ -55,4 +55,20 @@ test("yorliqlar", () => {
   assert.equal(regionLabel("andijon"), "Andijon vil.");
   assert.equal(regionLabel("Rossiya"), "Rossiya");
   assert.equal(intlOption(PROFILE), "ham");
+});
+
+test("yo'nalish doirasi: Mini App'dan kelgan uzoq davlat tashlanadi, ichki doirada xalqaro o'chadi", () => {
+  const input = { ...PROFILE, fromAreas: ["andijon", "Rossiya", "Qozog'iston", "xorij"], toAreas: ["Xitoy"], domestic: true, international: true };
+  const qoshni = sanitizeProfile(input, { scope: "qoshni" }).profile;
+  assert.deepEqual([qoshni.fromAreas, qoshni.toAreas], [["andijon", "Qozog'iston", "xorij"], []]);
+  const ichki = sanitizeProfile({ ...input, domestic: false }, { scope: "ichki" }).profile;
+  assert.deepEqual([ichki.fromAreas, ichki.domestic, ichki.international], [["andijon"], true, false]);
+  assert.deepEqual(sanitizeProfile(input, { scope: "hammasi" }).profile.toAreas, ["Xitoy"]);
+  assert.deepEqual(sanitizeProfile(input).profile.toAreas, ["Xitoy"], "doirasiz — avvalgidek");
+  assert.deepEqual(decodeProfile(encodeProfile(input), { scope: "qoshni" }).toAreas, []);
+
+  assert.equal(intlChoices("ichki"), null);
+  assert.equal(intlChoices().options.faqat.label, "Faqat qo'shni davlatlar");
+  assert.equal(intlLabel({ domestic: true, international: true }), "O'zbekiston va qo'shni davlatlar");
+  assert.equal(intlLabel({ domestic: true, international: true }, "hammasi"), "O'zbekiston va xalqaro");
 });

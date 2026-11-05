@@ -5,7 +5,7 @@
 //
 // E'lonni AI'gacha matnidan ajratib bo'lmaydi: ko'p e'lon bir nechta yo'nalish ro'yxati (Toshkent–Olmaota,
 // Toshkent–Moskva...), shuning uchun tekshiruv AI aniqlagan davlatlar bo'yicha — har bir yuk alohida.
-import { HOME_COUNTRY, NEIGHBOR_COUNTRIES } from "./regions.js";
+import { COUNTRIES, HOME_COUNTRY, NEIGHBOR_COUNTRIES } from "./regions.js";
 
 export const ROUTE_SCOPES = {
   qoshni: { title: "O'zbekiston ichi va chegaradosh davlatlar bilan", countries: [HOME_COUNTRY, ...NEIGHBOR_COUNTRIES] },
@@ -13,6 +13,9 @@ export const ROUTE_SCOPES = {
   hammasi: { title: "Hamma yo'nalishlar", countries: null },
 };
 export const DEFAULT_ROUTE_SCOPE = "qoshni";
+
+// Noma'lum yoki berilmagan kod — standart doira
+export const validRouteScope = (scope) => (Object.hasOwn(ROUTE_SCOPES, scope ?? "") ? scope : DEFAULT_ROUTE_SCOPE);
 
 // .env dagi ROUTE_SCOPE → doira kodi. Bo'sh — standart; noma'lum qiymat — xato (jim o'tib ketmasin)
 export function routeScopeFrom(env = process.env) {
@@ -44,9 +47,16 @@ export function routeText(load) {
 // - kamida bittasi O'zbekistonda: Qozog'iston → Qirg'iziston kabi O'zbekistonga tegmaydigan yuk — yo'q;
 // - bir uchi noma'lum bo'lsa, ma'lum uchi bo'yicha (e'londa ba'zan faqat "Toshkentdan" deyiladi).
 export function routeInScope(load, scope = DEFAULT_ROUTE_SCOPE) {
-  const countries = ROUTE_SCOPES[scope]?.countries;
+  const { countries } = ROUTE_SCOPES[validRouteScope(scope)];
   if (!countries) return true;
   const ends = [loadCountry(load, "from"), loadCountry(load, "to")].filter(Boolean);
   if (ends.some((country) => !countries.includes(country))) return false;
   return ends.length < 2 || ends.includes(HOME_COUNTRY);
+}
+
+// Haydovchi sozlamalarida (bot, Mini App) tanlanadigan xorijiy davlatlar — faqat doiradagilari.
+// qoshni — 5 ta chegaradosh davlat, ichki — hech biri, hammasi — ro'yxatdagi hamma davlat
+export function scopeCountries(scope = DEFAULT_ROUTE_SCOPE) {
+  const { countries } = ROUTE_SCOPES[validRouteScope(scope)];
+  return countries ? countries.filter((country) => country !== HOME_COUNTRY) : COUNTRIES.map((c) => c.name);
 }

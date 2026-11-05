@@ -4,30 +4,38 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BODY_TYPES,
   CAPACITY_OPTIONS,
-  COUNTRIES,
-  INTL_OPTIONS,
   LOADING_SIDES,
   MODE_OPTIONS,
   REGIONS,
   SIDE_LABELS,
   TRUCK_CLASSES,
   decodeProfile,
+  intlChoices,
   regionLabel,
+  scopeCountries,
+  validRouteScope,
 } from "@yuk/shared";
 import { classBody, formFromProfile, profileFromForm, selectClass, sizeSummary, toggle } from "./form.js";
 import { canSave, haptic, inTelegram, sendToBot, setUnsaved, showAlert, useMainButton } from "./telegram.js";
 
-const initialProfile = decodeProfile(new URLSearchParams(window.location.search).get("p"));
+const params = new URLSearchParams(window.location.search);
+// Yo'nalish doirasi (bot .env dagi ROUTE_SCOPE ni ?s= bilan beradi): qaysi davlatlarni tanlash mumkin
+const scope = validRouteScope(params.get("s"));
+const initialProfile = decodeProfile(params.get("p"), { scope });
 const fmt = (n) => String(n).replace(".", ",");
 const number = (text) => Number(String(text).trim().replace(",", "."));
 
 const CLASS_OPTIONS = TRUCK_CLASSES.map((t) => ({ id: t.id, label: t.name, sub: `${fmt(t.capacityT[0])}–${fmt(t.capacityT[1])} t` }));
 const BODY_OPTIONS = BODY_TYPES.map((b) => ({ id: b.id, label: b.name }));
 const SIDE_OPTIONS = LOADING_SIDES.map((s) => ({ id: s.id, label: SIDE_LABELS[s.id] }));
-const INTL_CHOICES = Object.entries(INTL_OPTIONS).map(([id, o]) => ({ id, label: o.label }));
+const INTL = intlChoices(scope); // "ichki" doirada null — savol ko'rsatilmaydi
+const INTL_CHOICES = INTL ? Object.entries(INTL.options).map(([id, o]) => ({ id, label: o.label })) : [];
 const MODE_CHOICES = Object.entries(MODE_OPTIONS).map(([id, label]) => ({ id, label }));
 const REGION_OPTIONS = REGIONS.filter((r) => r.id !== "xorij").map((r) => ({ id: r.id, label: regionLabel(r.id) }));
-const COUNTRY_OPTIONS = [{ id: "xorij", label: "Istalgan davlat" }, ...COUNTRIES.map((c) => ({ id: c.name, label: c.name }))];
+const COUNTRY_OPTIONS = [
+  { id: "xorij", label: scope === "hammasi" ? "Istalgan davlat" : "Istalgan qo'shni davlat" },
+  ...scopeCountries(scope).map((name) => ({ id: name, label: name })),
+];
 
 function Section({ id, title, hint, error, children }) {
   return (
@@ -66,7 +74,7 @@ function Chips({ options, selected, onPick, layout = "wrap" }) {
   );
 }
 
-// Viloyatlar (va xalqaro bo'lsa — davlatlar). Hech biri tanlanmasa — hammasi.
+// Viloyatlar (va xalqaro bo'lsa — doiradagi davlatlar). Hech biri tanlanmasa — hammasi.
 function Areas({ values, allLabel, international, onChange }) {
   const pick = (id) => onChange(id === "*" ? [] : toggle(values, id));
   const selected = (id) => (id === "*" ? values.length === 0 : values.includes(id));
@@ -75,7 +83,7 @@ function Areas({ values, allLabel, international, onChange }) {
       <Chips options={[{ id: "*", label: allLabel }, ...REGION_OPTIONS]} selected={selected} onPick={pick} />
       {international && (
         <>
-          <p className="group">Xorij</p>
+          <p className="group">{scope === "hammasi" ? "Xorij" : "Qo'shni davlatlar"}</p>
           <Chips options={COUNTRY_OPTIONS} selected={selected} onPick={pick} />
         </>
       )}
@@ -108,7 +116,7 @@ export function App() {
   const errorFor = (field) => (problem?.field === field ? problem.error : null);
 
   const save = useCallback(() => {
-    const result = profileFromForm(form);
+    const result = profileFromForm(form, scope);
     if (result.error) {
       haptic.error();
       setProblem(result);
@@ -131,7 +139,7 @@ export function App() {
 
   const standard = classBody(form.truckClass);
   const summary = sizeSummary(form);
-  const international = INTL_OPTIONS[form.intl]?.international;
+  const international = Boolean(INTL?.options[form.intl]?.international);
 
   return (
     <main>
@@ -214,9 +222,11 @@ export function App() {
         <Chips options={SIDE_OPTIONS} selected={(id) => form.loadingSides.includes(id)} onPick={(id) => update({ loadingSides: toggle(form.loadingSides, id) })} />
       </Section>
 
-      <Section id="intl" title="🌍 Qayerda ishlaysiz?">
-        <Chips layout="list" options={INTL_CHOICES} selected={(id) => form.intl === id} onPick={(id) => update({ intl: id })} />
-      </Section>
+      {INTL && (
+        <Section id="intl" title="🌍 Qayerda ishlaysiz?" hint={INTL.question}>
+          <Chips layout="list" options={INTL_CHOICES} selected={(id) => form.intl === id} onPick={(id) => update({ intl: id })} />
+        </Section>
+      )}
 
       <Section id="from" title="📍 Qayerdan yuk olasiz?" hint="Bir nechtasini tanlash mumkin.">
         <Areas values={form.fromAreas} allLabel="Hamma joy" international={international} onChange={(fromAreas) => update({ fromAreas })} />

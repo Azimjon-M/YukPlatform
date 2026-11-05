@@ -77,7 +77,8 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
     (bot.botInfo && message.from?.id === bot.botInfo.id) ||
     message.via_bot?.id === bot.botInfo?.id;
 
-  const menu = (driver) => ({ reply_markup: mainMenu(driver, config.miniappUrl) });
+  const scope = config.routeScope; // yo'nalish doirasi: sozlamalarda qaysi davlatlar tanlanadi
+  const menu = (driver) => ({ reply_markup: mainMenu(driver, config.miniappUrl, scope) });
   const html = (driver) => ({ parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...menu(driver) });
 
   function rememberUser(ctx) {
@@ -106,7 +107,7 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
   }
 
   async function startWizard(ctx, profile = null) {
-    const draft = newDraft(profile);
+    const draft = newDraft(profile, scope);
     store.saveDriver(ctx.chat.id, { draft });
     await showStep(ctx, draft);
   }
@@ -122,7 +123,7 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
     const driver = store.saveDriver(ctx.chat.id, { profile, draft: null, active: true });
     const count = matchingLoads(profile).length;
     const extra = count ? `\n\nOxirgi 24 soatda sizga mos ${count} ta yuk bor — «${MENU.loads}» ni bosing.` : "";
-    await ctx.reply(`✅ Saqlandi. Endi mos yuklar shu yerga keladi.\n\n${describeProfile(profile)}${extra}`, menu(driver));
+    await ctx.reply(`✅ Saqlandi. Endi mos yuklar shu yerga keladi.\n\n${describeProfile(profile, scope)}${extra}`, menu(driver));
   }
 
   async function setActive(ctx, active) {
@@ -182,7 +183,7 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
   privateChat.command("start", async (ctx) => {
     const driver = rememberUser(ctx);
     if (driver.profile) {
-      await ctx.reply(`${helpText(driver)}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describeProfile(driver.profile))}`, html(driver));
+      await ctx.reply(`${helpText(driver)}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describeProfile(driver.profile, scope))}`, html(driver));
       return;
     }
     if (config.miniappUrl) {
@@ -232,7 +233,7 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
     } catch {
       // buzilgan JSON — pastda xato deb javob beriladi
     }
-    const { profile, error } = data?.type === "profile" ? sanitizeProfile(data.profile) : { error: "noma'lum ma'lumot keldi" };
+    const { profile, error } = data?.type === "profile" ? sanitizeProfile(data.profile, { scope }) : { error: "noma'lum ma'lumot keldi" };
     if (error) {
       await ctx.reply(`⚠️ Saqlanmadi: ${error}. Formani qaytadan oching.`, menu(driver));
       return;

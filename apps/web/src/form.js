@@ -6,6 +6,7 @@ import {
   REGION_IDS,
   TRUCK_CLASSES,
   emptyProfile,
+  intlChoices,
   intlOption,
   sanitizeBody,
   sanitizeProfile,
@@ -67,7 +68,7 @@ export function sizeSummary(form) {
 }
 
 // → { profile } yoki { error, field } — field: qaysi bo'limga qaytish kerak
-export function profileFromForm(form) {
+export function profileFromForm(form, scope) {
   if (!form.truckClass) return { error: "Mashina turini tanlang", field: "class" };
   if (!form.bodyType) return { error: "Kuzov turini tanlang", field: "body" };
   const capacityKg = Math.round(number(form.capacity) * 1000);
@@ -78,7 +79,10 @@ export function profileFromForm(form) {
   if (form.sizeMode === "custom" && !body) {
     return { error: "Kuzov o'lchamini to'g'ri yozing: uzunligi 1–20, eni 1–3.2, balandligi 0.5–4.5 metr", field: "size" };
   }
-  const intl = INTL_OPTIONS[form.intl] ?? INTL_OPTIONS.yoq;
+  // scope — yo'nalish doirasi (bot ?s= bilan beradi): doiradan tashqaridagi davlatlar tashlanadi.
+  // "ichki" doirada xalqaro savoli yo'q — faqat O'zbekiston
+  const options = scope === undefined ? INTL_OPTIONS : (intlChoices(scope)?.options ?? { yoq: INTL_OPTIONS.yoq });
+  const intl = options[form.intl] ?? INTL_OPTIONS.yoq;
   // Faqat O'zbekiston tanlansa, oldin belgilangan xorijiy davlatlar tashlanadi
   const areas = (list) => (intl.international ? list : list.filter((a) => REGION_IDS.includes(a)));
   const result = sanitizeProfile({
@@ -88,6 +92,6 @@ export function profileFromForm(form) {
     domestic: intl.domestic,
     international: intl.international,
     mode: form.mode,
-  });
+  }, { scope });
   return result.error ? { ...result, field: "class" } : result;
 }

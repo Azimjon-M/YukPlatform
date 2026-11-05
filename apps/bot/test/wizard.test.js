@@ -125,5 +125,43 @@ test("sinf o'zgarsa, eski sig'im va o'lcham tozalanadi; mavjud profil bilan tahr
   assert.deepEqual(edit.fromAreas, ["andijon"]);
   edit.fromAreas.push("namangan");
   assert.deepEqual(profile.fromAreas, ["andijon"], "asl profil o'zgarmaydi");
-  assert.match(describeProfile(profile), /O'zbekiston va xalqaro/);
+  assert.match(describeProfile(profile), /O'zbekiston va qo'shni davlatlar/);
+  assert.match(describeProfile(profile, "hammasi"), /O'zbekiston va xalqaro/);
+});
+
+test("yo'nalish doirasi: qo'shni — 5 ta davlat; ichki — davlat va xalqaro savoli yo'q; hammasi — umumiy Xorij", () => {
+  const labels = (draft) => buttons({ ...draft, step: "from" }).map((b) => b.text);
+  const qoshni = labels(newDraft());
+  for (const name of ["Qozog'iston", "Qirg'iziston", "Tojikiston", "Turkmaniston", "Afg'oniston"]) {
+    assert.ok(qoshni.some((t) => t.includes(name)), name);
+  }
+  assert.ok(!qoshni.some((t) => /Rossiya|Xorij/.test(t)), "uzoq davlat va umumiy Xorij yo'q");
+  assert.ok(!labels(newDraft(null, "ichki")).some((t) => t.includes("🌍") || /Xorij/.test(t)));
+  assert.ok(labels(newDraft(null, "hammasi")).some((t) => /Xorij/.test(t)));
+  assert.match(renderStep({ ...newDraft(), step: "intl" }).text, /Qo'shni davlatlar \(Qozog'iston/);
+
+  // Rossiya tugmasi yo'q, eski/soxta tugma bosilsa ham qo'shilmaydi
+  let d = { ...newDraft(), step: "from" };
+  d = press(d, "w:from:t.Rossiya");
+  assert.deepEqual(d.fromAreas, []);
+  d = press(d, "w:from:t.Qozog'iston");
+  d = press(d, "w:from:t.toshkent");
+  assert.deepEqual(d.fromAreas, ["Qozog'iston", "toshkent"]);
+
+  // "Faqat O'zbekiston" tanlansa, belgilangan davlat profildan tushadi
+  d = press(d, "w:from:ok");
+  d = press(d, "w:to:ok");
+  assert.equal(d.step, "intl");
+  const domestic = profileFromDraft(press(d, "w:intl:yoq"));
+  assert.deepEqual([domestic.fromAreas, domestic.international], [["toshkent"], false]);
+  const both = profileFromDraft(press(d, "w:intl:ham"));
+  assert.deepEqual([both.fromAreas, both.international], [["Qozog'iston", "toshkent"], true]);
+
+  // ichki: "to" dan keyin darrov "mode", orqaga ham "to" ga
+  let i = { ...newDraft(null, "ichki"), step: "to" };
+  i = press(i, "w:to:ok");
+  assert.equal(i.step, "mode");
+  assert.equal(press(i, "w:mode:back").step, "to");
+  assert.equal(profileFromDraft({ ...i, international: true }).international, false);
+  assert.equal(press({ ...i, step: "done" }, "w:done:restart").scope, "ichki", "qaytadan boshlansa ham doira saqlanadi");
 });

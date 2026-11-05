@@ -3,6 +3,7 @@
 // Profil ko'rinishi: { vehicle: { truckClass, bodyType, capacityKg, body, loadingSides }, fromAreas, toAreas,
 //                      domestic, international, mode }
 import { COUNTRIES, REGIONS, REGION_IDS } from "./regions.js";
+import { DEFAULT_ROUTE_SCOPE, scopeCountries, validRouteScope } from "./scope.js";
 import { BODY_TYPE_IDS, LOADING_SIDE_IDS, TRUCK_CLASS_IDS } from "./vehicles.js";
 
 // Sig'im tugmalari, tonna (do'stimiz aytgan odatdagi qiymatlar)
@@ -19,6 +20,36 @@ export const INTL_OPTIONS = {
   ham: { label: "O'zbekiston va xalqaro", domestic: true, international: true },
   faqat: { label: "Faqat xalqaro", domestic: false, international: true },
 };
+
+// "Xalqaro" savoli yo'nalish doirasiga qarab (scope.js): qoshni — "qo'shni davlatlar", hammasi — "xalqaro",
+// ichki — savol yo'q (null): faqat O'zbekiston. → { question, options: { yoq, ham, faqat } } yoki null
+export function intlChoices(scope = DEFAULT_ROUTE_SCOPE) {
+  const countries = scopeCountries(scope);
+  if (countries.length === 0) return null;
+  const all = validRouteScope(scope) === "hammasi";
+  const abroad = all ? "xalqaro" : "qo'shni davlatlar";
+  return {
+    question: all ? "Xalqaro yuklar ham kerakmi?" : `Qo'shni davlatlar (${countries.join(", ")}) bilan yuklar ham kerakmi?`,
+    options: {
+      yoq: { ...INTL_OPTIONS.yoq },
+      ham: { ...INTL_OPTIONS.ham, label: `O'zbekiston va ${abroad}` },
+      faqat: { ...INTL_OPTIONS.faqat, label: `Faqat ${abroad}` },
+    },
+  };
+}
+
+// Profilning "qayerda ishlaydi" yozuvi: "O'zbekiston va qo'shni davlatlar"
+export function intlLabel(profile, scope = DEFAULT_ROUTE_SCOPE) {
+  const options = intlChoices(scope)?.options ?? INTL_OPTIONS;
+  return (options[intlOption(profile)] ?? INTL_OPTIONS.yoq).label;
+}
+
+// Yo'nalishda tanlanadigan joylar: viloyatlar + doiradagi davlatlar ("xorij" — istalgan shunday davlat)
+export function areaIds(scope = DEFAULT_ROUTE_SCOPE) {
+  const countries = scopeCountries(scope);
+  const regions = countries.length ? REGION_IDS : REGION_IDS.filter((id) => id !== "xorij");
+  return [...regions, ...countries];
+}
 
 export const MODE_OPTIONS = {
   own: "Faqat mashinamga mos yuklar",
@@ -71,7 +102,9 @@ export function sanitizeBody(body) {
 }
 
 // Tashqaridan kelgan profilni tekshiradi. → { profile } yoki { error: "haydovchiga ko'rsatiladigan matn" }
-export function sanitizeProfile(input) {
+// scope berilsa — yo'nalishlar shu doiraga qisqartiriladi (doiradan tashqaridagi davlat tashlanadi;
+// "ichki" doirada xalqaro o'chadi). Berilmasa — ro'yxatdagi hamma davlat.
+export function sanitizeProfile(input, { scope } = {}) {
   if (!input || typeof input !== "object") return { error: "Ma'lumot kelmadi" };
   const v = input.vehicle && typeof input.vehicle === "object" ? input.vehicle : {};
   if (!TRUCK_CLASS_IDS.includes(v.truckClass)) return { error: "Mashina turini tanlang" };
@@ -89,15 +122,17 @@ export function sanitizeProfile(input) {
     if (!body) return { error: "Kuzov o'lchami noto'g'ri (uzunligi 1–20, eni 1–3.2, balandligi 0.5–4.5 m)" };
   }
 
-  const domestic = input.domestic !== false;
-  const international = input.international === true;
+  const abroad = scope === undefined || scopeCountries(scope).length > 0;
+  const domestic = abroad ? input.domestic !== false : true;
+  const international = abroad && input.international === true;
   if (!domestic && !international) return { error: "O'zbekiston yoki xalqaro — bittasini tanlang" };
+  const areas = scope === undefined ? AREAS : new Set(areaIds(scope));
 
   return {
     profile: {
       vehicle: { truckClass: v.truckClass, bodyType, capacityKg, body, loadingSides: pick(v.loadingSides, new Set(LOADING_SIDE_IDS)) },
-      fromAreas: pick(input.fromAreas, AREAS),
-      toAreas: pick(input.toAreas, AREAS),
+      fromAreas: pick(input.fromAreas, areas),
+      toAreas: pick(input.toAreas, areas),
       domestic,
       international,
       mode: input.mode === "all" ? "all" : "own",
@@ -122,11 +157,11 @@ export function encodeProfile(profile) {
   return toBase64Url(JSON.stringify(profile));
 }
 
-// Noto'g'ri yoki buzilgan bo'lsa — null
-export function decodeProfile(text) {
+// Noto'g'ri yoki buzilgan bo'lsa — null. scope — sanitizeProfile dagidek
+export function decodeProfile(text, { scope } = {}) {
   if (!text) return null;
   try {
-    return sanitizeProfile(JSON.parse(fromBase64Url(text))).profile ?? null;
+    return sanitizeProfile(JSON.parse(fromBase64Url(text)), { scope }).profile ?? null;
   } catch {
     return null;
   }

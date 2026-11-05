@@ -2,26 +2,37 @@
 // Har bir qadam: render (matn + tugmalar) va javobni qo'llash (tugma yoki yozilgan matn).
 // Tugma ma'lumoti: "w:<qadam>:<qiymat>" (Telegram 64 baytgacha ruxsat beradi).
 // Haydovchi bergan ma'lumotlar manbai: docs/haydovchi-suhbati.md (model, o'lcham, sig'im, yuklash eshiklari).
+// Xorijiy davlatlar va "xalqaro" savoli yo'nalish doirasiga qarab (draft.scope — .env dagi ROUTE_SCOPE):
+// qoshni — 5 ta chegaradosh davlat, ichki — davlat ham, xalqaro savoli ham yo'q, hammasi — umumiy "Xorij".
 import {
   BODY_LIMITS,
   BODY_TYPES,
   CAPACITY_OPTIONS,
-  INTL_OPTIONS,
+  DEFAULT_ROUTE_SCOPE,
   LOADING_SIDES,
   MODE_OPTIONS,
   REGIONS,
   SIDE_LABELS,
   TRUCK_CLASSES,
+  intlChoices,
+  intlLabel,
   regionLabel,
+  scopeCountries,
+  validRouteScope,
   vehiclePallets,
   vehicleVolumeM3,
 } from "@yuk/shared";
 
 export const STEPS = ["class", "body", "capacity", "size", "sides", "from", "to", "intl", "mode", "done"];
 
-export function newDraft(profile = null) {
+// "ichki" doirada xalqaro savoli yo'q
+const stepsFor = (scope) => (intlChoices(scope) ? STEPS : STEPS.filter((s) => s !== "intl"));
+
+// scope — yo'nalish doirasi (@yuk/shared ROUTE_SCOPES). Qoralama bilan saqlanadi: savol-javob o'rtasida o'zgarmaydi
+export function newDraft(profile = null, scope = DEFAULT_ROUTE_SCOPE) {
   if (profile) {
     return {
+      scope: validRouteScope(scope),
       step: "class",
       vehicle: { loadingSides: [], ...structuredClone(profile.vehicle ?? {}) },
       fromAreas: [...(profile.fromAreas ?? [])],
@@ -32,6 +43,7 @@ export function newDraft(profile = null) {
     };
   }
   return {
+    scope: validRouteScope(scope),
     step: "class",
     vehicle: { truckClass: null, bodyType: null, capacityKg: null, body: null, loadingSides: [] },
     fromAreas: [],
@@ -52,10 +64,19 @@ const rows = (buttons, perRow) => {
 const formatT = (t) => String(t).replace(".", ",");
 const nav = (step) => [button("⬅️ Orqaga", step, "back")];
 
+// Viloyatlar + doiradagi davlatlar. "hammasi" doirasida davlatlar ko'p — bitta umumiy "Xorij" tugmasi
+function areaOptions(scope) {
+  const regions = REGIONS.filter((r) => r.id !== "xorij").map((r) => ({ id: r.id, label: regionLabel(r.id) }));
+  const countries = scopeCountries(scope);
+  if (countries.length === 0) return regions;
+  if (validRouteScope(scope) === "hammasi") return [...regions, { id: "xorij", label: regionLabel("xorij") }];
+  return [...regions, ...countries.map((name) => ({ id: name, label: `🌍 ${name}` }))];
+}
+
 function regionStep(step, draft, title, emptyLabel) {
   const field = step === "from" ? "fromAreas" : "toAreas";
   const chosen = new Set(draft[field]);
-  const options = REGIONS.map((r) => button(`${chosen.has(r.id) ? "✅ " : ""}${regionLabel(r.id)}`, step, `t.${r.id}`));
+  const options = areaOptions(draft.scope).map((a) => button(`${chosen.has(a.id) ? "✅ " : ""}${a.label}`, step, `t.${a.id}`));
   return {
     text: `${title}\n\nBir nechtasini tanlash mumkin. Hech birini tanlamasangiz — ${emptyLabel.toLowerCase()}.`,
     keyboard: [
@@ -112,11 +133,13 @@ export function renderStep(draft) {
       return regionStep(step, draft, "📍 Qaysi viloyatlardan yuk olasiz?", "Hamma viloyat");
     case "to":
       return regionStep(step, draft, "🏁 Qayerga borasiz? (masalan, uyga qaytish yuki uchun)", "Istalgan joy");
-    case "intl":
+    case "intl": {
+      const choices = intlChoices(draft.scope);
       return {
-        text: "🌍 Xalqaro yuklar ham kerakmi?",
-        keyboard: [...rows(Object.entries(INTL_OPTIONS).map(([id, o]) => button(o.label, step, id)), 1), nav(step)],
+        text: `🌍 ${choices.question}`,
+        keyboard: [...rows(Object.entries(choices.options).map(([id, o]) => button(o.label, step, id)), 1), nav(step)],
       };
+    }
     case "mode":
       return {
         text: "👁 Qaysi yuklarni yuboraylik?",
@@ -124,7 +147,7 @@ export function renderStep(draft) {
       };
     case "done":
       return {
-        text: `Tekshiring:\n\n${describeProfile(profileFromDraft(draft))}`,
+        text: `Tekshiring:\n\n${describeProfile(profileFromDraft(draft), draft.scope)}`,
         keyboard: [[button("✅ Saqlash", step, "save")], [button("✏️ Qaytadan", step, "restart")], nav(step)],
       };
     default:
@@ -132,8 +155,14 @@ export function renderStep(draft) {
   }
 }
 
-const next = (step) => STEPS[STEPS.indexOf(step) + 1];
-const prev = (step) => STEPS[Math.max(0, STEPS.indexOf(step) - 1)];
+const next = (step, scope) => {
+  const steps = stepsFor(scope);
+  return steps[steps.indexOf(step) + 1];
+};
+const prev = (step, scope) => {
+  const steps = stepsFor(scope);
+  return steps[Math.max(0, steps.indexOf(step) - 1)];
+};
 
 function toggle(list, value) {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -144,7 +173,7 @@ export function applyAction(draft, step, value) {
   // Eski xabardagi tugma bosilsa — hech narsa o'zgarmaydi, joriy qadam qayta ko'rsatiladi
   if (step !== draft.step) return { draft };
   const d = structuredClone(draft);
-  if (value === "back") return { draft: { ...d, step: prev(step) } };
+  if (value === "back") return { draft: { ...d, step: prev(step, d.scope) } };
 
   switch (step) {
     case "class":
@@ -180,7 +209,9 @@ export function applyAction(draft, step, value) {
     case "to": {
       const field = step === "from" ? "fromAreas" : "toAreas";
       if (value.startsWith("t.")) {
-        d[field] = toggle(d[field], value.slice(2));
+        const id = value.slice(2);
+        if (!areaOptions(d.scope).some((a) => a.id === id)) return { draft };
+        d[field] = toggle(d[field], id);
         return { draft: d };
       }
       if (value === "all") {
@@ -191,7 +222,7 @@ export function applyAction(draft, step, value) {
       break;
     }
     case "intl": {
-      const option = INTL_OPTIONS[value];
+      const option = intlChoices(d.scope)?.options[value];
       if (!option) return { draft };
       d.domestic = option.domestic;
       d.international = option.international;
@@ -203,10 +234,10 @@ export function applyAction(draft, step, value) {
       break;
     case "done":
       if (value === "save") return { draft: d, saved: true };
-      if (value === "restart") return { draft: { ...newDraft(), step: "class" } };
+      if (value === "restart") return { draft: newDraft(null, d.scope) };
       return { draft };
   }
-  d.step = next(step);
+  d.step = next(step, d.scope);
   return { draft: d };
 }
 
@@ -236,22 +267,26 @@ export function applyText(draft, text) {
     const tonnes = parseCapacityT(text);
     if (tonnes == null) return { draft, error: "Sonni tushunmadim. Masalan: 7,5 yoki 24" };
     d.vehicle.capacityKg = Math.round(tonnes * 1000);
-    d.step = next("capacity");
+    d.step = next("capacity", d.scope);
     return { draft: d };
   }
   if (d.step === "size") {
     const body = parseBodySize(text);
     if (!body) return { draft, error: "Uchta sonni yozing: uzunligi eni balandligi. Masalan: 4.85 2.15 1.95" };
     d.vehicle.body = body;
-    d.step = next("size");
+    d.step = next("size", d.scope);
     return { draft: d };
   }
   return { draft, error: "Iltimos, tugmalardan birini bosing." };
 }
 
-// Qoralamadan @yuk/shared match.js tushunadigan haydovchi profili
+// Qoralamadan @yuk/shared match.js tushunadigan haydovchi profili.
+// Faqat O'zbekiston tanlansa, belgilangan xorijiy davlatlar tashlanadi (Mini App formasi ham shunday qiladi)
 export function profileFromDraft(draft) {
   const { vehicle } = draft;
+  const international = Boolean(intlChoices(draft.scope)) && draft.international;
+  const domesticOnly = (list) => list.filter((id) => id !== "xorij" && REGIONS.some((r) => r.id === id));
+  const areas = (list) => (international ? [...list] : domesticOnly(list));
   return {
     vehicle: {
       truckClass: vehicle.truckClass,
@@ -260,16 +295,16 @@ export function profileFromDraft(draft) {
       body: vehicle.body ?? null,
       loadingSides: [...vehicle.loadingSides],
     },
-    fromAreas: [...draft.fromAreas],
-    toAreas: [...draft.toAreas],
-    domestic: draft.domestic,
-    international: draft.international,
+    fromAreas: areas(draft.fromAreas),
+    toAreas: areas(draft.toAreas),
+    domestic: international ? draft.domestic : true,
+    international,
     mode: draft.mode,
   };
 }
 
-// Profilni haydovchiga ko'rsatish uchun matn
-export function describeProfile(profile) {
+// Profilni haydovchiga ko'rsatish uchun matn. scope — "qo'shni davlatlar" / "xalqaro" yozuvi uchun
+export function describeProfile(profile, scope = DEFAULT_ROUTE_SCOPE) {
   const v = profile.vehicle ?? {};
   const parts = [truckClass(v.truckClass)?.name ?? "—"];
   if (v.bodyType) parts.push(BODY_TYPES.find((b) => b.id === v.bodyType)?.name ?? v.bodyType);
@@ -280,13 +315,12 @@ export function describeProfile(profile) {
     : "";
   const sides = v.loadingSides?.length ? v.loadingSides.map((s) => SIDE_LABELS[s].toLowerCase()).join(", ") : "aytilmagan";
   const areas = (list, empty) => (list?.length ? list.map(regionLabel).join(", ") : empty);
-  const intl = Object.values(INTL_OPTIONS).find((o) => o.domestic === profile.domestic && o.international === profile.international);
   return [
     `🚚 Mashina: ${parts.join(", ")}${size}`,
     `↕️ Yuklash: ${sides}`,
     `📍 Qayerdan: ${areas(profile.fromAreas, "hamma viloyat")}`,
     `🏁 Qayerga: ${areas(profile.toAreas, "istalgan joy")}`,
-    `🌍 ${intl?.label ?? "Faqat O'zbekiston"}`,
+    `🌍 ${intlLabel(profile, scope)}`,
     `👁 ${MODE_OPTIONS[profile.mode] ?? MODE_OPTIONS.own}`,
   ].join("\n");
 }

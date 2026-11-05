@@ -1,6 +1,7 @@
 // .env dagi bot sozlamalari. Kalitlar ekranga chiqarilmaydi — faqat bor-yo'qligi va ko'rinishi tekshiriladi.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { routeScopeFrom } from "@yuk/shared";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -47,5 +48,8 @@ export function readConfig(env = process.env) {
   if (apk && !/\.apk$/i.test(apk)) throw new Error("APK_FILE .apk fayl bo'lishi kerak, masalan: data/apk/yuk-ekspert.apk");
   const apkFile = apk ? path.resolve(ROOT, apk) : null;
 
-  return { token, channel, admins, miniappUrl, androidUrl, iosUrl, apkFile };
+  // Qaysi yo'nalishlar (@yuk/shared scope.js): qoshni (standart) | ichki | hammasi
+  const routeScope = routeScopeFrom(env);
+
+  return { token, channel, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope };
 }

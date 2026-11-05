@@ -51,3 +51,11 @@ test("faqat O'zbekiston tanlansa, xorijiy davlatlar tashlanadi", () => {
   assert.equal(profile.international, false);
   assert.deepEqual(toggle(["a", "b"], "a"), ["b"]);
 });
+
+test("yo'nalish doirasi: qo'shni — Rossiya tashlanadi, Qozog'iston qoladi; ichki — xalqaro yo'q", () => {
+  const form = { ...formFromProfile(PROFILE), intl: "ham", fromAreas: ["toshkent", "Qozog'iston"], toAreas: ["Rossiya", "andijon"] };
+  const qoshni = profileFromForm(form, "qoshni").profile;
+  assert.deepEqual([qoshni.fromAreas, qoshni.toAreas, qoshni.international], [["toshkent", "Qozog'iston"], ["andijon"], true]);
+  const ichki = profileFromForm({ ...form, intl: "faqat" }, "ichki").profile;
+  assert.deepEqual([ichki.fromAreas, ichki.toAreas, ichki.domestic, ichki.international], [["toshkent"], ["andijon"], true, false]);
+});

@@ -29,7 +29,7 @@
    | `MINIAPP_URL` | `https://yuk-ekspert.pages.dev` | Mini App manzili ([qanday joylash](../web/README.md)). Bo'sh bo'lsa — chatda savol-javob |
    | `ANDROID_URL`, `IOS_URL` | `https://play.google.com/...` | Ixtiyoriy: «📱 Ilovalar» tugmasidagi havolalar |
    | `APK_FILE` | `data/apk/yuk-ekspert.apk` | Ixtiyoriy: Android o'rnatish fayli (50 MB gacha), bot o'zi yuboradi |
-   | `ROUTE_SCOPE` | `qoshni` | Qaysi yo'nalishlar: `qoshni` (standart) — O'zbekiston ichi va O'zbekiston ↔ Qozog'iston, Qirg'iziston, Tojikiston, Turkmaniston, Afg'oniston; `ichki` — faqat O'zbekiston ichi; `hammasi` — cheklovsiz |
+   | `ROUTE_SCOPE` | `qoshni` | Qaysi yo'nalishlar: `qoshni` (standart) — O'zbekiston ichi va O'zbekiston ↔ Qozog'iston, Qirg'iziston, Tojikiston, Turkmaniston, Afg'oniston; `ichki` — faqat O'zbekiston ichi; `hammasi` — cheklovsiz. Haydovchi sozlamalarida (savol-javob, Mini App) ham faqat shu doiradagi davlatlar chiqadi |
 
 3. Botni kanalga **admin** qiling. Telefonda shu havolani oching va kanalni tanlang:
    <https://t.me/Yuk_Ekspert_agent?startchannel&admin=post_messages>

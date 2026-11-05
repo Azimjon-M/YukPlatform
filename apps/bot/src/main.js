@@ -90,7 +90,7 @@ async function check(config) {
     await checkLinkedGroup(bot, config.channel, links);
   }
   checkApps(config);
-  console.log(`✅ Yo'nalishlar: ${ROUTE_SCOPES[routeScopeFrom()].title}.`);
+  console.log(`✅ Yo'nalishlar: ${ROUTE_SCOPES[config.routeScope].title}.`);
   const ai = createAiPool(store).list();
   if (ai.length) console.log(`✅ AI: ${ai.length} ta ulanish (${ai.map((s) => s.label).join(", ")})`);
   else console.log("⚠️  AI ulanishi yo'q: boshqaruv markazining «AI» bo'limida kalit qo'shing (yoki .env ga GEMINI_API_KEY).");
@@ -131,7 +131,7 @@ async function main() {
   const pool = createAiPool(store);
   const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log });
   await init();
-  const routeScope = routeScopeFrom();
+  const { routeScope } = config;
   const worker = createWorker({ pool, store, publish, deliver, routeScope }, { log });
 
   const stop = async () => {
