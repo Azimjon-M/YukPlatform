@@ -40,7 +40,7 @@ Bitta yuk 20 ta guruhga tashlanadi, shuning uchun takrorlar (telefon + yo'nalish
 |---|---|---|---|
 | 0 | Tadqiqot | 228 ta haqiqiy e'lon, AI parser, aniqlik 99% (32 ta qo'lda tekshirilgan e'londa) | ✅ |
 | 1 | MVP | collector → parser → baza → bot (pastki menyu, Mini App'da sozlamalar, shaxsiy xabar + qo'ng'iroq) + kanal @Yuk_Ekspert. 10–20 ta haydovchida sinov | ⏳ kod tayyor, sinov |
-| 2 | Mini App + boshqaruv markazi | ✅ sozlamalar formasi. ✅ Boshqaruv markazi (web): ko'rsatkichlar, yuklar, navbat, haydovchilar, manbalar, bot/collector'ni yoqish va loglar. Keyin: AI kalitlari web'dan + bir nechta AI parallel, yuklar ro'yxati Mini App'da, xarita | ⏳ |
+| 2 | Mini App + boshqaruv markazi | ✅ sozlamalar formasi. ✅ Boshqaruv markazi (web): ko'rsatkichlar, yuklar, navbat, haydovchilar, manbalar, bot/collector'ni yoqish va loglar. ✅ AI kalitlari web'dan (shifrlangan) + bir nechta AI parallel. Keyin: haydovchilar uchun ochiq web, xarita | ⏳ |
 | 3 | Daromad | Guruh adminlari bilan hamkorlik, obuna (bepulda kechikish, pullida darhol) | — |
 | 4 | Kengayish | Web sayt, mobil ilova, pochta / yo'lovchi taksi | — |
 

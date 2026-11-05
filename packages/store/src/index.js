@@ -7,8 +7,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { createAdminQueries } from "./admin.js";
+import { createAiQueries } from "./ai.js";
 
 export { acquireRunLock, isAlive, readRunLock, RUN_DIR } from "./lock.js";
+export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // YUK_DB — boshqa fayl bilan sinash uchun (masalan, YUK_DB=data/sinov.db); yo'l YukPlatform papkasiga nisbatan
@@ -73,6 +75,28 @@ CREATE TABLE IF NOT EXISTS sources (
 
 CREATE INDEX IF NOT EXISTS posts_created ON posts (created_at);
 CREATE INDEX IF NOT EXISTS loads_created ON loads (created_at);
+
+CREATE TABLE IF NOT EXISTS ai_keys (
+  id INTEGER PRIMARY KEY,
+  provider TEXT NOT NULL,            -- gemini | claude
+  label TEXT,
+  key_enc TEXT,                      -- shifrlangan kalit (secrets.js); NULL — .env dagi kalit ishlatiladi
+  key_hint TEXT,                     -- "…a1B2": ekranda qaysi kalit ekanini tanish uchun
+  models TEXT NOT NULL,              -- JSON: ["gemini-3.5-flash-lite", ...] — har biri alohida "ulanish"
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_slots (
+  id TEXT PRIMARY KEY,               -- "<ai_keys.id>:<model>"
+  data TEXT NOT NULL,                -- bot yozadi (JSON): bugungi so'rovlar, dam olish vaqti, oxirgi xato
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 `;
 
 // Eski bazaga yangi ustunlar (CREATE TABLE IF NOT EXISTS mavjud jadvalni o'zgartirmaydi)
@@ -117,6 +141,13 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     recentSameText: db.prepare("SELECT id FROM posts WHERE text_key = ? AND posted_at > ? LIMIT 1"),
     newPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY id LIMIT ?"),
     newestPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY posted_at DESC, id DESC LIMIT ?"),
+    newPostsExcept: db.prepare(
+      "SELECT * FROM posts WHERE status = 'new' AND id NOT IN (SELECT value FROM json_each(?)) ORDER BY id LIMIT ?",
+    ),
+    newestPostsExcept: db.prepare(
+      `SELECT * FROM posts WHERE status = 'new' AND id NOT IN (SELECT value FROM json_each(?))
+       ORDER BY posted_at DESC, id DESC LIMIT ?`,
+    ),
     finishPost: db.prepare("UPDATE posts SET status = ?, error = ?, done_at = ? WHERE id = ?"),
     recentLoad: db.prepare("SELECT id FROM loads WHERE key = ? AND created_at > ? LIMIT 1"),
     insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, created_at) VALUES (?, ?, ?, ?)"),
@@ -145,6 +176,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     db,
     // Boshqaruv markazi uchun: listLoads, listPosts, listDrivers, sources, metrics (admin.js)
     ...createAdminQueries(db, now),
+    // AI kalitlari va ulanishlar holati (ai.js)
+    ...createAiQueries(db, now),
 
     // --- E'lonlar navbati ---
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.
@@ -160,8 +193,12 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
     // newest: true — eng yangi joylangan e'lonlar birinchi (bot shunday oladi: navbat to'lib qolsa ham yangi yuk
     // darhol chiqadi, bir soatlik yukni esa odatda allaqachon olib bo'lishgan). Standart — navbat tartibida.
-    takeNewPosts(limit = 10, { newest = false } = {}) {
-      return (newest ? q.newestPosts : q.newPosts).all(limit).map((row) => ({
+    // exclude — shu id'lar olinmaydi (bir nechta AI parallel ishlaganda boshqasi allaqachon olgan e'lonlar).
+    takeNewPosts(limit = 10, { newest = false, exclude = [] } = {}) {
+      const rows = exclude.length
+        ? (newest ? q.newestPostsExcept : q.newPostsExcept).all(JSON.stringify(exclude), limit)
+        : (newest ? q.newestPosts : q.newPosts).all(limit);
+      return rows.map((row) => ({
         id: row.id,
         source: row.source,
         messageId: row.message_id,

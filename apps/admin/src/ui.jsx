@@ -52,14 +52,15 @@ export function Button({ variant = "secondary", busy = false, disabled, children
   );
 }
 
-export function Toggle({ checked, onChange, label, disabled, busy, hideLabel = false }) {
+// ariaLabel — o'zgarmas nom (ko'rinadigan label holat bilan o'zgarsa: "Yoqilgan" / "O'chirilgan")
+export function Toggle({ checked, onChange, label, disabled, busy, hideLabel = false, ariaLabel }) {
   return (
     <label className={`toggle ${disabled || busy ? "is-disabled" : ""}`}>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
-        aria-label={hideLabel ? label : undefined}
+        aria-label={ariaLabel ?? (hideLabel ? label : undefined)}
         disabled={disabled || busy}
         className="switch"
         onClick={() => onChange(!checked)}

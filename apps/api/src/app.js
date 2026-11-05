@@ -4,6 +4,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
+import { createAiTools } from "./ai.js";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
@@ -39,7 +40,23 @@ const bool = (value, field) => {
   return value;
 };
 
-export function createApp({ store, processes, env = process.env, adminDist = null }) {
+// AI kaliti: bo'sh joysiz, 10–300 belgi (Gemini "AIza…" ~39, Anthropic "sk-ant-…" ~100)
+function validKey(value) {
+  const key = typeof value === "string" ? value.trim() : "";
+  if (key.length < 10 || key.length > 300 || /\s/.test(key)) throw httpError(400, "Kalit noto'g'ri ko'rinishda: uni to'liq nusxalab qo'ying");
+  return key;
+}
+
+function validModels(value) {
+  const ok = Array.isArray(value) && value.length > 0 && value.length <= 20 && value.every((m) => typeof m === "string" && /^[\w.\-/:]{2,80}$/.test(m));
+  if (!ok) throw httpError(400, "Kamida bitta model tanlang");
+  return [...new Set(value)];
+}
+
+const validLabel = (value) => (value == null || String(value).trim() === "" ? null : String(value).trim().slice(0, 60));
+
+// ai — @yuk/parser bilan ishlaydigan yordamchilar (ai.js); secret — kalitlarni shifrlash kaliti (data/secret.key)
+export function createApp({ store, processes, env = process.env, adminDist = null, ai = createAiTools(), secret = null }) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "100kb" }));
@@ -106,6 +123,79 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
   api.delete("/sources/:name", (req, res) => {
     if (!store.removeSource(req.params.name)) throw httpError(404, "Manba topilmadi");
     res.json({ ok: true });
+  });
+
+  // --- AI kalitlari (bot har 15 s da qayta o'qiydi — qayta ishga tushirish shart emas) ---
+  // Kalitning o'zi hech qachon javobga qo'shilmaydi: faqat "…a1B2"
+  const access = () => ({ secret, env });
+  const validProvider = (id) => {
+    if (!ai.has(id)) throw httpError(400, "Noma'lum AI provayderi");
+    return id;
+  };
+  async function modelsOr400(provider, key) {
+    try {
+      return await ai.listModels(provider, key);
+    } catch (error) {
+      throw httpError(400, ai.describe(provider, error));
+    }
+  }
+  function storedKey(id) {
+    const key = store.getAiKey(Number(id), access());
+    if (!key) throw httpError(404, "Kalit topilmadi");
+    if (!key.apiKey) throw httpError(400, key.problem);
+    return key;
+  }
+
+  api.get("/ai", (req, res) => {
+    res.json({ keys: store.listAiKeys(access()), providers: ai.providers, parallel: Number(env.PARSER_PARALLEL) || 8 });
+  });
+
+  // Kalitni tekshirish va modellar ro'yxati (bepul limitdan so'rov sarflamaydi)
+  api.post("/ai/models", async (req, res) => {
+    res.json({ models: await modelsOr400(validProvider(req.body?.provider), validKey(req.body?.key)) });
+  });
+
+  api.post("/ai/keys", async (req, res) => {
+    const provider = validProvider(req.body?.provider);
+    const key = validKey(req.body?.key);
+    const models = validModels(req.body?.models);
+    if (store.findAiKey(provider, key, access())) throw httpError(409, "Bu kalit allaqachon qo'shilgan — yangi modelni o'sha kalitning o'ziga qo'shing");
+    await modelsOr400(provider, key); // kalit haqiqatan ishlayaptimi
+    const id = store.addAiKey({ provider, label: validLabel(req.body?.label), apiKey: key, models }, secret);
+    res.status(201).json({ id });
+  });
+
+  api.patch("/ai/keys/:id", (req, res) => {
+    const body = req.body ?? {};
+    const fields = {};
+    if ("label" in body) fields.label = validLabel(body.label);
+    if ("enabled" in body) fields.enabled = bool(body.enabled, "enabled");
+    if ("models" in body) fields.models = validModels(body.models);
+    if (!store.updateAiKey(Number(req.params.id), fields)) throw httpError(404, "Kalit topilmadi");
+    res.json({ ok: true });
+  });
+
+  api.delete("/ai/keys/:id", (req, res) => {
+    if (!store.removeAiKey(Number(req.params.id))) throw httpError(404, "Kalit topilmadi");
+    res.json({ ok: true });
+  });
+
+  // Saqlangan kalit bilan modellar ro'yxati — yana model qo'shish uchun
+  api.get("/ai/keys/:id/models", async (req, res) => {
+    const key = storedKey(req.params.id);
+    res.json({ models: await modelsOr400(key.provider, key.apiKey) });
+  });
+
+  // Bitta haqiqiy so'rov bilan sinov (bepul limitdan 1 ta so'rov sarflanadi)
+  api.post("/ai/keys/:id/test", async (req, res) => {
+    const key = storedKey(req.params.id);
+    const model = String(req.body?.model ?? "");
+    if (!key.models.some((m) => m.model === model)) throw httpError(400, "Bu model shu kalitga qo'shilmagan");
+    try {
+      res.json(await ai.test(key.provider, model, key.apiKey));
+    } catch (error) {
+      res.json({ ok: false, model, error: ai.describe(key.provider, error), loads: [] });
+    }
   });
 
   // --- Jarayonlar: bot va collector ---

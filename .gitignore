@@ -20,3 +20,6 @@ data/*.db-*
 
 # Ishlayotgan dasturlar (bot, collector) — PID fayllari
 data/run/
+
+# AI kalitlarini shifrlash kaliti (boshqaruv markazi yaratadi). Yo'qolsa — bazadagi kalitlarni qayta qo'shish kerak
+data/secret.key

@@ -36,13 +36,16 @@ export const gemini = {
   keyHint: "aistudio.google.com → Get API key (bepul), keyin .env ga GEMINI_API_KEY=... deb yozing.",
   costNote: "bepul tarifda $0",
 
-  createClient() {
+  // apiKey — boshqaruv markazida qo'shilgan kalit; berilmasa .env dagi GEMINI_API_KEY.
+  // attempts — 429 (limit) va 5xx (band) xatolarda necha marta urinadi (3s, 6s, 12s kutib).
+  // Bot bir nechta kalit bilan ishlaganda kam urinadi: limitga tushgan kalitni kutgandan ko'ra boshqasiga o'tgan tezroq.
+  createClient({ apiKey, attempts = 4 } = {}) {
     return new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      // 429 (limit) va 5xx (band) xatolarda kutib qayta urinadi: 3s, 6s, 12s (jami 4 urinish)
-      httpOptions: { retryOptions: { attempts: 4, initialDelay: 3, maxDelay: 30 } },
+      apiKey: apiKey ?? process.env.GEMINI_API_KEY,
+      httpOptions: { retryOptions: { attempts, initialDelay: 3, maxDelay: 30 } },
     });
   },
+  keyUrl: "https://aistudio.google.com/apikey",
 
   // system/schema — bir nechta e'lonni bitta so'rovda yuborishda (batch) boshqa ko'rsatma va sxema beriladi
   async generate(client, { text, model, system = SYSTEM_PROMPT, schema = POST_SCHEMA }) {
@@ -82,6 +85,11 @@ export const gemini = {
     return Math.ceil((delaySec ?? 60) + 1) * 1000;
   },
 
+  // Kunlik limit tugadimi (Google uni Tinch okeani vaqti bilan yarim tunda, Toshkentda 13:00 da yangilaydi)
+  isDailyLimit(error) {
+    return error instanceof ApiError && error.status === 429 && quotaInfo(error).perDay;
+  },
+
   // true — davom etishdan foyda yo'q, ish to'xtatiladi.
   // 429 bu yerga daqiqalik kutishlar ham yordam bermaganda yoki kunlik limit tugaganda keladi,
   // 503 — model hozir band. Ikkalasida ham har bir e'lonni kutib o'tirmaymiz.
@@ -94,13 +102,13 @@ export const gemini = {
   describeError(error) {
     if (!(error instanceof ApiError)) return error.message;
     if (error.status === 429 && quotaInfo(error).perDay) {
-      return "Gemini'ning bugungi bepul limiti tugadi (429). Ertaga --skip bilan davom eting.";
+      return "Gemini'ning bugungi bepul limiti tugadi (429), Toshkent vaqti bilan 13:00 da yangilanadi.";
     }
-    if (error.status === 429) return "Gemini bepul limiti tugadi (429). Bir necha marta kutildi, lekin tiklanmadi. Keyinroq --skip bilan davom eting.";
-    if (error.status === 503) return "Model hozir band (503). Keyinroq urinib ko'ring yoki .env da boshqa PARSER_MODEL tanlang (--models).";
+    if (error.status === 429) return "Gemini bepul limiti tugadi (429): daqiqasiga so'rovlar ko'p.";
+    if (error.status === 503) return "Model hozir band (503). Keyinroq urinib ko'ring yoki boshqa model tanlang.";
     if (error.status === 404) return "Model topilmadi yoki yopilgan (404). Mavjud modellar: npm run parse -- --models";
-    if (error.status === 403) return "Ruxsat yo'q (403): GEMINI_API_KEY ni tekshiring.";
-    if (error.status === 400 && /api key/i.test(error.message)) return "GEMINI_API_KEY noto'g'ri (400).";
+    if (error.status === 403) return "Ruxsat yo'q (403): kalitni tekshiring.";
+    if (error.status === 400 && /api key/i.test(error.message)) return "Kalit noto'g'ri (400).";
     if (error.status === 400 && /location/i.test(error.message)) return "Gemini API bu mamlakatda ishlamayapti (400).";
     return `Gemini xatosi ${error.status}: ${error.message}`;
   },

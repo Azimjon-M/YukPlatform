@@ -27,6 +27,7 @@ Bot va collector bilan bitta baza (`data/yuk.db`) ishlatiladi.
 |---|---|---|
 | `API_PORT` | `3000` | port |
 | `AUTOSTART` | `bot,collector` | `npm start` da nimalar o'zi yoqiladi; `AUTOSTART=none` — hech biri |
+| `PARSER_PARALLEL` | `8` | bot bir vaqtda nechta AI so'rovi yuboradi |
 
 ## Bitta nusxa
 
@@ -58,9 +59,20 @@ Kalit va tokenlar javoblarda hech qachon bo'lmaydi — faqat «yozilganmi» (`tr
 | `GET /api/processes` | bot va collector holati: `stopped`, `running`, `stopping`, `crashed`, `external` |
 | `POST /api/processes/:name/start\|stop\|restart` | yoqish / o'chirish / qayta ishga tushirish |
 | `GET /api/processes/:name/logs?after=<seq>` | oxirgi 1000 qator log; `after` — faqat yangilari |
+| `GET /api/ai` | AI kalitlari (faqat `…a1B2` ko'rinishida), modellari va bugungi holati, provayderlar |
+| `POST /api/ai/models {provider, key}` | kalitni tekshirish + modellar ro'yxati (bepul limitdan so'rov sarflamaydi) |
+| `POST /api/ai/keys {provider, key, label?, models}` | kalit qo'shish (avval tekshiriladi; takror kalit — 409) |
+| `PATCH /api/ai/keys/:id {label?, enabled?, models?}` · `DELETE /api/ai/keys/:id` | o'zgartirish, o'chirish |
+| `GET /api/ai/keys/:id/models` | saqlangan kalit bilan modellar ro'yxati (model qo'shish uchun) |
+| `POST /api/ai/keys/:id/test {model}` | sinov e'loni bilan bitta haqiqiy so'rov (limitdan 1 ta) → `{ ok, ms, loads, error }` |
 
 Manbalar birinchi marta `.env` dagi `TG_SOURCES` dan olinadi, keyin bazada saqlanadi va web'dan boshqariladi.
 O'zgarish collector'ning keyingi aylanishida (1–2 daqiqa) kuchga kiradi.
+
+AI kalitlari bazada **shifrlangan** (AES-256-GCM) saqlanadi. Shifr kaliti `data/secret.key` — birinchi marta o'zi
+yaratiladi, git'ga kirmaydi. Uni hech kimga bermang; o'chib ketsa, saqlangan AI kalitlarini qaytadan qo'shasiz.
+`.env` dagi `GEMINI_API_KEY` ro'yxatga bir marta «.env kaliti» bo'lib qo'shiladi (kalitning o'zi bazaga yozilmaydi).
+Bot ro'yxatni har 15 s da qayta o'qiydi — kalit qo'shgandan keyin botni qayta ishga tushirish shart emas.
 
 ## Fayllar
 
@@ -69,10 +81,10 @@ O'zgarish collector'ning keyingi aylanishida (1–2 daqiqa) kuchga kiradi.
 | `src/server.js` | ishga tushirish, port, avtomatik yoqish, `Ctrl+C` |
 | `src/app.js` | Express yo'llari, himoya, web fayllar |
 | `src/processes.js` | bot va collector jarayonlari: yoqish, to'xtatish, loglar, qayta ishga tushirish |
+| `src/ai.js` | «AI» bo'limi uchun: kalit bilan modellar ro'yxati, sinov so'rovi |
 
 ## Keyingi bosqichlar
 
-- **AI kalitlari** web'dan (bazada shifrlangan, ekranda yashirin) va bir nechta AI'ni parallel ishlatish — navbat tezroq yuradi.
 - **Haydovchilar uchun ochiq web**: Telegram orqali kirish, yuklar lentasi.
 - **Xarita** (Leaflet + OpenStreetMap, bepul): yuklar va yo'nalishlar xaritada.
 - Serverga ko'chganda: PostgreSQL, parol bilan kirish, HTTPS.

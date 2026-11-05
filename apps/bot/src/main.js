@@ -3,8 +3,8 @@
 //   npm run bot:check    — faqat tekshirish: token ishlayaptimi, bot kanalda adminmi
 //   npm run bot -- --dry-run — navbatdagi e'lonlarni tahlil qilib, Telegram'ga yubormasdan ekranga chiqarish
 import { existsSync, statSync } from "node:fs";
-import { createParser } from "@yuk/parser";
-import { acquireRunLock, openStore } from "@yuk/store";
+import { createParser, createParserPool, resolveSettings } from "@yuk/parser";
+import { acquireRunLock, loadSecret, openStore } from "@yuk/store";
 import { createBot } from "./bot.js";
 import { readConfig } from "./config.js";
 import { formatLoad } from "./format.js";
@@ -36,6 +36,18 @@ async function checkLinkedGroup(bot, channel, links) {
   } else {
     console.log(`ℹ️  Muhokama guruhi ${name}: bot qo'shilmagan (ixtiyoriy). Qo'shish: ${links.group}`);
   }
+}
+
+// AI ulanishlari: boshqaruv markazining «AI» bo'limida qo'shilgan kalitlar (bazada shifrlangan) va .env dagi kalit
+// (birinchi marta ro'yxatga o'zi qo'shiladi). Ro'yxat har 15 s da qayta o'qiladi — botni qayta ishga tushirish shart emas.
+function createAiPool(store) {
+  const { provider, model } = resolveSettings();
+  store.seedAiKeys([{ provider: provider.id, models: [model] }], process.env);
+  const access = { secret: loadSecret(), env: process.env };
+  return createParserPool({
+    connections: () => store.aiConnections(access),
+    onState: (state) => store.saveAiSlot(state),
+  });
 }
 
 // Mini App va "📱 Ilovalar" tugmasi sozlamalari
@@ -77,6 +89,9 @@ async function check(config) {
     await checkLinkedGroup(bot, config.channel, links);
   }
   checkApps(config);
+  const ai = createAiPool(store).list();
+  if (ai.length) console.log(`✅ AI: ${ai.length} ta ulanish (${ai.map((s) => s.label).join(", ")})`);
+  else console.log("⚠️  AI ulanishi yo'q: boshqaruv markazining «AI» bo'limida kalit qo'shing (yoki .env ga GEMINI_API_KEY).");
   const s = store.stats();
   console.log(`Baza: ${s.drivers.total} haydovchi, navbatda ${s.posts.new ?? 0} ta e'lon.`);
   store.close();
@@ -111,10 +126,10 @@ async function main() {
   // Ikkinchi bot nusxasi Telegram'dan "409 Conflict" oladi — oldindan to'xtatamiz
   acquireRunLock("bot");
   const store = openStore();
-  const parser = createParser();
+  const pool = createAiPool(store);
   const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log });
   await init();
-  const worker = createWorker({ parser, store, publish, deliver }, { log });
+  const worker = createWorker({ pool, store, publish, deliver }, { log });
 
   const stop = async () => {
     log("To'xtatilyapti...");

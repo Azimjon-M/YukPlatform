@@ -1,8 +1,10 @@
 // Bosh sahifa: navbat, oxirgi soat, kechikish, haydovchilar, xatolar, 24 soatlik grafik, jarayonlar, sozlamalar.
 // Ma'lumot: GET /api/overview (App har 10 s da yangilaydi).
 import { useState } from "react";
-import { post } from "../api.js";
+import { aiTotals } from "../aiStatus.js";
+import { get, post } from "../api.js";
 import { durationMin, formatNumber, formatTime } from "../format.js";
+import { useApi } from "../hooks.js";
 import { HourlyChart } from "../HourlyChart.jsx";
 import { configChecklist, throughput } from "../metrics.js";
 import { Link } from "../navigation.jsx";
@@ -68,15 +70,19 @@ function Throughput({ metrics }) {
   );
 }
 
-function ConfigList({ config }) {
+// AI ulanishlari soni GET /api/ai dan (kalitlar endi AI sahifasida); ololmasa — .env dagi belgilar
+function ConfigList({ config, processes }) {
+  const ai = useApi(() => get("/api/ai"), [], { interval: 30_000 });
+  const botRunning = processes.some((p) => p.name === "bot" && (p.status === "running" || p.status === "external"));
+  const totals = ai.data ? aiTotals(ai.data.keys, { botRunning }) : null;
   return (
     <ul className="checklist">
-      {configChecklist(config).map((row) => (
+      {configChecklist(config, totals).map((row) => (
         <li key={row.id}>
           <Badge tone={row.ok === true ? "good" : row.ok === false ? "critical" : "neutral"} icon={row.ok === true ? "✓" : row.ok === false ? "✗" : "–"}>
             {row.ok === true ? "Bor" : row.ok === false ? "Yo'q" : "Ixtiyoriy"}
           </Badge>
-          <span className="check-label">{row.label}</span>
+          <span className="check-label">{row.href ? <Link to={row.href}>{row.label}</Link> : row.label}</span>
           <span className="check-value">{row.value}</span>
         </li>
       ))}
@@ -164,8 +170,8 @@ export function OverviewPage() {
                 </div>
               </Card>
               <Card title="Sozlamalar (.env)">
-                <ConfigList config={config} />
-                <p className="muted small">Kalitlar bu yerda ko'rsatilmaydi — faqat yozilgan yoki yo'qligi. O'zgartirish: .env fayli, keyin jarayonni qayta ishga tushiring.</p>
+                <ConfigList config={config} processes={processes} />
+                <p className="muted small">Kalitlar bu yerda ko'rsatilmaydi — faqat yozilgan yoki yo'qligi. AI kalitlari — AI sahifasida; qolganlari .env faylida (o'zgartirgach jarayonni qayta ishga tushiring).</p>
               </Card>
             </div>
           </div>

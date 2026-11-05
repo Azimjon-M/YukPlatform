@@ -9,6 +9,7 @@
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
   },
   "dependencies": {
+    "@yuk/parser": "*",
     "@yuk/shared": "*",
     "@yuk/store": "*",
     "express": "^5.3.0"

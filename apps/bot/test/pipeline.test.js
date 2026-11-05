@@ -284,3 +284,116 @@ test("worker: guruh to'lmagan va e'lonlar yangi bo'lsa yig'ilishini kutadi (limi
   full.add(2);
   assert.equal(await createWorker(full.deps, { batch: 2, log: () => {} }).runOnce({ fillWaitMs: 60_000 }), 2);
 });
+
+// --- Bir nechta AI ulanishi parallel (start) ---
+
+// Har bir e'lonning o'z yo'nalishi bo'lsin (takror deb tashlanmasin): e'lon matnidagi raqam → shahar
+const loadFor = (text) => ({ ...LOAD, toCity: `Shahar ${text.match(/e'lon (\d+)/)[1]}` });
+
+// Soxta pool: har bir ulanish o'z parseBatch'i bilan; limit — shu ulanish dam oladi
+function fakePool(slots, { batchSize = 2 } = {}) {
+  const state = Object.fromEntries(slots.map((s) => [s.id, { busy: false, restUntil: 0, calls: [] }]));
+  const pool = {
+    batchSize,
+    batchWaitMs: 0,
+    size: () => slots.length,
+    nextReadyIn: () => {
+      const free = slots.filter((s) => !state[s.id].busy);
+      return free.length ? Math.max(0, Math.min(...free.map((s) => state[s.id].restUntil - Date.now()))) : null;
+    },
+    acquire() {
+      const slot = slots.find((s) => !state[s.id].busy && state[s.id].restUntil <= Date.now());
+      if (!slot) return null;
+      state[slot.id].busy = true;
+      return {
+        id: slot.id,
+        label: slot.id,
+        describe: (e) => e.message,
+        parser: {
+          async parseBatch(texts) {
+            state[slot.id].calls.push(texts.length);
+            await new Promise((resolve) => setTimeout(resolve, slot.delay ?? 5));
+            if (slot.limitOnce && state[slot.id].calls.length === 1) throw Object.assign(new Error("429 limit"), { limit: true });
+            return texts.map((t) => yuk(loadFor(t)));
+          },
+          async parse(text) {
+            return yuk(loadFor(text));
+          },
+        },
+        fail(error) {
+          if (!error.limit) return null;
+          state[slot.id].restUntil = Date.now() + 60_000;
+          return { ms: 60_000, reason: "minute" };
+        },
+        release() {
+          state[slot.id].busy = false;
+        },
+      };
+    },
+  };
+  return { pool, state };
+}
+
+async function runUntil(worker, done, ms = 3000) {
+  const run = worker.start();
+  const end = Date.now() + ms;
+  while (!done() && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 10));
+  worker.stop();
+  await run;
+}
+
+test("parallel: ikki AI ulanishi navbatni bo'lishib oladi, hech bir e'lon ikki marta tahlil qilinmaydi", async () => {
+  const { store, deps, published, add } = setup([]);
+  const { pool, state } = fakePool([{ id: "a", delay: 30 }, { id: "b", delay: 30 }]);
+  deps.pool = pool;
+  for (let i = 1; i <= 8; i++) add(i);
+  const logs = [];
+  const worker = createWorker(deps, { log: (m) => logs.push(m), idleMs: 10 });
+  await runUntil(worker, () => store.stats().posts.done === 8);
+  assert.equal(store.stats().posts.done, 8);
+  assert.equal(published.length, 8, "har bir yuk bir marta");
+  assert.ok(state.a.calls.length > 0 && state.b.calls.length > 0, "ikkala ulanish ham ishladi");
+  assert.equal(state.a.calls.reduce((s, n) => s + n, 0) + state.b.calls.reduce((s, n) => s + n, 0), 8);
+  assert.match(logs[0], /2 ta ulanish/);
+});
+
+test("parallel: bitta ulanish limitga tushsa, o'sha e'lonlarni ikkinchisi oladi", async () => {
+  const { store, deps, published, add } = setup([]);
+  const { pool, state } = fakePool([{ id: "a", limitOnce: true }, { id: "b", delay: 20 }]);
+  deps.pool = pool;
+  for (let i = 1; i <= 6; i++) add(i);
+  const logs = [];
+  await runUntil(createWorker(deps, { log: (m) => logs.push(m), idleMs: 10 }), () => store.stats().posts.done === 6);
+  assert.equal(store.stats().posts.done, 6);
+  assert.equal(published.length, 6);
+  assert.equal(state.a.calls.length, 1, "a dam olyapti — boshqa so'ralmadi");
+  assert.ok(logs.some((m) => /\[a\].*dam oladi, qolganlari ishlayveradi/.test(m)));
+});
+
+test("parallel: yuborish ketma-ket — kanalga bir vaqtda faqat bitta xabar", async () => {
+  const { store, deps, add } = setup([]);
+  const { pool } = fakePool([{ id: "a", delay: 1 }, { id: "b", delay: 1 }, { id: "c", delay: 1 }]);
+  deps.pool = pool;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  deps.publish = async () => {
+    maxInFlight = Math.max(maxInFlight, ++inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    inFlight--;
+    return 1;
+  };
+  for (let i = 1; i <= 9; i++) add(i);
+  await runUntil(createWorker(deps, { log: () => {}, idleMs: 10 }), () => store.stats().posts.done === 9);
+  assert.equal(store.stats().posts.done, 9);
+  assert.equal(maxInFlight, 1);
+});
+
+test("parallel: ulanish yo'q bo'lsa bir marta ogohlantiradi va kutadi", async () => {
+  const { deps, add } = setup([]);
+  deps.pool = { batchSize: 2, batchWaitMs: 0, size: () => 0, nextReadyIn: () => null, acquire: () => null };
+  add(1);
+  const logs = [];
+  const worker = createWorker(deps, { log: (m) => logs.push(m), idleMs: 5 });
+  await runUntil(worker, () => false, 60);
+  assert.equal(logs.filter((m) => /kalit qo'shing/.test(m)).length, 1);
+});

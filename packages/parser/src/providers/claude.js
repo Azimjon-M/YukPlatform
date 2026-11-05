@@ -29,9 +29,18 @@ export const claude = {
   keyEnv: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
   keyHint: "console.anthropic.com → API Keys, keyin .env ga ANTHROPIC_API_KEY=... deb yozing.",
 
-  createClient() {
-    // Kalit .env dagi ANTHROPIC_API_KEY dan olinadi. 429 va 5xx xatolarda SDK o'zi qayta urinadi.
-    return new Anthropic({ maxRetries: 4 });
+  // apiKey — boshqaruv markazida qo'shilgan kalit; berilmasa .env dagi ANTHROPIC_API_KEY.
+  // attempts — 429 va 5xx xatolarda jami urinishlar soni (SDK o'zi kutib qayta urinadi).
+  createClient({ apiKey, attempts = 5 } = {}) {
+    return new Anthropic({ ...(apiKey ? { apiKey } : {}), maxRetries: Math.max(attempts - 1, 0) });
+  },
+  keyUrl: "https://console.anthropic.com/settings/keys",
+
+  // 429: Anthropic qancha kutishni retry-after sarlavhasida aytadi
+  retryAfterMs(error) {
+    if (!(error instanceof Anthropic.RateLimitError)) return null;
+    const seconds = Number(error.headers?.get?.("retry-after") ?? error.headers?.["retry-after"]);
+    return (Number.isFinite(seconds) && seconds > 0 ? seconds : 60) * 1000;
   },
 
   // system/schema — bir nechta e'lonni bitta so'rovda yuborishda (batch) boshqa ko'rsatma va sxema beriladi
@@ -85,10 +94,10 @@ export const claude = {
 
   describeError(error) {
     // Aniqroq xatodan umumiyroq xatoga qarab tekshiramiz
-    if (error instanceof Anthropic.AuthenticationError) return "ANTHROPIC_API_KEY noto'g'ri (401).";
+    if (error instanceof Anthropic.AuthenticationError) return "Kalit noto'g'ri (401).";
     if (error instanceof Anthropic.PermissionDeniedError) return "Ruxsat yo'q (403): hisob yoki kalitni tekshiring.";
     if (error instanceof Anthropic.NotFoundError) return "Model topilmadi (404). Mavjud modellar: npm run parse -- --models";
-    if (error instanceof Anthropic.RateLimitError) return "Juda ko'p so'rov (429): --concurrency ni kamaytiring.";
+    if (error instanceof Anthropic.RateLimitError) return "Juda ko'p so'rov (429).";
     if (error instanceof Anthropic.BadRequestError) return `So'rov xato (400): ${error.message}`;
     if (error instanceof Anthropic.APIError) return `API xatosi ${error.status ?? ""}: ${error.message}`;
     return error.message;

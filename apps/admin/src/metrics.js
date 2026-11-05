@@ -1,4 +1,5 @@
 // Bosh sahifa hisoblari: tahlil oqimga yetib boryaptimi, sozlamalar ro'yxati.
+import { aiSummaryText } from "./aiStatus.js";
 import { formatNumber } from "./format.js";
 
 // lastHour: { posts, processed } — oxirgi soatda kelgan (takrorsiz) va tahlil qilingan e'lonlar.
@@ -43,19 +44,25 @@ export function throughput(lastHour = {}, queue = {}) {
 }
 
 // .env holati — API faqat true/false va maxfiy bo'lmagan qiymatlarni yuboradi
-// → [{ id, label, ok, value }] ; ok: true | false | null (null — majburiy emas, ma'lumot uchun)
-export function configChecklist(config) {
+// → [{ id, label, ok, value, href? }] ; ok: true | false | null (null — majburiy emas, ma'lumot uchun)
+// aiTotals (aiStatus.js) berilsa — .env dagi AI kalitlari o'rniga bitta "AI ulanishlari" qatori (kalitlar endi AI sahifasida)
+export function configChecklist(config, aiTotals = null) {
   if (!config) return [];
   const parser = config.parser ?? {};
   const provider = parser.provider ?? "gemini";
   const keyOk = provider === "claude" ? parser.keys?.claude : parser.keys?.gemini;
+  const aiRows = aiTotals
+    ? [{ id: "ai", label: "AI ulanishlari", ok: aiTotals.active > 0, value: aiSummaryText(aiTotals), href: "/ai" }]
+    : [
+        { id: "ai", label: "AI provayder", ok: Boolean(keyOk), value: `${provider}${parser.model ? ` · ${parser.model}` : " · standart model"}` },
+        { id: "gemini", label: "Gemini kaliti", ok: provider === "gemini" ? Boolean(parser.keys?.gemini) : parser.keys?.gemini ? true : null, value: parser.keys?.gemini ? "yozilgan" : "yo'q" },
+        { id: "claude", label: "Claude kaliti", ok: provider === "claude" ? Boolean(parser.keys?.claude) : parser.keys?.claude ? true : null, value: parser.keys?.claude ? "yozilgan" : "yo'q" },
+      ];
   return [
     { id: "bot", label: "Bot token", ok: Boolean(config.botToken), value: config.botToken ? "yozilgan" : "BOT_TOKEN yo'q" },
     { id: "channel", label: "Kanal", ok: Boolean(config.channel), value: config.channel ?? "CHANNEL_ID yo'q" },
     { id: "tg", label: "Telegram API (collector)", ok: Boolean(config.telegramApi), value: config.telegramApi ? "yozilgan" : "TG_API_ID / TG_API_HASH yo'q" },
-    { id: "ai", label: "AI provayder", ok: Boolean(keyOk), value: `${provider}${parser.model ? ` · ${parser.model}` : " · standart model"}` },
-    { id: "gemini", label: "Gemini kaliti", ok: provider === "gemini" ? Boolean(parser.keys?.gemini) : parser.keys?.gemini ? true : null, value: parser.keys?.gemini ? "yozilgan" : "yo'q" },
-    { id: "claude", label: "Claude kaliti", ok: provider === "claude" ? Boolean(parser.keys?.claude) : parser.keys?.claude ? true : null, value: parser.keys?.claude ? "yozilgan" : "yo'q" },
+    ...aiRows,
     { id: "miniapp", label: "Mini App manzili", ok: config.miniappUrl ? true : null, value: config.miniappUrl ?? "yo'q (botda oddiy savol-javob)" },
   ];
 }

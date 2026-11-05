@@ -5,3 +5,4 @@ export { formatBatch, readBatchAnswer } from "./batch.js";
 export { PROVIDERS, DEFAULT_PROVIDER, getProvider } from "./providers/index.js";
 export { POST_SCHEMA, BATCH_SCHEMA } from "./schema.js";
 export { SYSTEM_PROMPT, BATCH_SYSTEM_PROMPT } from "./prompt.js";
+export { createParserPool, poolFromParser, pauseFor, nextPacificMidnight, pacificDay, PAUSES } from "./pool.js";

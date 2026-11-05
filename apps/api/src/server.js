@@ -4,7 +4,8 @@
 // Sozlamalar (.env, ixtiyoriy): API_PORT=3000, AUTOSTART=bot,collector (none — hech birini yoqmaydi)
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { openStore } from "@yuk/store";
+import { resolveSettings } from "@yuk/parser";
+import { loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
 import { createProcessManager } from "./processes.js";
 
@@ -24,11 +25,14 @@ const store = openStore();
 // Bu yerda ham, chunki web'dan birinchi guruh qo'shilsa, jadval bo'sh bo'lmay qoladi va TG_SOURCES unutiladi.
 const seeded = store.seedSources((process.env.TG_SOURCES ?? "").split(/[,\s]+/).map(normalizeSourceName).filter(Boolean));
 if (seeded) log(`Manbalar: .env dagi TG_SOURCES dan ${seeded} ta guruh olindi`);
+// AI kalitlari: .env dagi kalit «AI» bo'limiga bir marta o'zi qo'shiladi (bot ham shunday qiladi)
+const { provider, model } = resolveSettings();
+if (store.seedAiKeys([{ provider: provider.id, models: [model] }], process.env)) log(`AI: .env dagi kalit ro'yxatga qo'shildi (${model})`);
 // Bot va collector loglari shu oynada ham chiqadi: [bot] ..., [collector] ...
 const processes = createProcessManager({
   onLine: (name, line) => (line.stream === "err" ? console.error : console.log)(`[${name}] ${line.text}`),
 });
-const app = createApp({ store, processes, adminDist: path.join(ROOT, "apps/admin/dist") });
+const app = createApp({ store, processes, adminDist: path.join(ROOT, "apps/admin/dist"), secret: loadSecret() });
 
 const server = app.listen(PORT, HOST, () => {
   log(`Boshqaruv markazi: http://localhost:${PORT}/admin  (to'xtatish: Ctrl+C)`);

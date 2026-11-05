@@ -69,6 +69,24 @@ Aniqlik (gold, 32 e'lon / 424 maydon, 2026-11-05). Asosiy model limiti tugagani 
 
 Bot navbatda 10 tadan kam e'lon bo'lsa, eng eski e'lon joylanganidan 60 soniya o'tguncha ko'proq yig'ilishini kutadi (`PARSER_BATCH_WAIT`) — aks holda navbat bo'sh paytda har 1–2 e'lon uchun alohida so'rov ketardi.
 
+## Bir nechta AI parallel (pool)
+
+Bot bitta kalit bilan emas, **ulanishlar** bilan ishlaydi: ulanish = kalit + model. Ular boshqaruv markazining
+**«AI»** bo'limida qo'shiladi (http://localhost:3000/admin/ai), kalitlar bazada shifrlangan holda saqlanadi.
+`.env` dagi `GEMINI_API_KEY` birinchi marta ro'yxatga o'zi qo'shiladi.
+
+- Gemini'da kunlik limit **har bir model uchun alohida**: bitta kalitga 3 ta model qo'shilsa, kuniga 3 × 500 so'rov.
+- Bot hamma yoqilgan ulanishni **parallel** ishlatadi: har biri navbatdan o'z 10 talik guruhini oladi (eng yangilari birinchi).
+- Biri limitga tushsa, faqat o'sha **dam oladi**: daqiqalik limit — Google aytgan soniyacha, kunlik — Toshkent vaqti bilan
+  13:00 gacha, model band (503) — 5 daqiqa, kalit yoki model xato — 6 soat (yoki tuzatilguncha). Qolganlari ishlayveradi.
+- Dam olish muddati bazada saqlanadi: bot qayta ishga tushsa ham kunlik limitga tushgan ulanish qayta so'ralmaydi.
+- Ro'yxat har 15 s da qayta o'qiladi — kalit qo'shish yoki o'chirish uchun botni qayta ishga tushirish shart emas.
+- Kanal va haydovchilarga yuborish avvalgidek **ketma-ket** (Telegram limitlari). AI Telegram'dan tez ishlasa, bot
+  ortiqcha tahlil qilmaydi: yuborish navbatida 30 tadan ko'p e'lon tursa, yangi guruh olmaydi.
+
+**Diqqat:** limitni chetlab o'tish uchun boshqa-boshqa Google akkauntlaridan ko'p bepul kalit olish Google shartlariga
+zid bo'lishi mumkin (akkaunt bloklanishi mumkin). Xavfsiz yo'l — bitta kalitda bir nechta model, kerak bo'lsa pullik tarif.
+
 ## AI provayderlari
 
 | Provayder | Narxi | Kalit | Standart model |
@@ -93,6 +111,10 @@ Bot navbatda 10 tadan kam e'lon bo'lsa, eng eski e'lon joylanganidan 60 soniya o
 | `PARSER_EFFORT` | `low` | Faqat Claude: `low` / `medium` / `high` |
 | `PARSER_BATCH` | `10` | Bitta so'rovdagi e'lonlar soni (bot va `npm run parse`). `1` — har e'lon alohida |
 | `PARSER_BATCH_WAIT` | `60` | Soniya: navbatda batch'dan kam e'lon bo'lsa, bot eng eski e'lon shuncha "eskirguncha" yig'ilishini kutadi. `0` — kutmaydi |
+| `PARSER_PARALLEL` | `8` | Bot bir vaqtda nechta AI so'rovi yuboradi (ulanishlar sonidan ko'p bo'lmaydi) |
+
+Bot uchun `PARSER_PROVIDER`, `PARSER_MODEL` va kalit faqat **birinchi marta** o'qiladi (ro'yxatga «.env kaliti» bo'lib qo'shiladi).
+Keyin modellar boshqaruv markazida o'zgartiriladi. `npm run parse` esa avvalgidek `.env` dan ishlaydi.
 
 ## Natija ko'rinishi
 
@@ -132,6 +154,7 @@ Bot navbatda 10 tadan kam e'lon bo'lsa, eng eski e'lon joylanganidan 60 soniya o
 | `src/providers/` | Har bir AI uchun alohida fayl: `gemini.js`, `claude.js` |
 | `src/parse.js` | Provayderni tanlaydi, telefonlarni biriktiradi, joylarni ro'yxat bo'yicha tekshiradi; `parseBatch` — bir nechta e'lon bitta so'rovda |
 | `src/batch.js` | Batch so'rov matnini tuzadi (`=== POST n ===`) va javobni e'lonlarga raqami bo'yicha qaytaradi |
+| `src/pool.js` | Bir nechta ulanish (kalit + model): navbat bilan berish, limitga tushganini dam oldirish, bugungi so'rovlarni sanash |
 | `src/cli.js` | Fayldagi e'lonlarni tahlil qilib, hisobot chiqaradi |
 | `src/eval.js` | Natijani `gold.jsonl` bilan solishtiradi |
 

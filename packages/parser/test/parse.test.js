@@ -135,7 +135,7 @@ test("gemini: bloklangan yoki bo'sh javob xato sifatida qaytadi", async () => {
 test("gemini: limit, kalit va model xatolari ishni to'xtatadi, boshqasi to'xtatmaydi", () => {
   const err = (status, message) => new ApiError({ status, message });
   assert.equal(gemini.isFatal(err(429, "Resource exhausted")), true);
-  assert.match(gemini.describeError(err(429, "Resource exhausted")), /--skip/);
+  assert.match(gemini.describeError(err(429, "Resource exhausted")), /limiti tugadi/);
   assert.equal(gemini.isFatal(err(400, "API key not valid")), true);
   assert.equal(gemini.isFatal(err(400, "User location is not supported")), true);
   assert.equal(gemini.isFatal(err(404, "model not found")), true);
@@ -152,6 +152,8 @@ test("gemini: daqiqalik limitda kutiladi, kunlik limitda to'xtaladi", () => {
   assert.equal(gemini.retryAfterMs(new ApiError({ status: 429, message: "Resource exhausted" })), 61000, "ma'lumot yo'q — 1 daqiqa");
   assert.equal(gemini.retryAfterMs(quota("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "3600s")), null);
   assert.match(gemini.describeError(quota("GenerateRequestsPerDayPerProjectPerModel-FreeTier")), /bugungi/);
+  assert.equal(gemini.isDailyLimit(quota("GenerateRequestsPerDayPerProjectPerModel-FreeTier")), true);
+  assert.equal(gemini.isDailyLimit(quota("GenerateRequestsPerMinutePerProjectPerModel-FreeTier", "37s")), false);
   assert.equal(gemini.retryAfterMs(new ApiError({ status: 500, message: "Internal" })), null);
 });
 

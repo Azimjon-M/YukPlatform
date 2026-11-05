@@ -46,10 +46,16 @@ function readPost(data, phones) {
   };
 }
 
-// options.client — testlarda soxta client berish uchun; odatda kerak emas
+// options.client — testlarda soxta client berish uchun; odatda kerak emas.
+// options.apiKey — boshqaruv markazida qo'shilgan kalit (berilmasa .env dan); options.attempts — SDK urinishlari.
+// options.onRequest — har bir AI so'rovidan oldin chaqiriladi (bugun nechta so'rov ketganini sanash uchun).
 export function createParser(options = {}) {
   const { provider, model, effort, batchSize, batchWaitMs } = resolveSettings(options);
-  const client = options.client ?? provider.createClient();
+  const client = options.client ?? provider.createClient({ apiKey: options.apiKey, attempts: options.attempts });
+  const generate = (request) => {
+    options.onRequest?.();
+    return provider.generate(client, request);
+  };
 
   // Bu xatolarda e'lonni bittadan qayta yuborishdan foyda yo'q: limit tugagan (429), model band (503),
   // kalit noto'g'ri. Ularni chaqiruvchi hal qiladi (kutadi yoki to'xtaydi), e'lonlar keyin qayta yuboriladi.
@@ -58,7 +64,7 @@ export function createParser(options = {}) {
   async function parse(text) {
     const phones = extractPhones(text);
     // AI telefon raqamlarini ko'rmaydi — ular yuqorida regex bilan olingan
-    const result = await provider.generate(client, { text: maskPhones(text), model, effort });
+    const result = await generate({ text: maskPhones(text), model, effort });
     const meta = { model: result.model, usage: result.usage, phones };
     if (!result.ok) return { ok: false, error: result.error, ...meta };
 
@@ -106,7 +112,7 @@ export function createParser(options = {}) {
     try {
       // Telefonlar har bir e'londa alohida yashiriladi, keyin e'lonlar "=== POST n ===" sarlavhasi bilan birlashtiriladi
       const text = formatBatch(texts.map((post) => maskPhones(post)));
-      answer = await provider.generate(client, { text, model, effort, system: BATCH_SYSTEM_PROMPT, schema: BATCH_SCHEMA });
+      answer = await generate({ text, model, effort, system: BATCH_SYSTEM_PROMPT, schema: BATCH_SCHEMA });
     } catch (error) {
       if (mustStop(error)) throw error;
       return splitAndRetry(texts, `so'rov xatosi: ${provider.describeError?.(error) ?? error.message}`);

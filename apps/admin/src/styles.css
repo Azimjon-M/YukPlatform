@@ -1651,42 +1651,6 @@ input[type="checkbox"] {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
-/* --- AI --- */
-.kv {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  margin: 0;
-}
-
-.kv > div {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--grid);
-  align-items: center;
-}
-
-.kv > div:last-child {
-  border-bottom: 0;
-}
-
-.kv dt {
-  color: var(--text-2);
-  font-size: 14px;
-}
-
-.kv dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 560px) {
-  .kv > div {
-    grid-template-columns: 120px minmax(0, 1fr);
-  }
-}
-
 /* --- Xabarchalar --- */
 .toasts {
   position: fixed;
@@ -1719,4 +1683,332 @@ input[type="checkbox"] {
 
 .ext-link {
   white-space: nowrap;
+}
+
+/* --- AI kalitlari --- */
+.tiles-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .tiles-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.tile-badge {
+  font-size: 15px;
+  padding: 6px 0 2px;
+}
+
+.plain-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.plain-list strong {
+  color: var(--text);
+}
+
+.notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  font-size: 14px;
+}
+
+.notice > span[aria-hidden="true"] {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.notice.tone-warning {
+  border-left-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+}
+
+.notice.tone-warning > span[aria-hidden="true"] {
+  background: var(--warning);
+  color: #0b0b0b;
+}
+
+.notice.tone-critical {
+  border-left-color: var(--critical);
+  background: color-mix(in srgb, var(--critical) 7%, var(--surface));
+}
+
+.notice.tone-critical > span[aria-hidden="true"] {
+  background: var(--critical);
+  color: #ffffff;
+}
+
+.key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.key-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+
+.key-card.is-off .model-list {
+  opacity: 0.6;
+}
+
+.key-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.key-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.key-title h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 17px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.key-title h3 .link-button {
+  font-weight: 400;
+  font-size: 12.5px;
+}
+
+.key-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.label-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 2px 0;
+}
+
+.label-edit input {
+  width: auto;
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+
+.model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  min-width: 0;
+}
+
+.model-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.model-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+
+.model-detail {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.model-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.last-error {
+  font-size: 12.5px;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.last-error summary {
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Yopiq — bitta qator (…), bosilsa — to'liq matn */
+.last-error[open] summary {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.test-result {
+  font-size: 13.5px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.test-result.is-ok strong {
+  color: var(--good-text);
+}
+
+.test-result.is-fail strong {
+  color: var(--critical-text);
+}
+
+.key-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.key-foot .confirm {
+  justify-content: flex-start;
+}
+
+.model-picker,
+.add-key-models {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+}
+
+.model-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 6px 16px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.model-checklist code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+
+.model-checklist .check {
+  align-items: flex-start;
+}
+
+.model-checklist input[type="checkbox"] {
+  margin-top: 2px;
+  flex: none;
+}
+
+.add-key {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.add-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.add-key-row .field {
+  max-width: 260px;
+}
+
+.add-key-row .field-grow {
+  max-width: none;
+}
+
+.key-link {
+  padding-bottom: 8px;
+  font-size: 14px;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .add-key-row .field {
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .key-card {
+    padding: 14px;
+  }
 }
