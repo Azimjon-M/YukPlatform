@@ -17,8 +17,13 @@
    | `CHANNEL_ID` | `@Yuk_Ekspert` | Yuklar joylanadigan kanal |
    | `ADMIN_IDS` | `123456789` | `/holat` buyrug'ini ko'ra oladiganlar. O'z id'ingizni botga `/id` yozib bilasiz |
 
-3. Botni kanalga **admin** qiling: Kanal → Administratorlar → Admin qo'shish → `@Yuk_Ekspert_agent` → faqat **"Post messages"** huquqi yetadi.
-4. Muhokama guruhiga ham admin qiling, agar guruhdagi e'lonlarni ham yig'moqchi bo'lsangiz. Bot guruhda faqat admin bo'lsa hamma xabarni ko'radi, chunki privacy mode yoqilgan.
+3. Botni kanalga **admin** qiling. Telefonda shu havolani oching va kanalni tanlang:
+   <https://t.me/Yuk_Ekspert_agent?startchannel&admin=post_messages>
+   Telegram botni "Post messages" huquqi bilan admin qiladi. Boshqa yo'llar ishlamaydi:
+   - bot profilidagi "Add to group" kanallarni ko'rsatmaydi;
+   - kanal ichidagi qidiruvda bot ko'pincha chiqmaydi;
+   - bot taklif havolasi (invite link) orqali qo'shila olmaydi.
+4. Muhokama guruhida (@Yuk_Ekspert_chat) ham admin qiling, agar guruhdagi e'lonlarni ham yig'moqchi bo'lsangiz: Guruh → Administratorlar → Admin qo'shish → bot (huquqlar shart emas). Bot guruhda faqat admin bo'lsa hamma xabarni ko'radi, chunki privacy mode yoqilgan.
 5. Tekshirish:
 
    ```bash

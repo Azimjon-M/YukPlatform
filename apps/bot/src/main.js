@@ -12,6 +12,31 @@ import { createWorker } from "./pipeline.js";
 const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
 const log = (message) => console.log(`[${time()}] ${message}`);
 
+// Botni admin qilib qo'shadigan havolalar (Telegram o'zi kanal/guruh tanlashni so'raydi)
+function addLinks(username) {
+  return {
+    channel: `https://t.me/${username}?startchannel&admin=post_messages`,
+    group: `https://t.me/${username}?startgroup&admin=delete_messages`,
+  };
+}
+
+// Kanalning muhokama guruhi: bot u yerda admin bo'lsa, guruhdagi e'lonlarni ham navbatga oladi
+async function checkLinkedGroup(bot, channel, links) {
+  const chat = await bot.api.getChat(channel).catch(() => null);
+  if (!chat?.linked_chat_id) return;
+  const group = await bot.api.getChat(chat.linked_chat_id).catch(() => null);
+  const name = group?.username ? `@${group.username}` : `"${group?.title ?? chat.linked_chat_id}"`;
+  const member = await bot.api.getChatMember(chat.linked_chat_id, bot.botInfo.id).catch(() => null);
+  if (member?.status === "administrator") {
+    console.log(`✅ Muhokama guruhi ${name}: bot admin, guruhdagi e'lonlarni ham oladi.`);
+  } else if (member) {
+    console.log(`ℹ️  Muhokama guruhi ${name}: bot oddiy a'zo. Guruhdagi e'lonlarni olishi uchun admin qiling:`);
+    console.log(`    Guruh → Administratorlar → Admin qo'shish → @${bot.botInfo.username} (huquqlar shart emas)`);
+  } else {
+    console.log(`ℹ️  Muhokama guruhi ${name}: bot qo'shilmagan (ixtiyoriy). Qo'shish: ${links.group}`);
+  }
+}
+
 async function check(config) {
   const store = openStore();
   const { bot, init } = createBot({ token: config.token, store, config, log });
@@ -20,19 +45,20 @@ async function check(config) {
   if (!bot.botInfo.can_read_all_group_messages) {
     console.log("ℹ️  Privacy mode yoqilgan: guruhda bot faqat admin bo'lsa hamma xabarni ko'radi.");
   }
+  const links = addLinks(bot.botInfo.username);
   if (!config.channel) {
     console.log("⚠️  CHANNEL_ID yozilmagan: yuklar kanalga joylanmaydi (.env ga CHANNEL_ID=@kanal_nomi).");
   } else {
-    try {
-      const member = await bot.api.getChatMember(config.channel, bot.botInfo.id);
-      if (member.status === "administrator" && member.can_post_messages !== false) {
-        console.log(`✅ Kanal ${config.channel}: bot admin, xabar joylay oladi.`);
-      } else {
-        console.log(`⚠️  Kanal ${config.channel}: bot admin emas yoki "Post messages" huquqi yo'q (holati: ${member.status}).`);
-      }
-    } catch (error) {
-      console.log(`⚠️  Kanal ${config.channel} topilmadi yoki bot unga qo'shilmagan: ${error.description ?? error.message}`);
+    const member = await bot.api.getChatMember(config.channel, bot.botInfo.id).catch(() => null);
+    if (member?.status === "administrator" && member.can_post_messages !== false) {
+      console.log(`✅ Kanal ${config.channel}: bot admin, xabar joylay oladi.`);
+    } else {
+      // Bot profilidagi "Add to group" kanallarni ko'rsatmaydi, taklif havolasi bilan bot qo'shila olmaydi.
+      // Shu havolani ochsangiz, Telegram kanal tanlashni so'raydi va botni "Post messages" huquqi bilan admin qiladi.
+      console.log(`⚠️  Kanal ${config.channel}: bot admin emas${member ? ` (holati: ${member.status})` : ""}.`);
+      console.log(`    Telefoningizda shu havolani oching va ${config.channel} ni tanlang:\n    ${links.channel}`);
     }
+    await checkLinkedGroup(bot, config.channel, links);
   }
   const s = store.stats();
   console.log(`Baza: ${s.drivers.total} haydovchi, navbatda ${s.posts.new ?? 0} ta e'lon.`);
