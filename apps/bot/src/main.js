@@ -4,7 +4,7 @@
 //   npm run bot -- --dry-run — navbatdagi e'lonlarni tahlil qilib, Telegram'ga yubormasdan ekranga chiqarish
 import { existsSync, statSync } from "node:fs";
 import { createParser } from "@yuk/parser";
-import { openStore } from "@yuk/store";
+import { acquireRunLock, openStore } from "@yuk/store";
 import { createBot } from "./bot.js";
 import { readConfig } from "./config.js";
 import { formatLoad } from "./format.js";
@@ -108,6 +108,8 @@ async function main() {
   const config = readConfig();
   if (process.argv.includes("--check")) return check(config);
 
+  // Ikkinchi bot nusxasi Telegram'dan "409 Conflict" oladi — oldindan to'xtatamiz
+  acquireRunLock("bot");
   const store = openStore();
   const parser = createParser();
   const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log });
@@ -123,6 +125,8 @@ async function main() {
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+  // Boshqaruv markazi (apps/api) "stop" yuborsa — yumshoq to'xtaydi
+  process.on("message", (message) => message === "stop" && stop());
 
   log(`Bot ishga tushdi: @${bot.botInfo.username}${config.channel ? `, kanal ${config.channel}` : ""}. To'xtatish: Ctrl+C`);
   worker.start();

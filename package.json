@@ -7,6 +7,11 @@
     "apps/*"
   ],
   "scripts": {
+    "start": "npm run admin:build && npm run start -w @yuk/api",
+    "api": "npm run start -w @yuk/api -- --no-autostart",
+    "api:dev": "npm run dev -w @yuk/api",
+    "admin": "npm run dev -w @yuk/admin",
+    "admin:build": "npm run build -w @yuk/admin",
     "parse": "npm run parse -w @yuk/parser --",
     "parse:eval": "npm run eval -w @yuk/parser --",
     "tg:login": "npm run login -w @yuk/collector",

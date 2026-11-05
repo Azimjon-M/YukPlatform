@@ -6,6 +6,9 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { createAdminQueries } from "./admin.js";
+
+export { acquireRunLock, isAlive, readRunLock, RUN_DIR } from "./lock.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // YUK_DB — boshqa fayl bilan sinash uchun (masalan, YUK_DB=data/sinov.db); yo'l YukPlatform papkasiga nisbatan
@@ -60,7 +63,25 @@ CREATE TABLE IF NOT EXISTS cursors (
   source TEXT PRIMARY KEY,           -- collector qaysi guruhni qayergacha o'qigani
   last_message_id INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sources (
+  name TEXT PRIMARY KEY,             -- collector kuzatadigan guruh: "@guruh"
+  enabled INTEGER NOT NULL DEFAULT 1,
+  note TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS posts_created ON posts (created_at);
+CREATE INDEX IF NOT EXISTS loads_created ON loads (created_at);
 `;
+
+// Eski bazaga yangi ustunlar (CREATE TABLE IF NOT EXISTS mavjud jadvalni o'zgartirmaydi)
+function migrate(db) {
+  const columns = db.prepare("PRAGMA table_info(posts)").all().map((c) => c.name);
+  // done_at — e'lon tahlil qilib bo'lingan vaqt (boshqaruv markazida tezlikni ko'rsatish uchun)
+  if (!columns.includes("done_at")) db.exec("ALTER TABLE posts ADD COLUMN done_at INTEGER");
+  db.exec("CREATE INDEX IF NOT EXISTS posts_done ON posts (done_at)");
+}
 
 const json = (value) => (value == null ? null : JSON.stringify(value));
 const parse = (text) => (text == null ? null : JSON.parse(text));
@@ -86,6 +107,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
   // WAL — bir dastur yozayotganda ikkinchisi o'qiy oladi; busy_timeout — band bo'lsa 5 s kutadi
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
+  migrate(db);
 
   const q = {
     insertPost: db.prepare(
@@ -95,7 +117,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     recentSameText: db.prepare("SELECT id FROM posts WHERE text_key = ? AND posted_at > ? LIMIT 1"),
     newPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY id LIMIT ?"),
     newestPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY posted_at DESC, id DESC LIMIT ?"),
-    finishPost: db.prepare("UPDATE posts SET status = ?, error = ? WHERE id = ?"),
+    finishPost: db.prepare("UPDATE posts SET status = ?, error = ?, done_at = ? WHERE id = ?"),
     recentLoad: db.prepare("SELECT id FROM loads WHERE key = ? AND created_at > ? LIMIT 1"),
     insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, created_at) VALUES (?, ?, ?, ?)"),
     loadDelivery: db.prepare("UPDATE loads SET sent_to = ?, channel_message_id = ? WHERE id = ?"),
@@ -121,6 +143,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
   return {
     db,
+    // Boshqaruv markazi uchun: listLoads, listPosts, listDrivers, sources, metrics (admin.js)
+    ...createAdminQueries(db, now),
 
     // --- E'lonlar navbati ---
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.
@@ -148,7 +172,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     },
 
     finishPost(id, status, error = null) {
-      q.finishPost.run(status, error, id);
+      q.finishPost.run(status, error, now(), id);
     },
 
     // --- Yuklar ---

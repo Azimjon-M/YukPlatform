@@ -1,0 +1,16 @@
+{
+  "name": "@yuk/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=../../.env --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --env-file-if-exists=../../.env --disable-warning=ExperimentalWarning --watch-path=src src/server.js --no-autostart",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "@yuk/shared": "*",
+    "@yuk/store": "*",
+    "express": "^5.3.0"
+  }
+}

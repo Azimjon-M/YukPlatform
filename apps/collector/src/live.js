@@ -47,10 +47,16 @@ export async function pollSource(source, reader, store, { minLength = 20, backfi
 }
 
 // Hamma guruhni aylanib chiqadi, keyin intervalMs kutadi. signal — to'xtatish uchun (Ctrl+C).
+// sources — ro'yxat yoki har aylanishda chaqiriladigan funksiya (boshqaruv markazida qo'shilgan guruh darhol kuzatiladi)
 export async function runLive({ sources, reader, store, intervalMs = 60_000, gapMs = 2_000, backfill = 0, log = console.log, signal }) {
   const sleep = (ms) => wait(ms, undefined, { signal }).catch(() => {});
+  const current = typeof sources === "function" ? sources : () => sources;
+  let empty = false;
   while (!signal?.aborted) {
-    for (const source of sources) {
+    const list = current();
+    if (!list.length && !empty) log("Kuzatiladigan guruh yo'q: boshqaruv markazining «Manbalar» bo'limidan qo'shing.");
+    empty = !list.length;
+    for (const source of list) {
       if (signal?.aborted) break;
       const label = sourceLabel(source);
       try {

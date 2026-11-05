@@ -7,13 +7,14 @@
 //        --min-length 20   bundan qisqa xabarlar tashlanadi
 //   npm run tg:logout                              — sessiyani bekor qilish va faylini o'chirish
 //   npm run tg:live -- @guruh1 @guruh2             — jonli rejim: yangi e'lonlarni bot navbatiga qo'yish
-//        (guruhlar berilmasa — .env dagi TG_SOURCES) --interval 60 (soniya)  --backfill 20 (boshida oxirgi 20 ta)
+//        (guruhlar berilmasa — bazadagi "Manbalar" ro'yxati; bo'sh bo'lsa bir marta .env dagi TG_SOURCES dan olinadi)
+//        --interval 60 (soniya)  --backfill 20 (boshida oxirgi 20 ta)
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { openStore } from "@yuk/store";
-import { runLive } from "./live.js";
+import { acquireRunLock, openStore } from "@yuk/store";
+import { runLive, sourceLabel } from "./live.js";
 import { ask } from "./prompt.js";
 import { appendPosts, selectNewPosts } from "./samples.js";
 import { normalizeSource } from "./sources.js";
@@ -114,20 +115,42 @@ async function cmdExport() {
   console.log("Keyingi qadam: npm run parse -- --dry-run, keyin npm run parse -- --limit 20");
 }
 
-async function cmdLive() {
-  const list = sourceArgs.length ? sourceArgs : (process.env.TG_SOURCES ?? "").split(/[,\s]+/).filter(Boolean);
-  if (list.length === 0) {
-    throw new Error("Qaysi guruhlar? npm run tg:live -- @guruh1 @guruh2 yoki .env ga TG_SOURCES=@guruh1,@guruh2");
+// Guruhlar: buyruqda berilgan bo'lsa — o'shalar; bo'lmasa — bazadagi "Manbalar" (boshqaruv markazidan o'zgartiriladi,
+// har aylanishda qayta o'qiladi, qayta ishga tushirish shart emas)
+function liveSources(store) {
+  if (sourceArgs.length) {
+    const fixed = sourceArgs.map(normalizeSource);
+    return () => fixed;
   }
-  const sources = list.map(normalizeSource);
+  const fromEnv = (process.env.TG_SOURCES ?? "").split(/[,\s]+/).filter(Boolean);
+  store.seedSources(fromEnv.map((s) => sourceLabel(normalizeSource(s))));
+  return () =>
+    store
+      .listSources()
+      .filter((s) => s.enabled)
+      .flatMap((s) => {
+        try {
+          return [normalizeSource(s.name)];
+        } catch {
+          return [];
+        }
+      });
+}
+
+async function cmdLive() {
   const intervalMs = Math.max(30, Number(args.interval)) * 1000; // 30 s dan tez so'rash — FLOOD_WAIT xavfi
   const store = openStore();
+  // Ikkinchi collector bitta Telegram sessiyasini ikki joyda ochadi — Telegram sessiyani bekor qilishi mumkin
+  acquireRunLock("collector");
+  const sources = liveSources(store);
   const client = await connectSaved();
   const controller = new AbortController();
   process.once("SIGINT", () => controller.abort());
+  // Boshqaruv markazi (apps/api) "stop" yuborsa — yumshoq to'xtaydi
+  process.on("message", (message) => message === "stop" && controller.abort());
   const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
 
-  console.log(`${sources.length} ta guruh kuzatilyapti, har ${intervalMs / 1000} s. E'lonlarni bot yuboradi (npm run bot). To'xtatish: Ctrl+C`);
+  console.log(`${sources().length} ta guruh kuzatilyapti, har ${intervalMs / 1000} s. E'lonlarni bot yuboradi (npm run bot). To'xtatish: Ctrl+C`);
   try {
     await runLive({
       sources,

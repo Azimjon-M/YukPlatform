@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "@yuk/store";
-import { pollSource, sourceLabel } from "../src/live.js";
+import { pollSource, runLive, sourceLabel } from "../src/live.js";
 
 const SOURCE = { kind: "username", value: "yuk_guruh" };
 const long = (s) => `${s} — Toshkentdan Samarqandga 20 t tent kerak`;
@@ -56,4 +56,34 @@ test("backfill: oxirgi N ta xabardan boshlaydi; takror matn AI'ga bormaydi", asy
 test("guruh nomi bazada @ bilan, raqamli id o'zgarishsiz", () => {
   assert.equal(sourceLabel(SOURCE), "@yuk_guruh");
   assert.equal(sourceLabel({ kind: "id", value: "-100123" }), "-100123");
+});
+
+test("manbalar ro'yxati har aylanishda qayta o'qiladi; bo'sh bo'lsa ogohlantiradi", async () => {
+  const store = openStore({ file: ":memory:" });
+  const controller = new AbortController();
+  const logs = [];
+  const rounds = [[], [{ kind: "username", value: "yangi" }]];
+  let round = 0;
+  const seen = [];
+  const reader = {
+    latestId: async (source) => {
+      seen.push(source.value);
+      return 10;
+    },
+    since: async () => [],
+  };
+  await runLive({
+    sources: () => {
+      if (round >= rounds.length) controller.abort();
+      return rounds[round++] ?? [];
+    },
+    reader,
+    store,
+    intervalMs: 0,
+    gapMs: 0,
+    log: (message) => logs.push(message),
+    signal: controller.signal,
+  });
+  assert.match(logs[0], /guruh yo'q/);
+  assert.deepEqual(seen, ["yangi"]);
 });

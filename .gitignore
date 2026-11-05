@@ -17,3 +17,6 @@ data/samples/*
 # Baza (haydovchilar va e'lonlar)
 data/*.db
 data/*.db-*
+
+# Ishlayotgan dasturlar (bot, collector) — PID fayllari
+data/run/

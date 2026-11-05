@@ -1,13 +1,78 @@
-# api — Yadro
+# api — Boshqaruv markazi serveri
 
-**Bosqich:** 1 (MVP)
+Bitta buyruq bilan hammasi: **`npm start`** (YukPlatform papkasida) →
 
-Hamma dastur shu yerga ulanadi.
+1. boshqaruv markazi web'ini yig'adi (`apps/admin`),
+2. shu serverni ochadi: **http://localhost:3000/admin**,
+3. bot va collector'ni o'zi ishga tushiradi (alohida jarayonlar; loglari web'da va shu oynada `[bot] ...`).
 
-- E'lonlarni qabul qiladi (collector, bot va web'dan)
-- `packages/parser` orqali matnni JSON'ga aylantiradi
-- Takrorlarni olib tashlaydi (telefon + yo'nalish + vaqt oralig'i)
-- Yukni haydovchilar filtrlariga moslab, kimga xabar ketishini hal qiladi
-- Web, Mini App va mobil ilova uchun REST API
+To'xtatish: shu oynada `Ctrl+C` — bot va collector ham yumshoq to'xtaydi.
 
-**Texnologiya:** Node.js, Express, PostgreSQL + Prisma
+Server faqat shu kompyuterdan ochiladi (`127.0.0.1`): tarmoqdan va internetdan kirib bo'lmaydi.
+Bot va collector bilan bitta baza (`data/yuk.db`) ishlatiladi.
+
+## Buyruqlar
+
+| Buyruq | Nima qiladi |
+|---|---|
+| `npm start` | web'ni yig'adi + server + bot + collector |
+| `npm run api` | faqat server (bot va collector'ni yoqmaydi — web'dan yoqasiz) |
+| `npm run api:dev` | server, `src/` o'zgarsa o'zi qayta yuklanadi (bot/collector yoqilmaydi) |
+| `npm run admin` | web'ni dasturlash rejimida: http://localhost:5174/admin/ (API'ni `npm run api` bilan oching) |
+| `npm test -w @yuk/api` | testlar |
+
+## Sozlamalar (`.env`, ixtiyoriy)
+
+| O'zgaruvchi | Standart | Ma'nosi |
+|---|---|---|
+| `API_PORT` | `3000` | port |
+| `AUTOSTART` | `bot,collector` | `npm start` da nimalar o'zi yoqiladi; `AUTOSTART=none` — hech biri |
+
+## Bitta nusxa
+
+Bot yoki collector ikki marta ishga tushsa, Telegram xato beradi (bot — 409, collector — bitta sessiya).
+Shuning uchun har biri `data/run/<nom>.json` ga o'z PID'ini yozadi va ikkinchi nusxa ochilmaydi.
+Terminalda `npm run bot` bilan ochilgan bot web'da **«terminalda»** deb ko'rinadi: uni web'dan
+boshqarish uchun avval o'sha oynada `Ctrl+C` bosing.
+
+Kutilmaganda to'xtagan jarayon 10 s dan keyin o'zi qayta ishga tushadi (10 daqiqada 5 martagacha;
+undan ko'p bo'lsa — to'xtaydi va loglarni ko'rishni so'raydi).
+
+## API
+
+Hamma javob JSON. Xato: `{ "error": "o'zbekcha matn" }` va mos HTTP kodi.
+O'zgartiruvchi so'rovlar (`POST`, `PATCH`, `DELETE`) `x-yuk-admin: 1` sarlavhasi bilan yuboriladi —
+boshqa sayt brauzeringiz orqali so'rov yubora olmasligi uchun. `Host` faqat `localhost` / `127.0.0.1`.
+Kalit va tokenlar javoblarda hech qachon bo'lmaydi — faqat «yozilganmi» (`true`/`false`).
+
+| So'rov | Nima |
+|---|---|
+| `GET /api/overview` | ko'rsatkichlar (`metrics`), jarayonlar, sozlamalar holati |
+| `GET /api/loads?from&to&truckClass&bodyType&q&hours&limit&offset` | yuklar (eng yangisi birinchi) → `{ total, items }` |
+| `GET /api/posts?status&q&limit&offset` | navbatdagi e'lonlar (`new`, `done`, `failed`, `skipped`, `duplicate`) |
+| `POST /api/posts/:id/retry` · `POST /api/posts/retry-failed` | xatolilarni qayta navbatga |
+| `GET /api/drivers` · `PATCH /api/drivers/:chatId {active}` | haydovchilar, faol / pauza |
+| `GET /api/sources` | collector kuzatadigan guruhlar + 24 soatlik statistika |
+| `POST /api/sources {name, note?}` | guruh qo'shish: `@nom`, `nom`, `https://t.me/nom`, `-100…` |
+| `PATCH /api/sources/:name {enabled}` · `DELETE /api/sources/:name` | o'chirib-yoqish, olib tashlash |
+| `GET /api/processes` | bot va collector holati: `stopped`, `running`, `stopping`, `crashed`, `external` |
+| `POST /api/processes/:name/start\|stop\|restart` | yoqish / o'chirish / qayta ishga tushirish |
+| `GET /api/processes/:name/logs?after=<seq>` | oxirgi 1000 qator log; `after` — faqat yangilari |
+
+Manbalar birinchi marta `.env` dagi `TG_SOURCES` dan olinadi, keyin bazada saqlanadi va web'dan boshqariladi.
+O'zgarish collector'ning keyingi aylanishida (1–2 daqiqa) kuchga kiradi.
+
+## Fayllar
+
+| Fayl | Nima |
+|---|---|
+| `src/server.js` | ishga tushirish, port, avtomatik yoqish, `Ctrl+C` |
+| `src/app.js` | Express yo'llari, himoya, web fayllar |
+| `src/processes.js` | bot va collector jarayonlari: yoqish, to'xtatish, loglar, qayta ishga tushirish |
+
+## Keyingi bosqichlar
+
+- **AI kalitlari** web'dan (bazada shifrlangan, ekranda yashirin) va bir nechta AI'ni parallel ishlatish — navbat tezroq yuradi.
+- **Haydovchilar uchun ochiq web**: Telegram orqali kirish, yuklar lentasi.
+- **Xarita** (Leaflet + OpenStreetMap, bepul): yuklar va yo'nalishlar xaritada.
+- Serverga ko'chganda: PostgreSQL, parol bilan kirish, HTTPS.
