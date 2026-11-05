@@ -1,7 +1,7 @@
 // Yukni Telegram xabariga aylantiradi (HTML). Haydovchiga ham, kanalga ham shu matn ketadi.
 // Telefon matnda +998901234567 ko'rinishida yoziladi — Telegram uni o'zi bosiladigan qiladi (bosganda qo'ng'iroq).
 // Inline tugmada tel: ishlamaydi, shuning uchun tugma faqat asl e'longa olib boradi.
-import { BODY_TYPES, LOADING_SIDES, PAYMENT_TYPES, REGIONS, TRUCK_CLASSES } from "@yuk/shared";
+import { BODY_TYPES, LOADING_SIDES, PAYMENT_TYPES, REGIONS, TRUCK_CLASSES, placeKey } from "@yuk/shared";
 
 const TIME_ZONE = "Asia/Tashkent";
 
@@ -10,17 +10,36 @@ export function escapeHtml(text) {
 }
 
 const regionName = (id) => REGIONS.find((r) => r.id === id)?.name;
+// "Farg'ona viloyati" → "Farg'ona", "Qoraqalpog'iston Respublikasi" → "Qoraqalpog'iston", "Toshkent shahri" → "Toshkent"
+const regionBase = (id) => regionName(id)?.replace(/ (viloyati|shahri|Respublikasi)$/, "") ?? null;
+const sameName = (a, b) => placeKey(a) === placeKey(b);
 
-// "Toshkent (Sergeli)", "Surxondaryo viloyati", "Boku (Ozarbayjon)"
+// Avval viloyat, keyin shahar — haydovchi har bir tuman qayerdaligini bilmaydi:
+//   "Farg'ona, Beshariq", "Xorazm, Urganch", "Toshkent vil., Chirchiq", "Toshkent (Sergeli)",
+//   viloyat markazi: "Samarqand"; faqat viloyat: "Surxondaryo viloyati"; xorij: "Rossiya, Moskva"
 export function placeText(load, side) {
   const city = load[`${side}City`];
   const place = load[`${side}Place`];
-  const region = load[`${side}Region`];
+  const region = regionName(load[`${side}Region`]) ? load[`${side}Region`] : null;
   const country = load[`${side}Country`];
-  let text = city ?? (region && region !== "xorij" ? regionName(region) : null) ?? country ?? "?";
-  if (place && place !== city) text += ` (${place})`;
-  else if (city && region === "xorij" && country) text += ` (${country})`;
-  return text;
+  const parts = [];
+  if (region === "xorij" || (country && country !== "O'zbekiston")) {
+    if (country) parts.push(country);
+    if (city && !sameName(city, country ?? "")) parts.push(city);
+  } else if (city && region) {
+    const base = regionBase(region);
+    // Toshkent viloyati — "Toshkent vil.", aks holda shahar bilan adashtiriladi
+    const area = region === "toshkent" ? "Toshkent vil." : base;
+    if (sameName(city, base)) parts.push(area);
+    else parts.push(area, city.replace(/\s*\([^)]*\)$/, "")); // "Yangibozor (Xorazm)" → "Yangibozor"
+  } else if (city) {
+    parts.push(city);
+  } else if (region) {
+    parts.push(regionName(region));
+  }
+  if (!parts.length) return place ?? country ?? "?";
+  const text = parts.join(", ");
+  return place && !sameName(place, city ?? "") ? `${text} (${place})` : text;
 }
 
 // 3800000 → "3 800 000"

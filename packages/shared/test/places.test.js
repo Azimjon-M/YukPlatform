@@ -56,3 +56,11 @@ test("shahar noma'lum bo'lsa AI yozgani qoladi", () => {
   const load = { fromCity: null, fromRegion: "surxondaryo", toCity: "Lotfobod", toRegion: "xorij", toCountry: "Eron" };
   assert.deepEqual(normalizePlaces(load), load);
 });
+
+test("ro'yxatda yo'q xorijiy shahar va faqat davlat — viloyati xorij", () => {
+  const fixed = normalizePlaces({ fromCity: "Kostroma", fromRegion: null, fromCountry: "Rossiya", toCity: null, toRegion: null, toCountry: "Bolgariya" });
+  assert.equal(fixed.fromRegion, "xorij");
+  assert.equal(fixed.toRegion, "xorij");
+  const home = normalizePlaces({ fromCity: null, fromRegion: null, fromCountry: "O'zbekiston" });
+  assert.equal(home.fromRegion, null, "O'zbekiston ichida viloyat o'ylab topilmaydi");
+});

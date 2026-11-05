@@ -65,10 +65,15 @@ export function normalizePlaces(load) {
   for (const side of ["from", "to"]) {
     promotePlace(out, side);
     const found = lookupCity(out[`${side}City`]);
-    if (!found) continue;
-    out[`${side}City`] = found.name;
-    out[`${side}Region`] = found.region;
-    out[`${side}Country`] = found.country;
+    if (found) {
+      out[`${side}City`] = found.name;
+      out[`${side}Region`] = found.region;
+      out[`${side}Country`] = found.country;
+    }
+    // Ro'yxatda yo'q xorijiy shahar (Kostroma, Kishinyov...) yoki faqat davlat: viloyati "xorij" bo'ladi,
+    // aks holda «Istalgan davlat» ni tanlagan haydovchiga bu yuk bormaydi
+    const country = out[`${side}Country`];
+    if (!out[`${side}Region`] && country && country !== "O'zbekiston") out[`${side}Region`] = "xorij";
   }
   return out;
 }

@@ -11,11 +11,24 @@ const LOAD = {
   when: "ertaga", note: null, phones: ["+998901234567"],
 };
 
-test("joy nomi: tuman, faqat viloyat, xorij", () => {
+test("joy nomi: avval viloyat, keyin shahar; tuman, faqat viloyat, xorij", () => {
+  const place = (city, region, extra = {}) => placeText({ fromCity: city, fromRegion: region, fromCountry: "O'zbekiston", ...extra }, "from");
+  assert.equal(place("Beshariq", "fargona"), "Farg'ona, Beshariq");
+  assert.equal(place("Urganch", "xorazm"), "Xorazm, Urganch");
+  assert.equal(place("Nukus", "qoraqalpogiston"), "Qoraqalpog'iston, Nukus");
+  assert.equal(place("Chirchiq", "toshkent"), "Toshkent vil., Chirchiq");
+  assert.equal(place("Toshkent", "toshkent"), "Toshkent vil.");
+  assert.equal(place("Samarqand", "samarqand"), "Samarqand", "viloyat markazi takrorlanmaydi");
+  assert.equal(place("Farg'ona", "fargona"), "Farg'ona");
+  assert.equal(place("Qo'qon", "fargona", { fromPlace: "Uchko'prik" }), "Farg'ona, Qo'qon (Uchko'prik)");
+  assert.equal(place("Yangibozor (Xorazm)", "xorazm"), "Xorazm, Yangibozor");
+  assert.equal(place("Qayerdir", null), "Qayerdir", "viloyati noma'lum shahar o'zgarmaydi");
   assert.equal(placeText(LOAD, "from"), "Toshkent (Chilonzor)");
   assert.equal(placeText({ fromCity: null, fromRegion: "surxondaryo" }, "from"), "Surxondaryo viloyati");
-  assert.equal(placeText({ toCity: "Boku", toRegion: "xorij", toCountry: "Ozarbayjon" }, "to"), "Boku (Ozarbayjon)");
+  assert.equal(placeText({ toCity: "Boku", toRegion: "xorij", toCountry: "Ozarbayjon" }, "to"), "Ozarbayjon, Boku");
+  assert.equal(placeText({ toCity: "Kostroma", toRegion: null, toCountry: "Rossiya" }, "to"), "Rossiya, Kostroma");
   assert.equal(placeText({ toCity: null, toRegion: "xorij", toCountry: "Germaniya" }, "to"), "Germaniya");
+  assert.equal(placeText({ toCity: null, toRegion: null, toCountry: "O'zbekiston" }, "to"), "O'zbekiston");
   assert.equal(placeText({}, "to"), "?");
 });
 
