@@ -160,6 +160,18 @@ export function capacityText(capacityKg) {
 
 export function profileSummary(profile) {
   if (!profile) return null;
+  // Yuk beruvchi: o'z mashinasi yo'q — qanday mashina va kuzov kerak (bo'sh ro'yxat — istalgani)
+  if (Array.isArray(profile.truckClasses)) {
+    const names = (ids, name) => ids.map((id) => name(id) ?? id).join(", ");
+    return {
+      vehicle: profile.truckClasses.length ? `Kerak: ${names(profile.truckClasses, truckClassName)}` : "Istalgan mashina",
+      size: profile.bodyTypes?.length ? `Kuzov: ${names(profile.bodyTypes, bodyTypeName).toLowerCase()}` : null,
+      from: areasText(profile.fromAreas),
+      to: areasText(profile.toAreas),
+      intl: INTL_OPTIONS[intlOption(profile)]?.label ?? null,
+      mode: null,
+    };
+  }
   const v = profile.vehicle ?? {};
   const body = bodyTypeName(v.bodyType);
   const vehicle = [truckClassName(v.truckClass), body ? body.toLowerCase() : null, capacityText(v.capacityKg)].filter(Boolean).join(" · ");

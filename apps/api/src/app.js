@@ -99,13 +99,19 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
   // --- Haydovchilar ---
   api.get("/drivers", (req, res) => res.json({ items: store.listDrivers() }));
 
+  // { active } — yuborishni yoqish/to'xtatish; { isAdmin } — Mini App'dagi «🛠 Boshqaruv» huquqi.
+  // Admin belgisi FAQAT shu yerdan (localhost) qo'yiladi — internetdagi ilova serveri buni qila olmaydi.
   api.patch("/drivers/:chatId", (req, res) => {
     const chatId = Number(req.params.chatId);
-    const active = bool(req.body?.active, "active");
+    const body = req.body ?? {};
     const driver = store.getDriver(chatId);
     if (!driver) throw httpError(404, "Haydovchi topilmadi");
-    if (active && !driver.profile) throw httpError(400, "Haydovchi hali ro'yxatdan o'tmagan");
-    res.json(store.saveDriver(chatId, { active }));
+    const fields = {};
+    if ("active" in body) fields.active = bool(body.active, "active");
+    if ("isAdmin" in body) fields.isAdmin = bool(body.isAdmin, "isAdmin");
+    if (!Object.keys(fields).length) throw httpError(400, "active yoki isAdmin kerak");
+    if (fields.active && !driver.profile) throw httpError(400, "Haydovchi hali ro'yxatdan o'tmagan");
+    res.json(store.saveDriver(chatId, fields));
   });
 
   // Haydovchilar web'ini shu haydovchi nomidan ochish (sinash uchun, Telegram'ga kirmasdan).

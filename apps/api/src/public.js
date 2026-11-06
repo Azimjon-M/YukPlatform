@@ -11,9 +11,14 @@
 //   PATCH /pub/me              { active } — pauza / davom
 //   GET  /pub/loads            ?view=mine|all&from&to&hours&limit&offset — yuklar (haydovchiga), eng yangisi birinchi
 //   GET  /pub/trucks           xuddi shunday — bo'sh mashinalar (yuk beruvchiga)
+//   --- faqat adminlar (Mini App'dagi «🛠 Boshqaruv»), boshqalarga 403 ---
+//   GET  /pub/admin/overview   ko'rsatkichlar (navbat, yuklar, foydalanuvchilar) va AI ulanishlari holati
+//   GET  /pub/admin/users      ?q&role — foydalanuvchilar ro'yxati
+//   PATCH /pub/admin/users/:id { active?, role? } — yoqish / to'xtatish, rolni almashtirish
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
+import { pacificDay } from "@yuk/parser";
 import { KIND_MATCHERS, KIND_ROLE, isAdmin, parseAdminIds, roleOf, routeInScope, sameArea, sanitizeProfileFor, validRole } from "@yuk/shared";
 import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
@@ -195,6 +200,91 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
   };
   pub.get("/loads", listing("yuk"));
   pub.get("/trucks", listing("mashina"));
+
+  // --- Admin ---
+  // Admin — .env dagi ADMIN_IDS yoki boshqaruv markazida (localhost) yoqilgan belgi. Bu server internetga chiqadi,
+  // shuning uchun har bir so'rovda shu yerda tekshiriladi (web'dagi tugmani yashirish — himoya emas).
+  // Bu yerdan boshqa odamni admin qilib ham, obunasini o'zgartirib ham BO'LMAYDI — faqat boshqaruv markazidan.
+  const admin = express.Router();
+  admin.use((req, res, next) => next(isAdmin(req.driver, adminIds) ? undefined : httpError(403, "Bu bo'lim faqat adminlar uchun", "forbidden")));
+
+  admin.get("/overview", (req, res) => {
+    const m = store.metrics();
+    const today = pacificDay(now()); // Gemini kunlik limiti Tinch okeani vaqti bilan yangilanadi
+    // AI ulanishlari: kalitning o'zi ham, "…a1B2" ko'rsatkichi ham yuborilmaydi
+    const ai = store.listAiKeys().flatMap((key) =>
+      key.models.map(({ model, state }) => {
+        const fresh = state?.day === today;
+        return {
+          label: key.label ?? key.provider,
+          model,
+          enabled: key.enabled,
+          requests: fresh ? state.requests : 0,
+          posts: fresh ? state.posts : 0,
+          errors: fresh ? state.errors : 0,
+          restingUntil: state?.cooldownUntil > now() ? state.cooldownUntil : null,
+          reason: state?.cooldownUntil > now() ? (state.reason ?? null) : null,
+        };
+      }),
+    );
+    res.json({
+      now: m.now,
+      queue: m.queue,
+      lastHour: m.lastHour,
+      loads: m.loads,
+      trucks: m.trucks,
+      drivers: m.drivers,
+      shippers: m.shippers,
+      hourly: m.hourly,
+      ai,
+    });
+  });
+
+  // Ro'yxatda telefon yo'q (bazada ham yo'q): ism, username, rol, holat
+  admin.get("/users", (req, res) => {
+    const q = text(req.query.q)?.toLowerCase().replace(/^@/, "") ?? null;
+    const role = req.query.role === "none" ? "none" : validRole(req.query.role);
+    const items = store
+      .listDrivers()
+      .filter((u) => !role || (role === "none" ? !u.role : u.role === role))
+      .filter((u) => !q || [u.name, u.username, String(u.chatId)].some((v) => v?.toLowerCase().includes(q)))
+      .map((u) => ({
+        chatId: u.chatId,
+        name: u.name,
+        username: u.username,
+        role: u.role,
+        plan: u.plan,
+        isAdmin: isAdmin(u, adminIds),
+        hasProfile: Boolean(u.profile),
+        registering: u.registering,
+        active: u.active,
+        updatedAt: u.updatedAt,
+      }));
+    res.json({ total: items.length, items: items.slice(0, 200) });
+  });
+
+  admin.patch("/users/:id", (req, res) => {
+    const chatId = Number(req.params.id);
+    const user = Number.isSafeInteger(chatId) ? store.getDriver(chatId) : null;
+    if (!user) throw httpError(404, "Foydalanuvchi topilmadi");
+    const body = req.body ?? {};
+    const fields = {};
+    if ("role" in body) {
+      const role = validRole(body.role);
+      if (!role) throw httpError(400, "role: haydovchi yoki yuk_beruvchi bo'lishi kerak");
+      // Bot va web'dagidek: boshqa rolga o'tsa, eski sozlamalar o'chadi (u yangi rolda qaytadan to'ldiradi)
+      if (role !== roleOf(user)) Object.assign(fields, { role, profile: null, draft: null, active: true });
+    }
+    if ("active" in body) {
+      if (typeof body.active !== "boolean") throw httpError(400, "active: true yoki false bo'lishi kerak");
+      if (body.active && !user.profile && !fields.role) throw httpError(409, "Bu foydalanuvchi hali sozlamalarni to'ldirmagan");
+      if (!fields.role) fields.active = body.active;
+    }
+    if (!Object.keys(fields).length) return res.json(meOf(user));
+    res.json(meOf(store.saveDriver(chatId, fields)));
+  });
+
+  pub.use("/admin", admin);
 
   pub.use((req, res, next) => next(httpError(404, "Topilmadi")));
   app.use("/pub", pub);

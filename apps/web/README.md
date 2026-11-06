@@ -19,12 +19,14 @@ Bot Mini App tugmasida rolni `?r=` bilan beradi — server bilan aloqa bo'lmasa 
 ## Bo'limlar
 
 Haydovchi: 📋 Yuklar · 🗺 Xarita · ⚙️ Sozlamalar. Yuk beruvchi: 🚚 Mashinalar · ⚙️ Sozlamalar.
+Adminlarga qo'shimcha 🛠 Boshqaruv (botdagi «🛠 Boshqaruv» tugmasi `?v=admin` bilan ochadi).
 
 | Bo'lim | Nima |
 |---|---|
 | 📋 Yuklar | «Menga mos» — bot shaxsiy xabarda yuboradigan yuklar; «Hammasi» — doiradagi barcha yuklar. Qayerdan bo'yicha filtr, 6 / 24 / 72 soat. Telefonni bosib qo'ng'iroq, «Asl e'lon» — guruhdagi xabar. Har daqiqada yangilanadi |
 | 🗺 Xarita | Oxirgi 24 soat: har doira — bitta shahar, kattaligi — yuk soni. «Yuklash joyi» / «Tushirish joyi». Doira bosilsa — o'sha joydagi yuklar pastda va ular qayerga borishi chiziq bilan. Uzuq chiziqli doira — e'londa faqat viloyat yoki davlat yozilgan |
 | 🚚 Mashinalar | Yuk beruvchiga: «Menga mos» — bot yuboradigan bo'sh mashinalar (yuk qayerda yuklanadi, qanday mashina kerak); «Hammasi» — doiradagi barcha bo'sh mashinalar. Lenta yuklarnikidek |
+| 🛠 Boshqaruv | Faqat adminlar: navbat va kechikish, 24 soatdagi yuklar va bo'sh mashinalar, faol foydalanuvchilar, AI ulanishlari (bugungi so'rovlar, dam olayotgani), foydalanuvchilar ro'yxati — qidirish, to'xtatish / yoqish, rolni almashtirish. Server har so'rovda tekshiradi (boshqalarga 403). Admin qilish — faqat kompyuterdagi boshqaruv markazida |
 | ⚙️ Sozlamalar | Haydovchi — mashina va yo'nalish; yuk beruvchi — yuk qayerdan qayerga, mashina turlari, kuzovlar (hech biri tanlanmasa — istalgani). Bot ham shu sozlamalar bo'yicha yuboradi. Saqlansa — botda yuborish yoqiladi |
 
 Yuqorida: ⏸ Pauza / ▶️ Yoqish (botdagi shaxsiy xabarlar) va saytda «Chiqish».
@@ -70,6 +72,7 @@ Tunnel manzili o'zgarsa — qayta yig'ish kerak, shuning uchun hozircha birinchi
 |---|---|
 | `src/App.jsx` | Ilova qobig'i: kirish holati, rolga qarab bo'limlar, pauza, xabarlar |
 | `src/RolePage.jsx` | «Siz kimsiz?» / «Rolni almashtirish» |
+| `src/AdminPage.jsx` | 🛠 Boshqaruv (adminlar) |
 | `src/api.js` | Server bilan aloqa: token saqlash, `#token=` havolasi, kirish, yuklar, profil |
 | `src/LoadsPage.jsx` · `src/LoadCard.jsx` | Lenta (yuklar yoki bo'sh mashinalar) va kartochkalar (`LoadCard`, `TruckCard`) |
 | `src/MapPage.jsx` · `src/mapData.js` | Xarita (Leaflet + OpenStreetMap); yuklarni joy bo'yicha guruhlash (testlangan) |

@@ -10,7 +10,7 @@ Ma'lumotlarni `apps/api` serveridan oladi; API ro'yxati: [apps/api/README.md](..
 | Bosh sahifa | navbat, kechikish, oxirgi soat, 24 soatlik grafik (kelgan ↔ tahlil qilingan), bot va collector'ni yoqish/o'chirish, `.env` holati (faqat «bor/yo'q») |
 | Yuklar | viloyat, mashina, kuzov, vaqt bo'yicha filtr va qidiruv; asl e'longa havola |
 | Navbat | e'lonlar holati bo'yicha; xatolilarni qayta navbatga qo'yish |
-| Haydovchilar | profil qisqacha, faol / pauza |
+| Haydovchilar | rol (haydovchi / yuk beruvchi) va obuna, profil qisqacha, faol / pauza, «Admin» (Mini App'dagi «🛠 Boshqaruv» huquqi) |
 | Manbalar | collector kuzatadigan guruhlar: qo'shish, o'chirib-yoqish, 24 soatlik statistika |
 | Jarayonlar | bot va collector loglari jonli |
 | AI | kalitlar va modellar (ulanishlar): bugungi so'rovlar, dam olayotganlari, «Sinash», model qo'shish, yangi kalit qo'shish |

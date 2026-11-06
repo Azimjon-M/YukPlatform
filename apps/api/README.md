@@ -65,7 +65,7 @@ Kalit va tokenlar javoblarda hech qachon bo'lmaydi — faqat «yozilganmi» (`tr
 | `GET /api/loads?from&to&truckClass&bodyType&q&hours&limit&offset` | yuklar (eng yangisi birinchi) → `{ total, items }` |
 | `GET /api/posts?status&q&limit&offset` | navbatdagi e'lonlar (`new`, `done`, `failed`, `skipped`, `duplicate`) |
 | `POST /api/posts/:id/retry` · `POST /api/posts/retry-failed` | xatolilarni qayta navbatga |
-| `GET /api/drivers` · `PATCH /api/drivers/:chatId {active}` | haydovchilar, faol / pauza |
+| `GET /api/drivers` · `PATCH /api/drivers/:chatId {active?, isAdmin?}` | foydalanuvchilar (rol, obuna), faol / pauza, **admin qilish** (faqat shu yerdan — internetdagi ilova serveri buni qila olmaydi) |
 | `POST /api/drivers/:chatId/web-link` | haydovchilar ilovasini shu haydovchi nomidan ochish havolasi (12 soat; Telegram'siz sinash uchun) |
 | `GET /api/sources` | collector kuzatadigan guruhlar + 24 soatlik statistika |
 | `POST /api/sources {name, note?}` | guruh qo'shish: `@nom`, `nom`, `https://t.me/nom`, `-100…` |
@@ -125,6 +125,9 @@ Kirgandan keyin server o'z tokenini beradi (30 kun). Ilova uni har so'rovda `Aut
 | `PATCH /pub/me {active}` | pauza / davom |
 | `GET /pub/loads?view=mine\|all&from&to&hours&limit&offset` | yuklar, e'lon vaqti bo'yicha eng yangisi birinchi; `mine` — bot yuboradigan mos yuklar (faqat haydovchiga, boshqasiga 409 `role`) |
 | `GET /pub/trucks?...` | xuddi shunday — bo'sh mashinalar; `mine` — yuk beruvchiga mos (`matchTruck`) |
+| `GET /pub/admin/overview` | **faqat adminlar** (`ADMIN_IDS` yoki boshqaruv markazidagi belgi; boshqalarga 403 `forbidden`): navbat, yuklar, foydalanuvchilar, AI ulanishlari (kalitsiz) |
+| `GET /pub/admin/users?q&role` | adminlar: foydalanuvchilar (ism, @username, rol, holat; telefon yo'q), 200 tagacha |
+| `PATCH /pub/admin/users/:id {active?, role?}` | adminlar: yoqish / to'xtatish, rolni almashtirish (sozlamalari o'chadi). Admin qilish va obuna bu yerdan **mumkin emas** |
 
 Kirmagan odamga `config` va `auth` dan boshqa hech narsa berilmaydi (401). Bir manzildan daqiqasiga 240 ta so'rov,
 kirishga 20 ta urinish. Telefon raqamlari faqat kirgan haydovchiga ko'rinadi.

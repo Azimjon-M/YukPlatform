@@ -1,5 +1,8 @@
-// Haydovchilar: GET /api/drivers — kim, qanday mashina, qaysi yo'nalish, faolmi. Faol — unga yuk yuboriladi.
+// Foydalanuvchilar: GET /api/drivers — kim (haydovchi / yuk beruvchi), qanday mashina, qaysi yo'nalish, faolmi.
+// Faol — unga yuk (yuk beruvchiga — bo'sh mashina) yuboriladi. «Admin» — Mini App'dagi «🛠 Boshqaruv» huquqi:
+// faqat shu yerdan (localhost) beriladi, internetdagi ilova orqali emas.
 import { useState } from "react";
+import { PLANS, ROLES } from "@yuk/shared";
 import { get, patch, post } from "../api.js";
 import { formatNumber, profileSummary } from "../format.js";
 import { useApi, useNow } from "../hooks.js";
@@ -33,6 +36,38 @@ function ActiveToggle({ driver, onChanged }) {
     }
   }
   return <Toggle checked={checked} onChange={change} busy={busy} label={checked ? "Faol" : "Pauza"} />;
+}
+
+// Admin huquqi: botda «🛠 Boshqaruv» tugmasi va Mini App'dagi boshqaruv bo'limi. .env dagi ADMIN_IDS ham admin qiladi
+function AdminToggle({ driver, onChanged }) {
+  const notify = useToast();
+  const [busy, setBusy] = useState(false);
+  const [checked, setChecked] = useState(driver.isAdmin);
+  async function change(isAdmin) {
+    setBusy(true);
+    setChecked(isAdmin);
+    try {
+      await patch(`/api/drivers/${driver.chatId}`, { isAdmin });
+      notify(isAdmin ? "Admin qilindi — botda /start bossa, «🛠 Boshqaruv» tugmasi chiqadi" : "Admin huquqi olindi");
+      onChanged();
+    } catch (e) {
+      setChecked(!isAdmin);
+      notify(e.message, "critical");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <Toggle checked={checked} onChange={change} busy={busy} label="Admin" />;
+}
+
+function RoleBadge({ driver }) {
+  const role = ROLES[driver.role];
+  return (
+    <>
+      {role ? <Badge icon={role.icon}>{role.name}</Badge> : <Badge icon="–">Rol tanlanmagan</Badge>}
+      <div className="muted small">{PLANS[driver.plan]?.name ?? driver.plan}</div>
+    </>
+  );
 }
 
 // Haydovchilar web'ini shu haydovchi nomidan ochadi (Telegram'siz sinash uchun; havola 12 soat amal qiladi)
@@ -70,12 +105,17 @@ export function DriversPage() {
   const items = state.data?.items ?? [];
   const registered = items.filter((d) => d.profile);
   const active = registered.filter((d) => d.active);
+  const shippers = registered.filter((d) => d.role === "yuk_beruvchi");
 
   return (
     <>
       <PageHeader
         title="Haydovchilar"
-        subtitle={state.data ? `${formatNumber(registered.length)} ta ro'yxatdan o'tgan, ${formatNumber(active.length)} tasi faol` : "Botda ro'yxatdan o'tgan haydovchilar"}
+        subtitle={
+          state.data
+            ? `${formatNumber(registered.length)} ta ro'yxatdan o'tgan (${formatNumber(registered.length - shippers.length)} haydovchi, ${formatNumber(shippers.length)} yuk beruvchi), ${formatNumber(active.length)} tasi faol`
+            : "Botda ro'yxatdan o'tgan haydovchilar va yuk beruvchilar"
+        }
         actions={
           <Button onClick={state.reload} busy={state.loading && state.data != null}>
             Yangilash
@@ -91,7 +131,8 @@ export function DriversPage() {
               <table className="data-table drivers-table">
                 <thead>
                   <tr>
-                    <th scope="col">Haydovchi</th>
+                    <th scope="col">Foydalanuvchi</th>
+                    <th scope="col">Rol</th>
                     <th scope="col">Mashina</th>
                     <th scope="col">Yo'nalish</th>
                     <th scope="col">Holat</th>
@@ -106,7 +147,7 @@ export function DriversPage() {
                     const p = profileSummary(d.profile);
                     return (
                       <tr key={d.chatId}>
-                        <td data-label="Haydovchi">
+                        <td data-label="Foydalanuvchi">
                           <strong>{d.name || "Ismsiz"}</strong>
                           <div className="muted small">
                             {d.username ? (
@@ -117,6 +158,9 @@ export function DriversPage() {
                               "username yo'q"
                             )}
                           </div>
+                        </td>
+                        <td data-label="Rol">
+                          <RoleBadge driver={d} />
                         </td>
                         <td data-label="Mashina">
                           {p ? (
@@ -148,6 +192,7 @@ export function DriversPage() {
                         </td>
                         <td data-label="Holat">
                           <ActiveToggle key={`${d.chatId}:${d.active}`} driver={d} onChanged={state.reload} />
+                          <AdminToggle key={`${d.chatId}:admin:${d.isAdmin}`} driver={d} onChanged={state.reload} />
                         </td>
                         <td data-label="Yangilangan" className="nowrap">
                           <TimeAgo ts={d.updatedAt} now={now} />

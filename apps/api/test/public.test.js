@@ -74,7 +74,7 @@ test("cheklov: oynada limitdan ortig'i rad etiladi, keyingi oynada yana ruxsat",
 
 // --- Server ---
 let server, base, store, sessions, adminServer, adminBase;
-const env = { BOT_TOKEN };
+const env = { BOT_TOKEN, ADMIN_IDS: "558" };
 const HOUR = 3600 * 1000;
 
 function addLoad(id, load, { hoursAgo = 1, kind = "yuk" } = {}) {
@@ -286,4 +286,56 @@ test("boshqaruv markazi: haydovchi nomidan web havolasi (token # ichida)", async
   assert.equal(sessions.verify(url.split("#token=")[1]), 555);
   const missing = await fetch(`${adminBase}/api/drivers/1/web-link`, { method: "POST", headers: { "x-yuk-admin": "1" } });
   assert.equal(missing.status, 404);
+});
+
+test("admin: oddiy foydalanuvchiga 403; ADMIN_IDS va boshqaruv markazidagi belgi admin qiladi", async () => {
+  store.saveDriver(558, { name: "Bosh admin" }); // .env ADMIN_IDS=558
+  store.saveDriver(559, { name: "Yordamchi" });
+  store.saveDriver(560, { name: "Olim", username: "olim_yuk", role: "haydovchi", profile: { vehicle: { truckClass: "isuzu" }, fromAreas: [], toAreas: [] }, active: true });
+  const plain = sessions.issue(560);
+  for (const url of ["/pub/admin/overview", "/pub/admin/users"]) {
+    const denied = await call("GET", url, { token: plain });
+    assert.equal(denied.status, 403, url);
+    assert.equal(denied.body.code, "forbidden");
+  }
+  assert.equal((await call("PATCH", "/pub/admin/users/560", { token: plain, body: { active: false } })).status, 403);
+  assert.equal((await call("GET", "/pub/admin/overview")).status, 401, "tokensiz — 401");
+
+  const boss = sessions.issue(558);
+  assert.equal((await call("GET", "/pub/me", { token: boss })).body.isAdmin, true);
+  const overview = await call("GET", "/pub/admin/overview", { token: boss });
+  assert.equal(overview.status, 200);
+  assert.equal(overview.body.trucks.total, 2);
+  assert.ok(overview.body.queue && overview.body.drivers && Array.isArray(overview.body.ai));
+
+  // Boshqaruv markazidan (localhost) admin qilish — keyin u ham kira oladi
+  const helper = sessions.issue(559);
+  assert.equal((await call("GET", "/pub/admin/users", { token: helper })).status, 403);
+  const made = await fetch(`${adminBase}/api/drivers/559`, {
+    method: "PATCH",
+    headers: { "x-yuk-admin": "1", "content-type": "application/json" },
+    body: JSON.stringify({ isAdmin: true }),
+  });
+  assert.equal(made.status, 200);
+  assert.equal(store.getDriver(559).isAdmin, true);
+
+  const found = await call("GET", "/pub/admin/users?q=@olim&role=haydovchi", { token: helper });
+  assert.equal(found.status, 200);
+  assert.deepEqual(found.body.items.map((u) => u.chatId), [560]);
+  assert.equal(found.body.items[0].hasProfile, true);
+  assert.equal(found.body.items[0].phone, undefined);
+  assert.ok((await call("GET", "/pub/admin/users?role=none", { token: helper })).body.items.every((u) => u.role === null));
+
+  // Pauza, rolni almashtirish (sozlamalari o'chadi); admin qilish bu yerdan bo'lmaydi
+  assert.equal((await call("PATCH", "/pub/admin/users/560", { token: helper, body: { active: false } })).body.active, false);
+  const switched = await call("PATCH", "/pub/admin/users/560", { token: helper, body: { role: "yuk_beruvchi", isAdmin: true, plan: "pro" } });
+  assert.equal(switched.status, 200);
+  assert.equal(switched.body.role, "yuk_beruvchi");
+  assert.equal(switched.body.profile, null);
+  const after = store.getDriver(560);
+  assert.equal(after.isAdmin, false, "Mini App'dan admin qilib bo'lmaydi");
+  assert.equal(after.plan, "free", "Mini App'dan obunani o'zgartirib bo'lmaydi");
+  assert.equal((await call("PATCH", "/pub/admin/users/560", { token: helper, body: { active: true } })).status, 409, "sozlamasiz yoqib bo'lmaydi");
+  assert.equal((await call("PATCH", "/pub/admin/users/999999", { token: helper, body: { active: false } })).status, 404);
+  assert.equal((await call("PATCH", "/pub/admin/users/560", { token: helper, body: { role: "kosmonavt" } })).status, 400);
 });

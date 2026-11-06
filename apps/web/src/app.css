@@ -513,3 +513,106 @@ select:focus-visible {
   color: var(--hint);
   font-size: 14px;
 }
+
+/* --- 🛠 Boshqaruv (adminlar): plitkalar, AI ulanishlari, foydalanuvchilar --- */
+.group-title {
+  margin: 16px 4px 8px;
+  color: var(--hint);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tile {
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.tile.warn {
+  border-color: var(--error);
+}
+
+.tile b {
+  display: block;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.tile span {
+  display: block;
+  margin-top: 2px;
+  color: var(--hint);
+  font-size: 13px;
+}
+
+.ai-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-row strong {
+  overflow-wrap: anywhere;
+}
+
+.search {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+
+.users {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.user {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.user p {
+  margin: 4px 0 0;
+}
+
+.user-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag {
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.user-actions:empty {
+  display: none;
+}

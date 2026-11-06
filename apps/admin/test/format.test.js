@@ -96,6 +96,15 @@ test("loadView kartochka uchun hamma matnni beradi", () => {
   assert.equal(view.phones.length, 1);
 });
 
+test("yuk beruvchi profili: kerakli mashina va kuzov", () => {
+  const summary = profileSummary({ fromAreas: ["samarqand"], toAreas: [], domestic: true, international: false, truckClasses: ["fura", "isuzu"], bodyTypes: ["tent", "ploshatka"] });
+  assert.equal(summary.vehicle, "Kerak: Fura, Isuzu");
+  assert.equal(summary.size, "Kuzov: tent, ploshatka");
+  assert.equal(summary.from, "Samarqand vil.");
+  assert.equal(summary.to, "Hamma joy");
+  assert.equal(profileSummary({ fromAreas: [], toAreas: [], truckClasses: [], bodyTypes: [] }).vehicle, "Istalgan mashina");
+});
+
 test("haydovchi profili qisqa ko'rinishda", () => {
   const summary = profileSummary({
     vehicle: { truckClass: "fura", bodyType: "ref", capacityKg: 22000, body: { lengthM: 13.6, widthM: 2.45, heightM: 2.7 }, loadingSides: [] },

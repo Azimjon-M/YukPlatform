@@ -107,3 +107,10 @@ const query = (params) => new URLSearchParams(Object.entries(params).filter(([, 
 export const getLoads = (params = {}) => request("GET", `/pub/loads?${query(params)}`);
 // Bo'sh mashinalar (yuk beruvchiga) — parametrlar xuddi shunday
 export const getTrucks = (params = {}) => request("GET", `/pub/trucks?${query(params)}`);
+
+// --- Admin («🛠 Boshqaruv»): server har safar admin ekanini tekshiradi, boshqalarga 403 ---
+export const getAdminOverview = () => request("GET", "/pub/admin/overview");
+// q — ism / @username / id; role — haydovchi | yuk_beruvchi | none
+export const getAdminUsers = (params = {}) => request("GET", `/pub/admin/users?${query(params)}`);
+// { active } yoki { role } (boshqa rolga o'tsa, uning sozlamalari o'chadi)
+export const updateAdminUser = (chatId, body) => request("PATCH", `/pub/admin/users/${chatId}`, { body });

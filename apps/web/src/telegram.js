@@ -40,6 +40,12 @@ export function showAlert(message) {
   else window.alert(message);
 }
 
+// "Ha / Yo'q" savoli → Promise<boolean>. Telegram ichida — Telegram oynasi, brauzerda — oddiy confirm
+export function confirmAction(message) {
+  if (atLeast("6.2")) return new Promise((resolve) => tg.showConfirm(message, (ok) => resolve(Boolean(ok))));
+  return Promise.resolve(window.confirm(message));
+}
+
 // O'zgartirib, saqlamasdan yopmoqchi bo'lsa — Telegram "Yopilsinmi?" deb so'raydi
 export function setUnsaved(unsaved) {
   if (!atLeast("6.2")) return;

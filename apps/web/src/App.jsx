@@ -2,9 +2,11 @@
 //   haydovchi:     📋 Yuklar (menga mos / hammasi) · 🗺 Xarita · ⚙️ Sozlamalar (mashina va yo'nalish)
 //   yuk beruvchi:  🚚 Mashinalar (bo'sh mashinalar) · ⚙️ Sozlamalar (yo'nalish va kerakli mashina)
 // Rol tanlanmagan bo'lsa — «Siz kimsiz?» ekrani. Bot ham shu sozlamalar bo'yicha shaxsiy xabar yuboradi.
+// Adminlarga qo'shimcha 🛠 Boshqaruv (botdagi «🛠 Boshqaruv» tugmasi ?v=admin bilan ochadi).
 // Kirish: Telegram ichida — o'zi (initData), saytda — «Telegram bilan kirish». Server: apps/api public.js.
 import { useCallback, useEffect, useState } from "react";
 import { ROLES, decodeProfile, validRole, validRouteScope } from "@yuk/shared";
+import { AdminPage } from "./AdminPage.jsx";
 import { getConfig, logout, resume, setActive, setRole } from "./api.js";
 import { LoadsPage } from "./LoadsPage.jsx";
 import { LoginPage } from "./LoginPage.jsx";
@@ -20,6 +22,7 @@ const ROLE_TABS = {
   haydovchi: [{ id: "yuklar", icon: "📋", label: "Yuklar" }, { id: "xarita", icon: "🗺", label: "Xarita" }, SETTINGS_TAB],
   yuk_beruvchi: [{ id: "mashinalar", icon: "🚚", label: "Mashinalar" }, SETTINGS_TAB],
 };
+const ADMIN_TAB = { id: "admin", icon: "🛠", label: "Boshqaruv" };
 // Rolga qarab so'zlar
 const ROLE_TEXT = {
   haydovchi: { many: "yuklar", saved: "✅ Saqlandi. Mos yuklar shu yerda va botda shaxsiy xabarda." },
@@ -27,7 +30,7 @@ const ROLE_TEXT = {
 };
 
 const params = new URLSearchParams(window.location.search);
-const TAB_IDS = new Set(Object.values(ROLE_TABS).flat().map((t) => t.id));
+const TAB_IDS = new Set([...Object.values(ROLE_TABS).flat(), ADMIN_TAB].map((t) => t.id));
 // Bot sozlamalar tugmasida ?v=sozlamalar&r=<rol>&p=<hozirgi profil>&s=<doira> beradi
 const requestedTab = TAB_IDS.has(params.get("v")) ? params.get("v") : params.has("p") ? "sozlamalar" : null;
 // ?r= — bot bilgan rol; ?p= shu rolning profili (eski bot havolasida r= yo'q edi — u haydovchi profili)
@@ -171,7 +174,8 @@ export function App() {
     );
   }
 
-  const tabs = ROLE_TABS[role] ?? [];
+  // Admin bo'limi faqat server bilan aloqa bo'lsa (ma'lumot serverdan, huquq ham serverda tekshiriladi)
+  const tabs = [...(ROLE_TABS[role] ?? []), ...(online && me.isAdmin ? [ADMIN_TAB] : [])];
   const current = tabs.some((t) => t.id === tab) ? tab : (tabs[0]?.id ?? null);
   const switchTab = (id) => {
     haptic.select();
@@ -216,6 +220,8 @@ export function App() {
     );
   } else if (!online) {
     page = offlineNotice;
+  } else if (current === "admin") {
+    page = <AdminPage onAuthLost={onAuthLost} />;
   } else if (current === "xarita") {
     page = <MapPage view={view} onView={setView} onNeedProfile={onNeedProfile} onAuthLost={onAuthLost} />;
   } else {
@@ -262,7 +268,7 @@ export function App() {
       </header>
 
       <main>
-        {me && !me.active && me.profile && showTabs && current !== "sozlamalar" && (
+        {me && !me.active && me.profile && showTabs && current !== "sozlamalar" && current !== "admin" && (
           <div className="notice">⏸ Pauzadasiz: botga yangi {ROLE_TEXT[role].many} kelmaydi. Bu yerda ko'rish mumkin.</div>
         )}
         {page}
