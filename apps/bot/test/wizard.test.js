@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchLoad } from "@yuk/shared";
+import { matchLoad, matchTruck, sanitizeShipperProfile } from "@yuk/shared";
 import {
+  SHIPPER_STEPS,
   STEPS,
   applyAction,
   applyText,
@@ -164,4 +165,50 @@ test("yo'nalish doirasi: qo'shni — 5 ta davlat; ichki — davlat va xalqaro sa
   assert.equal(press(i, "w:mode:back").step, "to");
   assert.equal(profileFromDraft({ ...i, international: true }).international, false);
   assert.equal(press({ ...i, step: "done" }, "w:done:restart").scope, "ichki", "qaytadan boshlansa ham doira saqlanadi");
+});
+
+test("yuk beruvchi: qayerdan → qayerga → mashina → kuzov → xalqaro → saqlash", () => {
+  for (const step of SHIPPER_STEPS) {
+    for (const b of buttons({ ...newDraft(null, undefined, "yuk_beruvchi"), step })) assert.ok(Buffer.byteLength(b.data) <= 64, b.data);
+  }
+  let d = newDraft(null, undefined, "yuk_beruvchi");
+  assert.equal(d.step, "from");
+  assert.match(renderStep(d).text, /Yukingiz qayerda yuklanadi/);
+  d = press(d, "w:from:t.samarqand");
+  d = press(d, "w:from:ok");
+  d = press(d, "w:to:t.toshkent");
+  d = press(d, "w:to:ok");
+  assert.equal(d.step, "classes");
+  d = press(d, find(d, "Fura"));
+  d = press(d, find(d, "Isuzu"));
+  d = press(d, "w:classes:t.raketa"); // soxta tugma — e'tiborsiz
+  d = press(d, "w:classes:ok");
+  assert.equal(d.step, "bodies");
+  assert.ok(!buttons(d).some((b) => b.text === "Boshqa"), "«Boshqa» kuzov yuk beruvchiga kerak emas");
+  d = press(d, find(d, "Tent"));
+  d = press(d, "w:bodies:ok");
+  assert.equal(d.step, "intl");
+  assert.equal(press(d, "w:intl:back").step, "bodies");
+  d = press(d, "w:intl:yoq");
+  assert.equal(d.step, "done");
+  assert.match(renderStep(d).text, /Yuk qayerda: Samarqand[\s\S]*Mashina: Fura, Isuzu[\s\S]*Kuzov: Tent/);
+
+  const profile = profileFromDraft(d);
+  assert.deepEqual(profile, {
+    fromAreas: ["samarqand"],
+    toAreas: ["toshkent"],
+    domestic: true,
+    international: false,
+    truckClasses: ["fura", "isuzu"],
+    bodyTypes: ["tent"],
+  });
+  assert.deepEqual(sanitizeShipperProfile(profile).profile, profile, "savol-javob natijasi tekshiruvdan o'zgarmay o'tadi");
+  // Samarqanddagi bo'sh tent fura — mos; ref — mos emas; qayerga yozilmagan — baribir mos
+  assert.equal(matchTruck({ fromRegion: "samarqand", truckClass: "fura", bodyType: "tent" }, profile).ok, true);
+  assert.equal(matchTruck({ fromRegion: "samarqand", truckClass: "fura", bodyType: "ref" }, profile).ok, false);
+
+  // Qaytadan — rol saqlanadi; ichki doirada xalqaro savoli yo'q
+  assert.equal(press(d, "w:done:restart").role, "yuk_beruvchi");
+  let i = { ...newDraft(null, "ichki", "yuk_beruvchi"), step: "bodies" };
+  assert.equal(press(i, "w:bodies:ok").step, "done");
 });

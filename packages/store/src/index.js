@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS loads (
 );
 CREATE INDEX IF NOT EXISTS loads_key ON loads (key, created_at);
 
+-- Botning hamma foydalanuvchilari (haydovchi ham, yuk beruvchi ham). Nomi tarixiy: avval faqat haydovchilar edi.
+-- role, plan, is_admin ustunlari migrate() da qo'shiladi (eski bazalar uchun)
 CREATE TABLE IF NOT EXISTS drivers (
   chat_id INTEGER PRIMARY KEY,       -- Telegram foydalanuvchi id (shaxsiy chat)
   name TEXT,
@@ -106,6 +108,21 @@ function migrate(db) {
   // done_at — e'lon tahlil qilib bo'lingan vaqt (boshqaruv markazida tezlikni ko'rsatish uchun)
   if (!columns.includes("done_at")) db.exec("ALTER TABLE posts ADD COLUMN done_at INTEGER");
   db.exec("CREATE INDEX IF NOT EXISTS posts_done ON posts (done_at)");
+
+  // Rollar (2026-11-06): role — haydovchi | yuk_beruvchi | NULL (hali tanlamagan);
+  // plan — obuna (hozircha hammasi "free", pullik obuna keyin); is_admin — faqat boshqaruv markazidan yoqiladi
+  const users = db.prepare("PRAGMA table_info(drivers)").all().map((c) => c.name);
+  if (!users.includes("role")) {
+    db.exec("ALTER TABLE drivers ADD COLUMN role TEXT");
+    // Rollardan oldin profil to'ldirganlarning hammasi haydovchi edi
+    db.exec("UPDATE drivers SET role = 'haydovchi' WHERE profile IS NOT NULL");
+  }
+  if (!users.includes("plan")) db.exec("ALTER TABLE drivers ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'");
+  if (!users.includes("is_admin")) db.exec("ALTER TABLE drivers ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+
+  // kind — yuk (yuk bor, mashina kerak) | mashina (mashina bo'sh, yuk kerak — yuk beruvchilarga)
+  const loads = db.prepare("PRAGMA table_info(loads)").all().map((c) => c.name);
+  if (!loads.includes("kind")) db.exec("ALTER TABLE loads ADD COLUMN kind TEXT NOT NULL DEFAULT 'yuk'");
 }
 
 const json = (value) => (value == null ? null : JSON.stringify(value));
@@ -117,9 +134,13 @@ function driverRow(row) {
     chatId: row.chat_id,
     name: row.name,
     username: row.username,
+    // Rol ustuni bo'lmagan eski yozuv: profili bo'lsa — haydovchi (migrate shunday to'ldiradi)
+    role: row.role ?? (row.profile != null ? "haydovchi" : null),
     profile: parse(row.profile),
     draft: parse(row.draft),
     active: row.active === 1,
+    plan: row.plan ?? "free",
+    isAdmin: row.is_admin === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -154,27 +175,33 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       `UPDATE posts SET status = 'done', error = ?, done_at = ?
        WHERE status = 'new' AND posted_at < ? AND id NOT IN (SELECT value FROM json_each(?))`,
     ),
-    recentLoad: db.prepare("SELECT id FROM loads WHERE key = ? AND created_at > ? LIMIT 1"),
-    insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, created_at) VALUES (?, ?, ?, ?)"),
+    recentLoad: db.prepare("SELECT id FROM loads WHERE key = ? AND kind = ? AND created_at > ? LIMIT 1"),
+    insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, kind, created_at) VALUES (?, ?, ?, ?, ?)"),
     loadDelivery: db.prepare("UPDATE loads SET sent_to = ?, channel_message_id = ? WHERE id = ?"),
     recentLoads: db.prepare(
       `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at
        FROM loads l JOIN posts p ON p.id = l.post_id
-       WHERE l.created_at > ? ORDER BY l.id DESC LIMIT ?`,
+       WHERE l.created_at > ? AND l.kind = ? ORDER BY l.id DESC LIMIT ?`,
     ),
     getDriver: db.prepare("SELECT * FROM drivers WHERE chat_id = ?"),
     insertDriver: db.prepare(
       "INSERT OR IGNORE INTO drivers (chat_id, name, username, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     ),
-    activeDrivers: db.prepare("SELECT * FROM drivers WHERE active = 1 AND profile IS NOT NULL"),
+    // Rolsiz eski yozuv profili bilan — haydovchi (driverRow dagi qoida bilan bir xil)
+    activeUsers: db.prepare(
+      "SELECT * FROM drivers WHERE active = 1 AND profile IS NOT NULL AND COALESCE(role, 'haydovchi') = ?",
+    ),
     getCursor: db.prepare("SELECT last_message_id FROM cursors WHERE source = ?"),
     setCursor: db.prepare(
       `INSERT INTO cursors (source, last_message_id) VALUES (?, ?)
        ON CONFLICT (source) DO UPDATE SET last_message_id = excluded.last_message_id`,
     ),
     postCounts: db.prepare("SELECT status, COUNT(*) AS n FROM posts GROUP BY status"),
-    driverCounts: db.prepare("SELECT COUNT(*) AS total, SUM(active) AS active FROM drivers WHERE profile IS NOT NULL"),
-    loadCounts: db.prepare("SELECT COUNT(*) AS total, SUM(sent_to) AS sent FROM loads WHERE created_at > ?"),
+    driverCounts: db.prepare(
+      `SELECT COALESCE(role, 'haydovchi') AS role, COUNT(*) AS total, SUM(active) AS active
+       FROM drivers WHERE profile IS NOT NULL GROUP BY 1`,
+    ),
+    loadCounts: db.prepare("SELECT kind, COUNT(*) AS total, SUM(sent_to) AS sent FROM loads WHERE created_at > ? GROUP BY kind"),
   };
 
   return {
@@ -227,24 +254,27 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       return Number(q.expirePosts.run(error, now(), before, JSON.stringify(exclude)).changes);
     },
 
-    // --- Yuklar ---
-    // Shu kalitli yuk oxirgi windowMs ichida bo'lganmi (bo'lsa — takror, yuborilmaydi)
-    hasRecentLoad(key, windowMs) {
-      return Boolean(q.recentLoad.get(key, now() - windowMs));
+    // --- Yuklar va bo'sh mashinalar ---
+    // kind: "yuk" (standart) — yuk bor, haydovchilarga; "mashina" — mashina bo'sh, yuk beruvchilarga.
+    // Ikkalasi bitta jadvalda: maydonlari bir xil (parser mashina e'lonini ham yuk maydonlari bilan yozadi).
+
+    // Shu kalitli yuk (yoki mashina) oxirgi windowMs ichida bo'lganmi (bo'lsa — takror, yuborilmaydi)
+    hasRecentLoad(key, windowMs, kind = "yuk") {
+      return Boolean(q.recentLoad.get(key, kind, now() - windowMs));
     },
 
-    addLoad({ postId, key, load }) {
-      return Number(q.insertLoad.run(postId, key, JSON.stringify(load), now()).lastInsertRowid);
+    addLoad({ postId, key, load, kind = "yuk" }) {
+      return Number(q.insertLoad.run(postId, key, JSON.stringify(load), kind, now()).lastInsertRowid);
     },
 
     setLoadDelivery(id, { sentTo = 0, channelMessageId = null }) {
       q.loadDelivery.run(sentTo, channelMessageId, id);
     },
 
-    // Oxirgi yuklar, eng yangisi birinchi ("📋 Mos yuklar" tugmasi uchun).
+    // Oxirgi yuklar, eng yangisi birinchi ("📋 Mos yuklar" / "🚚 Bo'sh mashinalar" tugmalari uchun).
     // → [{ id, load, post: { source, link, postedAt }, createdAt }]
-    recentLoads({ sinceMs = 24 * 60 * 60 * 1000, limit = 500 } = {}) {
-      return q.recentLoads.all(now() - sinceMs, limit).map((row) => ({
+    recentLoads({ sinceMs = 24 * 60 * 60 * 1000, limit = 500, kind = "yuk" } = {}) {
+      return q.recentLoads.all(now() - sinceMs, kind, limit).map((row) => ({
         id: row.id,
         load: JSON.parse(row.data),
         post: { source: row.source, link: row.link, postedAt: row.posted_at },
@@ -257,22 +287,30 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       return driverRow(q.getDriver.get(chatId));
     },
 
-    // fields: name, username, profile, draft, active — faqat berilganlari o'zgaradi
+    // fields: name, username, role, profile, draft, active, plan, isAdmin — faqat berilganlari o'zgaradi.
+    // Rolni tekshirish (haydovchi | yuk_beruvchi) chaqiruvchining ishi: bu yerga faqat to'g'ri qiymat keladi.
     saveDriver(chatId, fields) {
       const time = now();
       q.insertDriver.run(chatId, fields.name ?? null, fields.username ?? null, time, time);
-      const columns = { name: fields.name, username: fields.username, active: fields.active };
+      const columns = { name: fields.name, username: fields.username, active: fields.active, role: fields.role, plan: fields.plan };
       if ("profile" in fields) columns.profile = json(fields.profile);
       if ("draft" in fields) columns.draft = json(fields.draft);
       if (typeof columns.active === "boolean") columns.active = columns.active ? 1 : 0;
+      if (typeof fields.isAdmin === "boolean") columns.is_admin = fields.isAdmin ? 1 : 0;
       const set = Object.entries(columns).filter(([, value]) => value !== undefined);
       const sql = `UPDATE drivers SET ${[...set.map(([k]) => `${k} = ?`), "updated_at = ?"].join(", ")} WHERE chat_id = ?`;
       db.prepare(sql).run(...set.map(([, value]) => value), time, chatId);
       return this.getDriver(chatId);
     },
 
+    // Profili bor va yoqilgan foydalanuvchilar: role = "haydovchi" (yuk oladi) yoki "yuk_beruvchi" (mashina oladi)
+    activeUsers(role = "haydovchi") {
+      return q.activeUsers.all(role).map(driverRow);
+    },
+
+    // Eski nom: faol haydovchilar
     activeDrivers() {
-      return q.activeDrivers.all().map(driverRow);
+      return this.activeUsers("haydovchi");
     },
 
     // --- Collector qayergacha o'qigani ---
@@ -297,14 +335,18 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     },
 
     // --- Hisobot (/holat) ---
+    // drivers — haydovchilar, shippers — yuk beruvchilar; loads24h — yuklar, trucks24h — bo'sh mashinalar
     stats({ sinceMs = 24 * 60 * 60 * 1000 } = {}) {
       const posts = Object.fromEntries(q.postCounts.all().map((r) => [r.status, r.n]));
-      const drivers = q.driverCounts.get();
-      const loads = q.loadCounts.get(now() - sinceMs);
+      const users = Object.fromEntries(q.driverCounts.all().map((r) => [r.role, { total: r.total ?? 0, active: r.active ?? 0 }]));
+      const loads = Object.fromEntries(q.loadCounts.all(now() - sinceMs).map((r) => [r.kind, { total: r.total ?? 0, sent: r.sent ?? 0 }]));
+      const empty = { total: 0, active: 0 };
       return {
         posts,
-        drivers: { total: drivers.total ?? 0, active: drivers.active ?? 0 },
-        loads24h: { total: loads.total ?? 0, sent: loads.sent ?? 0 },
+        drivers: users.haydovchi ?? empty,
+        shippers: users.yuk_beruvchi ?? empty,
+        loads24h: loads.yuk ?? { total: 0, sent: 0 },
+        trucks24h: loads.mashina ?? { total: 0, sent: 0 },
       };
     },
 

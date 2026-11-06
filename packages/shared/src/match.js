@@ -124,3 +124,31 @@ export function matchLoad(load, driver = {}) {
 export function findDrivers(load, drivers) {
   return drivers.filter((driver) => matchLoad(load, driver).ok);
 }
+
+// --- Bo'sh mashina ↔ yuk beruvchi ---
+// truck — parserning "mashina_bor" yozuvi (yuk maydonlarida): fromRegion/fromCountry — mashina qayerda yuk oladi,
+//   toRegion/toCountry — qayerga boradi, truckClass, bodyType, weightT — necha tonna ko'taradi.
+// shipper — yuk beruvchi profili (profile.js sanitizeShipperProfile).
+// Qoida yuklarnikidek: e'londa yozilmagan narsa cheklov emas. Bo'sh mashina e'lonlarida "qayerga" ko'pincha
+// yozilmaydi ("Samarqanddan yuk olaman") — demak istalgan joyga boradi, yuk beruvchiga baribir yuboriladi.
+export function matchTruck(truck, shipper = {}) {
+  const reasons = [];
+  const international = isInternational(truck);
+  if (international && !shipper.international) reasons.push("xalqaro mashina");
+  if (!international && shipper.domestic === false) reasons.push("O'zbekiston ichidagi mashina");
+
+  const known = (side) => truck[`${side}Region`] != null || truck[`${side}Country`] != null;
+  if (known("from") && !inAreas(truck.fromRegion, truck.fromCountry, shipper.fromAreas)) reasons.push("boshqa joyda");
+  if (known("to") && !inAreas(truck.toRegion, truck.toCountry, shipper.toAreas)) reasons.push("boshqa tomonga boradi");
+
+  if (truck.truckClass && shipper.truckClasses?.length && !shipper.truckClasses.includes(truck.truckClass)) {
+    reasons.push(`${truck.truckClass} kerak emas`);
+  }
+  if (truck.bodyType && shipper.bodyTypes?.length && !shipper.bodyTypes.includes(truck.bodyType)) {
+    reasons.push(`${truck.bodyType} kuzov kerak emas`);
+  }
+  return { ok: reasons.length === 0, reasons };
+}
+
+// E'lon turi (loads.kind) → qaysi tekshiruv: yuk — haydovchiga, mashina — yuk beruvchiga (roles.js KIND_ROLE)
+export const KIND_MATCHERS = { yuk: matchLoad, mashina: matchTruck };

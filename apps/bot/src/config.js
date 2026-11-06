@@ -53,7 +53,17 @@ export function readConfig(env = process.env) {
 
   const maxPostAgeMs = readMaxPostAge(env);
 
-  return { token, channel, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope, maxPostAgeMs };
+  // Yuklarni kanalga ham joylash. Standart — YO'Q (Azimjonning qarori, 2026-11-06): yuklar faqat haydovchilarga
+  // shaxsiy xabarda boradi, kanal va guruh keyin boshqa maqsadda ishlatiladi. CHANNEL_ID baribir kerak:
+  // bot o'z kanalining postlarini (va muhokama guruhidagi nusxalarini) yangi e'lon deb navbatga olmasin.
+  const channelLoads = readFlag(env.CHANNEL_LOADS);
+
+  return { token, channel, channelLoads, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope, maxPostAgeMs };
+}
+
+// "1", "ha", "true", "on" — yoqilgan; bo'sh va boshqa hamma narsa — o'chiq
+export function readFlag(value) {
+  return /^(1|ha|yes|true|on)$/i.test(value?.trim() ?? "");
 }
 
 // Joylanganiga necha soatdan oshgan e'lon AI'ga bormaydi va «Eskirgan» deb yopiladi.

@@ -42,8 +42,10 @@ export function createAdminQueries(db, now) {
     // --- Yuklar ---
     // filters: from, to (viloyat kodi), truckClass, bodyType, q (matn), hours (oxirgi N soat)
     // → { total, items: [{ id, load, post, createdAt, sentTo, channelMessageId }] } — eng yangisi birinchi
-    listLoads({ from, to, truckClass, bodyType, q, hours, limit, offset } = {}) {
+    // kind: "yuk" (standart) yoki "mashina" (bo'sh mashina e'lonlari)
+    listLoads({ from, to, truckClass, bodyType, q, hours, limit, offset, kind = "yuk" } = {}) {
       const { where, params } = buildWhere([
+        ["l.kind = ?", kind],
         ["json_extract(l.data, '$.fromRegion') = ?", from],
         ["json_extract(l.data, '$.toRegion') = ?", to],
         ["json_extract(l.data, '$.truckClass') = ?", truckClass],
@@ -101,9 +103,12 @@ export function createAdminQueries(db, now) {
           chatId: row.chat_id,
           name: row.name,
           username: row.username,
+          role: row.role ?? (row.profile != null ? "haydovchi" : null),
           profile: parse(row.profile),
           registering: row.profile == null && row.draft != null,
           active: row.active === 1,
+          plan: row.plan ?? "free",
+          isAdmin: row.is_admin === 1,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
         }));
@@ -150,7 +155,7 @@ export function createAdminQueries(db, now) {
         )
         .all(since);
       const loads = db
-        .prepare("SELECT p.source, COUNT(*) AS loads FROM loads l JOIN posts p ON p.id = l.post_id WHERE l.created_at > ? GROUP BY p.source")
+        .prepare("SELECT p.source, COUNT(*) AS loads FROM loads l JOIN posts p ON p.id = l.post_id WHERE l.created_at > ? AND l.kind = 'yuk' GROUP BY p.source")
         .all(since);
       const out = {};
       for (const row of posts) out[row.source] = { posts: row.posts, duplicates: row.duplicates ?? 0, loads: 0, lastPostAt: row.last_post_at };
@@ -185,11 +190,22 @@ export function createAdminQueries(db, now) {
       const hourly = {
         posts: bucket(group("SELECT created_at AS t, 1 AS n FROM posts WHERE created_at > ? AND status != 'duplicate'")),
         processed: bucket(group("SELECT done_at AS t, 1 AS n FROM posts WHERE done_at > ?")),
-        loads: bucket(group("SELECT created_at AS t, 1 AS n FROM loads WHERE created_at > ?")),
+        loads: bucket(group("SELECT created_at AS t, 1 AS n FROM loads WHERE created_at > ? AND kind = 'yuk'")),
       };
 
-      const drivers = db.prepare("SELECT COUNT(*) AS total, SUM(active) AS active FROM drivers WHERE profile IS NOT NULL").get();
-      const loads = db.prepare("SELECT COUNT(*) AS total, SUM(sent_to > 0) AS delivered, SUM(sent_to) AS messages FROM loads WHERE created_at > ?").get(since);
+      // drivers — haydovchilar (rolsiz eski yozuvlar ham), shippers — yuk beruvchilar
+      const users = (role) =>
+        db
+          .prepare("SELECT COUNT(*) AS total, SUM(active) AS active FROM drivers WHERE profile IS NOT NULL AND COALESCE(role, 'haydovchi') = ?")
+          .get(role);
+      const drivers = users("haydovchi");
+      const shippers = users("yuk_beruvchi");
+      const loadStats = (kind) =>
+        db
+          .prepare("SELECT COUNT(*) AS total, SUM(sent_to > 0) AS delivered, SUM(sent_to) AS messages FROM loads WHERE created_at > ? AND kind = ?")
+          .get(since, kind);
+      const loads = loadStats("yuk");
+      const trucks = loadStats("mashina");
       return {
         now: time,
         hours,
@@ -207,7 +223,9 @@ export function createAdminQueries(db, now) {
           medianDelayMin: delays.length ? Math.round((median(delays) / 60000) * 10) / 10 : null,
         },
         loads: { total: loads.total ?? 0, delivered: loads.delivered ?? 0, messages: loads.messages ?? 0 },
+        trucks: { total: trucks.total ?? 0, delivered: trucks.delivered ?? 0, messages: trucks.messages ?? 0 },
         drivers: { total: drivers.total ?? 0, active: drivers.active ?? 0 },
+        shippers: { total: shippers.total ?? 0, active: shippers.active ?? 0 },
         hourly,
       };
     },

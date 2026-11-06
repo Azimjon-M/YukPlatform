@@ -5,10 +5,24 @@
 // Telegram va AI tashqaridan beriladi (deps), shuning uchun testda soxtasi qo'yiladi.
 import { setTimeout as wait } from "node:timers/promises";
 import { poolFromParser } from "@yuk/parser";
-import { DEFAULT_DEDUPE_WINDOW_MS, DEFAULT_ROUTE_SCOPE, loadKeys, matchLoad, routeInScope, routeText } from "@yuk/shared";
+import {
+  DEFAULT_DEDUPE_WINDOW_MS,
+  DEFAULT_ROUTE_SCOPE,
+  KIND_MATCHERS,
+  KIND_ROLE,
+  loadKeys,
+  planAllows,
+  routeInScope,
+  routeText,
+} from "@yuk/shared";
 
-// AI natijasi tayyor bo'lgan bitta e'lon: yo'nalish doirasi → takrorni tashlash → bazaga yozish → kanal → haydovchilar.
-// deps: { store, publish?(load, post) → kanal xabar id | null, deliver(chatId, load, post) → true/false, windowMs,
+// E'lon turi → bazadagi kind va kimga boradi (rollar: @yuk/shared roles.js)
+//   yuk_bor     → kind "yuk"     → haydovchilarga (matchLoad: mashinasi va yo'nalishi)
+//   mashina_bor → kind "mashina" → yuk beruvchilarga (matchTruck: yo'nalishi, kerakli mashina turi)
+const POST_KIND = { yuk_bor: "yuk", mashina_bor: "mashina" };
+
+// AI natijasi tayyor bo'lgan bitta e'lon: yo'nalish doirasi → takrorni tashlash → bazaga yozish → kanal → foydalanuvchilar.
+// deps: { store, publish?(load, post) → kanal xabar id | null, deliver(chatId, load, post, kind) → true/false, windowMs,
 //         routeScope — @yuk/shared ROUTE_SCOPES kodi (.env dagi ROUTE_SCOPE; standart "qoshni") }
 export async function handleParsed(post, result, deps) {
   const { store, windowMs = DEFAULT_DEDUPE_WINDOW_MS, routeScope = DEFAULT_ROUTE_SCOPE } = deps;
@@ -16,8 +30,9 @@ export async function handleParsed(post, result, deps) {
     store.finishPost(post.id, "failed", result.error);
     return { status: "failed", error: result.error };
   }
-  // Hozircha faqat "yuk bor, mashina kerak" e'lonlari yuboriladi. "Mashina bo'sh" — keyin yuk beruvchilarga.
-  if (result.postType !== "yuk_bor" || result.loads.length === 0) {
+  // "Yuk bor" — haydovchilarga, "mashina bo'sh" — yuk beruvchilarga. Reklama va boshqasi — hech kimga.
+  const kind = POST_KIND[result.postType];
+  if (!kind || result.loads.length === 0) {
     store.finishPost(post.id, "done", result.postType);
     return { status: "skipped", postType: result.postType };
   }
@@ -28,7 +43,7 @@ export async function handleParsed(post, result, deps) {
   if (loads.length === 0) {
     const routes = [...new Set(result.loads.map(routeText))];
     store.finishPost(post.id, "done", `Boshqa yo'nalish: ${routes.slice(0, 3).join(", ")}${routes.length > 3 ? "…" : ""}`);
-    return { status: "skipped", reason: "route", outOfScope: result.loads.length };
+    return { status: "skipped", reason: "route", kind, outOfScope: result.loads.length };
   }
 
   // Avval hamma yangi yuklarni bazaga yozamiz, keyin yuboramiz:
@@ -36,24 +51,28 @@ export async function handleParsed(post, result, deps) {
   const keys = loadKeys(loads);
   const fresh = [];
   loads.forEach((load, i) => {
-    if (store.hasRecentLoad(keys[i], windowMs)) return;
-    fresh.push({ id: store.addLoad({ postId: post.id, key: keys[i], load }), load });
+    if (store.hasRecentLoad(keys[i], windowMs, kind)) return;
+    fresh.push({ id: store.addLoad({ postId: post.id, key: keys[i], load, kind }), load });
   });
 
-  const drivers = store.activeDrivers();
+  const users = store.activeUsers(KIND_ROLE[kind]);
+  const matches = KIND_MATCHERS[kind];
   let sent = 0;
   for (const { id, load } of fresh) {
-    const channelMessageId = (await deps.publish?.(load, post)) ?? null;
+    // Kanal faqat yuklar uchun (va faqat CHANNEL_LOADS=1 bo'lsa — bot.js publish)
+    const channelMessageId = kind === "yuk" ? ((await deps.publish?.(load, post)) ?? null) : null;
     let count = 0;
-    for (const driver of drivers) {
-      if (!matchLoad(load, driver.profile).ok) continue;
-      if (await deps.deliver(driver.chatId, load, post)) count++;
+    for (const user of users) {
+      if (!matches(load, user.profile).ok) continue;
+      // Obuna (hozircha hamma bepul va hammaga yuboriladi — roles.js planAllows)
+      if (!planAllows(user, { kind })) continue;
+      if (await deps.deliver(user.chatId, load, post, kind)) count++;
     }
     store.setLoadDelivery(id, { sentTo: count, channelMessageId });
     sent += count;
   }
   store.finishPost(post.id, "done");
-  return { status: "done", loads: loads.length, outOfScope: result.loads.length - loads.length, fresh: fresh.length, sent };
+  return { status: "done", kind, loads: loads.length, outOfScope: result.loads.length - loads.length, fresh: fresh.length, sent };
 }
 
 // Bitta e'lon: AI (alohida so'rov) + handleParsed.
@@ -191,7 +210,8 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
           const outcome = await handleParsed(post, results[i], deps);
           if (outcome.status === "done") {
             const other = outcome.outOfScope ? ` (+${outcome.outOfScope} tasi boshqa yo'nalish)` : "";
-            log(`#${post.id} ${post.source}: ${outcome.fresh}/${outcome.loads} yangi yuk${other}, ${outcome.sent} ta haydovchiga`);
+            const [what, whom] = outcome.kind === "mashina" ? ["bo'sh mashina", "yuk beruvchiga"] : ["yuk", "haydovchiga"];
+            log(`#${post.id} ${post.source}: ${outcome.fresh}/${outcome.loads} yangi ${what}${other}, ${outcome.sent} ta ${whom}`);
           }
           else if (outcome.status === "failed") log(`#${post.id}: xato — ${outcome.error}`);
         } catch (error) {

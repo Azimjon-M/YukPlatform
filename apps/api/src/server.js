@@ -66,7 +66,10 @@ function failed(port, name) {
   };
 }
 
-const publicServer = publicApp.listen(PUBLIC_PORT, HOST, () => {
+// Express 5: app.listen callback'i port band bo'lganda HAM chaqiriladi (xato argument bo'lib keladi).
+// Tekshirmasak, "ishga tushdi" deb yozib, keyin "port band" deb yiqiladi. Xatoning o'zini failed() yozadi.
+const publicServer = publicApp.listen(PUBLIC_PORT, HOST, (error) => {
+  if (error) return;
   const tunnel = process.env.PUBLIC_URL?.trim();
   const internet = tunnel
     ? `  (internetda: ${tunnel})`
@@ -77,7 +80,9 @@ const publicServer = publicApp.listen(PUBLIC_PORT, HOST, () => {
 });
 publicServer.on("error", failed(PUBLIC_PORT, "haydovchilar web'i"));
 
-const server = app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, (error) => {
+  // Port band bo'lsa bot va collector'ni yoqmaymiz: ular allaqachon ishlab turgan nusxaniki
+  if (error) return;
   log(`Boshqaruv markazi: http://localhost:${PORT}/admin  (to'xtatish: Ctrl+C)`);
   for (const name of autostart) {
     try {

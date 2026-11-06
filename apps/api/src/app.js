@@ -25,6 +25,8 @@ export function configInfo(env, { publicUrl = null, tunnel = null } = {}) {
   return {
     botToken: Boolean(env.BOT_TOKEN),
     channel: env.CHANNEL_ID || null,
+    // Bot yuklarni kanalga ham joylaydimi (apps/bot config.js: standart — yo'q)
+    channelLoads: /^(1|ha|yes|true|on)$/i.test(env.CHANNEL_LOADS?.trim() ?? ""),
     miniappUrl: env.MINIAPP_URL || tunnel || null,
     miniappFromTunnel: !env.MINIAPP_URL && Boolean(tunnel),
     publicUrl,

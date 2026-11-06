@@ -140,6 +140,43 @@ export function sanitizeProfile(input, { scope } = {}) {
   };
 }
 
+// --- Yuk beruvchi profili (rol "yuk_beruvchi") ---
+// { fromAreas, toAreas, domestic, international, truckClasses: ["fura", ...], bodyTypes: ["tent", ...] }
+//   fromAreas — yuk qayerda yuklanadi (bo'sh mashina shu yerda bo'lishi kerak), toAreas — yuk qayerga boradi;
+//   truckClasses / bodyTypes — qanday mashina kerak (bo'sh — istalgani). Moslash: match.js matchTruck.
+export function emptyShipperProfile() {
+  return { fromAreas: [], toAreas: [], domestic: true, international: false, truckClasses: [], bodyTypes: [] };
+}
+
+// Tashqaridan kelgan yuk beruvchi profilini tekshiradi. → { profile } yoki { error }. scope — sanitizeProfile dagidek
+export function sanitizeShipperProfile(input, { scope } = {}) {
+  if (!input || typeof input !== "object") return { error: "Ma'lumot kelmadi" };
+  const abroad = scope === undefined || scopeCountries(scope).length > 0;
+  const domestic = abroad ? input.domestic !== false : true;
+  const international = abroad && input.international === true;
+  if (!domestic && !international) return { error: "O'zbekiston yoki xalqaro — bittasini tanlang" };
+  const areas = scope === undefined ? AREAS : new Set(areaIds(scope));
+  // "Boshqa" kuzov tanlovda ma'nosiz: e'londa kuzov aytilmasa, u baribir mos keladi
+  const bodies = new Set(BODY_TYPE_IDS.filter((id) => id !== "boshqa"));
+  return {
+    profile: {
+      fromAreas: pick(input.fromAreas, areas),
+      toAreas: pick(input.toAreas, areas),
+      domestic,
+      international,
+      truckClasses: pick(input.truckClasses, new Set(TRUCK_CLASS_IDS)),
+      bodyTypes: pick(input.bodyTypes, bodies),
+    },
+  };
+}
+
+// Rolga qarab: haydovchi — sanitizeProfile, yuk beruvchi — sanitizeShipperProfile
+export function sanitizeProfileFor(role, input, options = {}) {
+  if (role === "yuk_beruvchi") return sanitizeShipperProfile(input, options);
+  if (role === "haydovchi") return sanitizeProfile(input, options);
+  return { error: "Avval kim ekaningizni tanlang: haydovchi yoki yuk beruvchi" };
+}
+
 // --- Mini App manzilida (?p=...) profilni olib o'tish: forma haydovchining hozirgi sozlamalari bilan ochiladi ---
 function toBase64Url(text) {
   let binary = "";
@@ -157,11 +194,11 @@ export function encodeProfile(profile) {
   return toBase64Url(JSON.stringify(profile));
 }
 
-// Noto'g'ri yoki buzilgan bo'lsa — null. scope — sanitizeProfile dagidek
-export function decodeProfile(text, { scope } = {}) {
+// Noto'g'ri yoki buzilgan bo'lsa — null. scope — sanitizeProfile dagidek; role — qaysi profil (standart: haydovchi)
+export function decodeProfile(text, { scope, role = "haydovchi" } = {}) {
   if (!text) return null;
   try {
-    return sanitizeProfile(JSON.parse(fromBase64Url(text)), { scope }).profile ?? null;
+    return sanitizeProfileFor(role, JSON.parse(fromBase64Url(text)), { scope }).profile ?? null;
   } catch {
     return null;
   }

@@ -43,7 +43,7 @@ test("yuk kanalga va faqat mos, faol haydovchiga boradi", async () => {
   const { store, deps, published, delivered, add } = setup([{ ok: true, postType: "yuk_bor", loads: [LOAD] }]);
   add(1);
   const result = await processPost(store.takeNewPosts()[0], deps);
-  assert.deepEqual(result, { status: "done", loads: 1, outOfScope: 0, fresh: 1, sent: 1 });
+  assert.deepEqual(result, { status: "done", kind: "yuk", loads: 1, outOfScope: 0, fresh: 1, sent: 1 });
   assert.equal(published.length, 1);
   assert.deepEqual(delivered, [1], "Isuzu (5 t) va pauzadagi haydovchiga bormaydi");
   assert.equal(store.takeNewPosts().length, 0);
@@ -70,7 +70,7 @@ test("yo'nalish doirasi: Rossiya yuki chiqmaydi, Qozog'iston yuki chiqadi; ROUTE
   add(1);
   add(2);
   const [first, second] = store.takeNewPosts();
-  assert.deepEqual(await processPost(first, deps), { status: "skipped", reason: "route", outOfScope: 1 });
+  assert.deepEqual(await processPost(first, deps), { status: "skipped", reason: "route", kind: "yuk", outOfScope: 1 });
   assert.equal(store.listPosts({ status: "done" }).items.find((p) => p.id === first.id).error, "Boshqa yo'nalish: Rossiya → O'zbekiston");
   const mixed = await processPost(second, deps);
   assert.deepEqual([mixed.status, mixed.loads, mixed.outOfScope, mixed.fresh], ["done", 1, 1, 1]);
@@ -95,9 +95,44 @@ test("reklama, mashina bo'sh e'loni va AI xatosi", async () => {
   add(3);
   const statuses = [];
   for (const post of store.takeNewPosts()) statuses.push((await processPost(post, deps)).status);
-  assert.deepEqual(statuses, ["skipped", "skipped", "failed"]);
-  assert.equal(published.length, 0);
+  assert.deepEqual(statuses, ["skipped", "done", "failed"], "mashina bo'sh — endi yuk beruvchilarga (bu yerda yo'q)");
+  assert.equal(published.length, 0, "bo'sh mashina kanalga chiqmaydi");
   assert.equal(store.stats().posts.failed, 1);
+  assert.equal(store.stats().trucks24h.total, 1);
+  assert.equal(store.stats().loads24h.total, 0);
+});
+
+test("rollar: bo'sh mashina faqat mos yuk beruvchiga, yuk faqat haydovchiga", async () => {
+  const truck = { ...LOAD, fromCity: "Samarqand", fromRegion: "samarqand", toCity: "Toshkent", toRegion: "toshkent_sh", phones: ["+998900000009"] };
+  const { store, deps, delivered, add } = setup([
+    { ok: true, postType: "mashina_bor", loads: [truck] },
+    { ok: true, postType: "yuk_bor", loads: [LOAD] },
+  ]);
+  const kinds = [];
+  deps.deliver = async (chatId, load, post, kind) => (delivered.push(chatId), kinds.push(kind), true);
+  const shipper = (chatId, fromAreas, extra = {}) =>
+    store.saveDriver(chatId, {
+      role: "yuk_beruvchi",
+      profile: { fromAreas, toAreas: [], domestic: true, international: false, truckClasses: [], bodyTypes: [], ...extra },
+      active: true,
+      ...extra.user,
+    });
+  shipper(10, ["samarqand"]);
+  shipper(11, ["buxoro"]); // boshqa joyda
+  shipper(12, ["samarqand"], { truckClasses: ["isuzu"] }); // fura kerak emas
+  shipper(13, ["samarqand"], { user: { active: false } }); // pauzada
+  add(1, "Samarqanddan Toshkentga bo'sh fura bor xxxxxxx");
+  add(2, "Toshkentdan Samarqandga yuk bor xxxxxxxxxxxxxx");
+
+  const [first, second] = store.takeNewPosts();
+  const truckResult = await processPost(first, deps);
+  assert.deepEqual({ kind: truckResult.kind, sent: truckResult.sent }, { kind: "mashina", sent: 1 });
+  assert.deepEqual(delivered, [10]);
+  await processPost(second, deps);
+  assert.deepEqual(delivered, [10, 1], "yuk FURA haydovchisiga; yuk beruvchilarga bormaydi");
+  assert.deepEqual(kinds, ["mashina", "yuk"]);
+  assert.equal(store.recentLoads({ kind: "mashina" }).length, 1);
+  assert.equal(store.recentLoads().length, 1, "standart — faqat yuklar");
 });
 
 test("worker: daqiqalik limitda kutadi va o'sha e'lonni qayta oladi", async () => {

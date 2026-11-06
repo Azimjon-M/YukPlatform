@@ -90,6 +90,9 @@ async function check(config) {
       console.log(`    Telefoningizda shu havolani oching va ${config.channel} ni tanlang:\n    ${links.channel}`);
     }
     await checkLinkedGroup(bot, config.channel, links);
+    console.log(config.channelLoads
+      ? `ℹ️  Yuklar kanalga ham joylanadi (.env: CHANNEL_LOADS=1).`
+      : `ℹ️  Yuklar kanalga joylanmaydi, faqat haydovchilarga (yoqish: .env ga CHANNEL_LOADS=1).`);
   }
   checkApps(config, store);
   console.log(`✅ Yo'nalishlar: ${ROUTE_SCOPES[config.routeScope].title}.`);
@@ -97,7 +100,7 @@ async function check(config) {
   if (ai.length) console.log(`✅ AI: ${ai.length} ta ulanish (${ai.map((s) => s.label).join(", ")})`);
   else console.log("⚠️  AI ulanishi yo'q: boshqaruv markazining «AI» bo'limida kalit qo'shing (yoki .env ga GEMINI_API_KEY).");
   const s = store.stats();
-  console.log(`Baza: ${s.drivers.total} haydovchi, navbatda ${s.posts.new ?? 0} ta e'lon.`);
+  console.log(`Baza: ${s.drivers.total} haydovchi, ${s.shippers.total} yuk beruvchi, navbatda ${s.posts.new ?? 0} ta e'lon.`);
   store.close();
 }
 
@@ -111,14 +114,14 @@ async function dryRun() {
     console.log(`\n${plain(text)}${url ? `\n🔗 ${url}` : ""}`);
     return null;
   };
-  const deliver = async (chatId) => {
-    console.log(`   → haydovchi ${chatId}`);
+  const deliver = async (chatId, load, post, kind) => {
+    console.log(`   → ${kind === "mashina" ? "yuk beruvchi" : "haydovchi"} ${chatId}`);
     return true;
   };
   const worker = createWorker({ parser, store, publish, deliver, routeScope: routeScopeFrom() }, { log });
   while ((await worker.runOnce()) > 0);
   const s = store.stats();
-  console.log(`\nTayyor. E'lonlar: ${Object.entries(s.posts).map(([k, v]) => `${k} ${v}`).join(", ")}; yangi yuk: ${s.loads24h.total}`);
+  console.log(`\nTayyor. E'lonlar: ${Object.entries(s.posts).map(([k, v]) => `${k} ${v}`).join(", ")}; yangi yuk: ${s.loads24h.total}, bo'sh mashina: ${s.trucks24h.total}`);
   store.close();
 }
 
@@ -150,7 +153,10 @@ async function main() {
   // Boshqaruv markazi (apps/api) "stop" yuborsa — yumshoq to'xtaydi
   process.on("message", (message) => message === "stop" && stop());
 
-  log(`Bot ishga tushdi: @${bot.botInfo.username}${config.channel ? `, kanal ${config.channel}` : ""}. To'xtatish: Ctrl+C`);
+  log(`Bot ishga tushdi: @${bot.botInfo.username}. To'xtatish: Ctrl+C`);
+  log(config.channel && config.channelLoads
+    ? `Kanal: yuklar ${config.channel} ga ham joylanadi (.env: CHANNEL_LOADS=1)`
+    : "Kanal: yuklar joylanmaydi — faqat mos haydovchilarga shaxsiy xabar (yoqish: .env ga CHANNEL_LOADS=1)");
   log(`Yo'nalishlar: ${ROUTE_SCOPES[routeScope].title} (.env: ROUTE_SCOPE=${routeScope})`);
   log(maxPostAgeMs > 0
     ? `Eski e'lonlar: joylanganiga ${maxPostAgeMs / 3_600_000} soatdan oshgani AI'ga bormaydi (.env: POST_MAX_AGE_HOURS)`

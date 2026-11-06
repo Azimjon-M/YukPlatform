@@ -39,7 +39,7 @@ Bitta yuk 20 ta guruhga tashlanadi, shuning uchun takrorlar (telefon + yo'nalish
 | # | Bosqich | Nima qilinadi | Holati |
 |---|---|---|---|
 | 0 | Tadqiqot | 228 ta haqiqiy e'lon, AI parser, aniqlik 99% (32 ta qo'lda tekshirilgan e'londa) | ✅ |
-| 1 | MVP | collector → parser → baza → bot (pastki menyu, Mini App'da sozlamalar, shaxsiy xabar + qo'ng'iroq) + kanal @Yuk_Ekspert. 10–20 ta haydovchida sinov | ⏳ kod tayyor, sinov |
+| 1 | MVP | collector → parser → baza → bot (pastki menyu, Mini App'da sozlamalar, shaxsiy xabar + qo'ng'iroq). Kanalga yuk chiqarish 2026-11-06 dan o'chiq. 10–20 ta haydovchida sinov | ⏳ kod tayyor, sinov |
 | 2 | Mini App + boshqaruv markazi | ✅ sozlamalar formasi. ✅ Boshqaruv markazi (web): ko'rsatkichlar, yuklar, navbat, haydovchilar, manbalar, bot/collector'ni yoqish va loglar. ✅ AI kalitlari web'dan (shifrlangan) + bir nechta AI parallel. ✅ Haydovchilar ilovasi: Telegram orqali kirish, yuklar lentasi, xarita. Keyin: internetga doimiy manzil | ⏳ |
 | 3 | Daromad | Guruh adminlari bilan hamkorlik, obuna (bepulda kechikish, pullida darhol) | — |
 | 4 | Kengayish | Web sayt, mobil ilova, pochta / yo'lovchi taksi | — |
@@ -79,7 +79,7 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | `npm run parse -- --dry-run` | E'lonlarni sanaydi va telefonlarni ajratadi (AI'siz, bepul) |
 | `npm run parse -- --limit 10` | Birinchi 10 ta e'lonni AI bilan tahlil qiladi |
 | `npm run bot:check` | Bot tokeni va kanaldagi adminlikni tekshiradi |
-| `npm run bot` | Bot: haydovchilarni ro'yxatdan o'tkazadi, yuklarni kanalga va haydovchilarga yuboradi |
+| `npm run bot` | Bot: haydovchilarni ro'yxatdan o'tkazadi, yuklarni mos haydovchilarga yuboradi |
 | `npm run tg:live` | Guruhlardan yangi e'lonlarni bot navbatiga yig'adi (guruhlar ro'yxati — boshqaruv markazining «Manbalar» bo'limida) |
 | `npm run web` | Haydovchilar ilovasini dasturlash rejimida (http://localhost:5173; server ishlab turishi kerak) |
 | `npm run web:build` | Haydovchilar ilovasini yig'adi (`apps/web/dist`) |

@@ -60,7 +60,15 @@ export function configChecklist(config, aiTotals = null) {
       ];
   return [
     { id: "bot", label: "Bot token", ok: Boolean(config.botToken), value: config.botToken ? "yozilgan" : "BOT_TOKEN yo'q" },
-    { id: "channel", label: "Kanal", ok: Boolean(config.channel), value: config.channel ?? "CHANNEL_ID yo'q" },
+    {
+      id: "channel",
+      label: "Kanal",
+      // Kanal endi majburiy emas: yuklar haydovchilarga shaxsiy xabarda boradi (CHANNEL_LOADS=1 — kanalga ham)
+      ok: config.channel ? true : null,
+      value: config.channel
+        ? `${config.channel} — ${config.channelLoads ? "yuklar kanalga ham chiqadi" : "yuklar chiqmaydi (faqat haydovchilarga)"}`
+        : "CHANNEL_ID yo'q",
+    },
     { id: "tg", label: "Telegram API (collector)", ok: Boolean(config.telegramApi), value: config.telegramApi ? "yozilgan" : "TG_API_ID / TG_API_HASH yo'q" },
     ...aiRows,
     {

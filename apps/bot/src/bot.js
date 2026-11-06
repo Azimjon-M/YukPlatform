@@ -1,52 +1,87 @@
-// Telegram bot (grammY): haydovchini ro'yxatdan o'tkazish, pastki menyu, sozlamalar (Mini App yoki chatda savol-javob),
-// guruhdagi e'lonlarni navbatga qo'yish, kanalga va haydovchilarga yuk yuborish.
+// Telegram bot (grammY): rol tanlash (haydovchi / yuk beruvchi), pastki menyu, sozlamalar (Mini App yoki chatda savol-javob),
+// guruhdagi e'lonlarni navbatga qo'yish, haydovchilarga yuk va yuk beruvchilarga bo'sh mashina yuborish.
 // Savol-javob mantig'i wizard.js da, pastki menyu menu.js da, xabar ko'rinishi format.js da.
 import { existsSync } from "node:fs";
 import { autoRetry } from "@grammyjs/auto-retry";
 import { Bot, GrammyError, InlineKeyboard, InputFile } from "grammy";
-import { DEFAULT_DEDUPE_WINDOW_MS, matchLoad, sanitizeProfile } from "@yuk/shared";
-import { escapeHtml, formatLoad } from "./format.js";
-import { MENU, mainMenu, settingsLabel } from "./menu.js";
+import { DEFAULT_DEDUPE_WINDOW_MS, KIND_MATCHERS, ROLES, ROLE_IDS, ROLE_KIND, isAdmin, roleOf, sanitizeProfileFor, validRole } from "@yuk/shared";
+import { escapeHtml, formatLoad, formatTruck } from "./format.js";
+import { MENU, mainMenu, matchesLabel, settingsLabel } from "./menu.js";
 import { applyAction, applyText, describeProfile, newDraft, profileFromDraft, renderStep } from "./wizard.js";
 
-const LOADS_WINDOW_MS = 24 * 60 * 60 * 1000; // "📋 Mos yuklar" — oxirgi 24 soat
+const LOADS_WINDOW_MS = 24 * 60 * 60 * 1000; // "📋 Mos yuklar" / "🚚 Bo'sh mashinalar" — oxirgi 24 soat
 const LOADS_SHOWN = 5;
 
 // Bot profilidagi matnlar (botni birinchi ochganda "Bu bot nima qila oladi?" o'rnida chiqadi)
 const DESCRIPTION =
-  "🚛 Yuk Ekspert — O'zbekistondagi katta yuk guruhlaridan faqat sizning mashinangiz va yo'nalishingizga mos yuklarni topib, " +
-  "shaxsiy xabarda yuboradi.\n\nTelefon raqamini bosing — qo'ng'iroq qiling. Boshlash uchun «Start» ni bosing.";
-const SHORT_DESCRIPTION = "Mashinangiz va yo'nalishingizga mos yuklarni katta yuk guruhlaridan topib yuboradi.";
+  "🚛 Yuk Ekspert — O'zbekistondagi katta yuk guruhlaridan haydovchiga mashinasi va yo'nalishiga mos yuklarni, " +
+  "yuk beruvchiga esa yo'nalishidagi bo'sh mashinalarni topib, shaxsiy xabarda yuboradi.\n\n" +
+  "Telefon raqamini bosing — qo'ng'iroq qiling. Boshlash uchun «Start» ni bosing.";
+const SHORT_DESCRIPTION = "Haydovchiga mos yuklar, yuk beruvchiga bo'sh mashinalar — katta yuk guruhlaridan.";
 
 const COMMANDS = [
   { command: "start", description: "Boshlash va menyu" },
-  { command: "sozlamalar", description: "Mashina va yo'nalishni o'zgartirish" },
+  { command: "sozlamalar", description: "Sozlamalarni o'zgartirish" },
+  { command: "rol", description: "Haydovchi yoki yuk beruvchi" },
   { command: "pauza", description: "Yuk yuborishni to'xtatib turish" },
   { command: "davom", description: "Yana yuborish" },
   { command: "yordam", description: "Yordam" },
 ];
 
+// Rolga qarab so'zlar: nima keladi, sozlamalarda nima so'raladi
+const ROLE_TEXT = {
+  haydovchi: {
+    intro: "katta yuk guruhlaridagi e'lonlardan faqat sizning mashinangiz va yo'nalishingizga mos yuklarni shaxsiy xabarda yuboradi.",
+    one: "yuk",
+    many: "yuklar",
+    settings: "mashina va yo'nalish",
+    setup: "mashinangiz va yo'nalishingizni",
+  },
+  yuk_beruvchi: {
+    intro: "katta yuk guruhlaridagi «mashina bo'sh» e'lonlaridan sizning yo'nalishingizdagi bo'sh mashinalarni shaxsiy xabarda yuboradi.",
+    one: "bo'sh mashina",
+    many: "bo'sh mashinalar",
+    settings: "yo'nalish va kerakli mashina",
+    setup: "yo'nalishingizni va qanday mashina kerakligini",
+  },
+};
+
 function helpText(driver) {
+  const role = roleOf(driver);
+  if (!role) {
+    return [
+      "🚛 <b>Yuk Ekspert</b> — katta yuk guruhlaridagi e'lonlarni saralab, shaxsiy xabarda yuboradi:",
+      `${ROLES.haydovchi.icon} haydovchiga — ${ROLES.haydovchi.gets};`,
+      `${ROLES.yuk_beruvchi.icon} yuk beruvchiga — ${ROLES.yuk_beruvchi.gets}.`,
+      "",
+      "Xabardagi telefon raqamini bossangiz — qo'ng'iroq qilasiz.",
+    ].join("\n");
+  }
+  const t = ROLE_TEXT[role];
   return [
-    "🚛 <b>Yuk Ekspert</b> — katta yuk guruhlaridagi e'lonlardan faqat sizning mashinangiz va yo'nalishingizga mos yuklarni shaxsiy xabarda yuboradi.",
+    `🚛 <b>Yuk Ekspert</b> — ${t.intro}`,
     "",
     "Xabardagi telefon raqamini bossangiz — qo'ng'iroq qilasiz.",
     "",
     "<b>Pastdagi menyu:</b>",
-    `${MENU.loads} — oxirgi 24 soatdagi mos yuklar`,
-    `${settingsLabel(driver)} — mashina va yo'nalish`,
-    `${MENU.pause} / ${MENU.resume} — yuk yuborishni to'xtatish va yoqish`,
-    `${MENU.apps} — telefon ilovalari va kanal`,
+    `${matchesLabel(driver)} — oxirgi 24 soatdagi mos ${t.many}`,
+    `${settingsLabel(driver)} — ${t.settings}`,
+    `${MENU.pause} / ${MENU.resume} — yuborishni to'xtatish va yoqish`,
+    `${MENU.apps} — telefon ilovalari`,
     "",
+    `Siz: ${ROLES[role].icon} ${ROLES[role].name}. Almashtirish — /rol`,
     "Menyu yo'qolsa — /start",
   ].join("\n");
 }
 
+const roleKeyboard = () => InlineKeyboard.from(ROLE_IDS.map((id) => [InlineKeyboard.text(ROLES[id].choice, `r:${id}`)]));
+
 const toKeyboard = (rows) => InlineKeyboard.from(rows.map((row) => row.map((b) => InlineKeyboard.text(b.text, b.data))));
 
-// Haydovchiga shaxsiy xabardagi yuk: tugmasiz, asl e'lon havolasi matn ichida
-export function directText(load, post) {
-  const { text, url } = formatLoad(load, post);
+// Shaxsiy xabardagi yuk (haydovchiga) yoki bo'sh mashina (kind "mashina", yuk beruvchiga):
+// tugmasiz, asl e'lon havolasi matn ichida
+export function directText(load, post, kind = "yuk") {
+  const { text, url } = kind === "mashina" ? formatTruck(load, post) : formatLoad(load, post);
   return url ? `${text}\n<a href="${escapeHtml(url)}">📄 Asl e'lon</a>` : text;
 }
 
@@ -85,7 +120,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   const menu = (driver) => {
     const url = appUrl() ?? null;
     if (driver?.chatId != null) shownUrl.set(driver.chatId, url);
-    return { reply_markup: mainMenu(driver, url, scope) };
+    return { reply_markup: mainMenu(driver, url, scope, { admin: isAdmin(driver, config.admins ?? []) }) };
   };
   const html = (driver) => ({ parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...menu(driver) });
 
@@ -95,8 +130,20 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     return store.saveDriver(ctx.chat.id, { name, username: from.username ?? null });
   }
 
-  function matchingLoads(profile) {
-    return store.recentLoads({ sinceMs: LOADS_WINDOW_MS }).filter((row) => matchLoad(row.load, profile).ok);
+  // Oxirgi 24 soatdagi mos e'lonlar: haydovchiga yuklar, yuk beruvchiga bo'sh mashinalar
+  function matching(user) {
+    const kind = ROLE_KIND[roleOf(user)];
+    const matches = KIND_MATCHERS[kind];
+    return store.recentLoads({ sinceMs: LOADS_WINDOW_MS, kind }).filter((row) => matches(row.load, user.profile).ok);
+  }
+
+  // "Siz kimsiz?" — ikki tugma (r:haydovchi / r:yuk_beruvchi)
+  async function askRole(ctx, driver = null) {
+    const role = roleOf(driver);
+    const text = role
+      ? `Hozir siz: <b>${ROLES[role].icon} ${ROLES[role].name}</b>.\nBoshqa rolni tanlasangiz, sozlamalarni qaytadan kiritasiz.`
+      : "Siz kimsiz? 👇";
+    await ctx.reply(text, { parse_mode: "HTML", reply_markup: roleKeyboard() });
   }
 
   async function showStep(ctx, draft, { edit = false } = {}) {
@@ -114,8 +161,8 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     await ctx.reply(text, options);
   }
 
-  async function startWizard(ctx, profile = null) {
-    const draft = newDraft(profile, scope);
+  async function startWizard(ctx, profile = null, role = "haydovchi") {
+    const draft = newDraft(profile, scope, role);
     store.saveDriver(ctx.chat.id, { draft });
     await showStep(ctx, draft);
   }
@@ -123,15 +170,32 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   // Sozlamalar: Mini App bo'lsa — pastki menyudagi tugma uni ochadi; bo'lmasa — chatda savol-javob
   async function openSettings(ctx) {
     const driver = rememberUser(ctx);
-    if (!appUrl()) return startWizard(ctx, driver.profile);
+    const role = roleOf(driver);
+    if (!role) return askRole(ctx);
+    if (!appUrl()) return startWizard(ctx, driver.profile, role);
     await ctx.reply(`Pastdagi «${settingsLabel(driver)}» tugmasini bosing — forma ochiladi. To'ldirib, «Saqlash» ni bosasiz.`, menu(driver));
   }
 
-  async function saved(ctx, profile) {
-    const driver = store.saveDriver(ctx.chat.id, { profile, draft: null, active: true });
-    const count = matchingLoads(profile).length;
-    const extra = count ? `\n\nOxirgi 24 soatda sizga mos ${count} ta yuk bor — «${MENU.loads}» ni bosing.` : "";
-    await ctx.reply(`✅ Saqlandi. Endi mos yuklar shu yerga keladi.\n\n${describeProfile(profile, scope)}${extra}`, menu(driver));
+  async function saved(ctx, profile, role) {
+    const driver = store.saveDriver(ctx.chat.id, { role, profile, draft: null, active: true });
+    const t = ROLE_TEXT[role];
+    const count = matching(driver).length;
+    const extra = count ? `\n\nOxirgi 24 soatda sizga mos ${count} ta ${t.one} bor — «${matchesLabel(driver)}» ni bosing.` : "";
+    await ctx.reply(`✅ Saqlandi. Endi mos ${t.many} shu yerga keladi.\n\n${describeProfile(profile, scope, role)}${extra}`, menu(driver));
+  }
+
+  // Rol tanlandi. Boshqa rolga o'tsa, eski sozlamalar o'chadi (haydovchi profili yuk beruvchiga to'g'ri kelmaydi).
+  async function chooseRole(ctx, role) {
+    const before = rememberUser(ctx);
+    const changed = roleOf(before) !== role;
+    const driver = changed ? store.saveDriver(ctx.chat.id, { role, profile: null, draft: null, active: true }) : before;
+    if (!changed && driver.profile) {
+      await ctx.reply(`Siz allaqachon ${ROLES[role].name.toLowerCase()}siz — hech narsa o'zgarmadi.`, menu(driver));
+      return;
+    }
+    const next = appUrl() ? `\n\n👇 Endi «${settingsLabel(driver)}» tugmasini bosing — 1 daqiqalik forma.` : "";
+    await ctx.reply(`${ROLES[role].icon} Siz: <b>${ROLES[role].name}</b>. Sizga ${ROLES[role].gets} keladi.${next}`, html(driver));
+    if (!appUrl()) await startWizard(ctx, null, role);
   }
 
   async function setActive(ctx, active) {
@@ -141,24 +205,30 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     await ctx.reply(active ? "▶️ Yuk yuborish yoqildi." : `⏸ Yuk yuborish to'xtatildi. Qayta yoqish: «${MENU.resume}»`, menu(updated));
   }
 
-  async function showLoads(ctx) {
+  // «📋 Mos yuklar» (haydovchi) yoki «🚚 Bo'sh mashinalar» (yuk beruvchi) — eski menyu tugmasi bosilsa ham hozirgi rol bo'yicha
+  async function showMatches(ctx) {
     const driver = rememberUser(ctx);
+    const role = roleOf(driver);
+    if (!role) return askRole(ctx);
+    const t = ROLE_TEXT[role];
     if (!driver.profile) {
-      await ctx.reply(`Avval mashinangiz va yo'nalishingizni kiriting: «${settingsLabel(driver)}».`, menu(driver));
+      await ctx.reply(`Avval ${t.setup} kiriting: «${settingsLabel(driver)}».`, menu(driver));
       return;
     }
-    const found = matchingLoads(driver.profile);
+    const found = matching(driver);
     if (!found.length) {
-      await ctx.reply("Oxirgi 24 soatda sizga mos yuk chiqmadi. Yangisi chiqishi bilan shu yerga yuboraman.", menu(driver));
+      await ctx.reply(`Oxirgi 24 soatda sizga mos ${t.one} chiqmadi. Yangisi chiqishi bilan shu yerga yuboraman.`, menu(driver));
       return;
     }
+    const kind = ROLE_KIND[role];
+    const icon = role === "yuk_beruvchi" ? "🚚" : "📋";
     const more = found.length > LOADS_SHOWN ? `, eng yangi ${LOADS_SHOWN} tasi` : "";
-    await ctx.reply(`📋 Oxirgi 24 soatda sizga mos ${found.length} ta yuk${more}:`, menu(driver));
-    // Eskisidan yangisiga: eng yangi yuk chatda eng pastda turadi
+    await ctx.reply(`${icon} Oxirgi 24 soatda sizga mos ${found.length} ta ${t.one}${more}:`, menu(driver));
+    // Eskisidan yangisiga: eng yangisi chatda eng pastda turadi
     for (const row of found.slice(0, LOADS_SHOWN).reverse()) {
-      await ctx.reply(directText(row.load, row.post), html(driver));
+      await ctx.reply(directText(row.load, row.post, kind), html(driver));
     }
-    if (driver.active === false) await ctx.reply(`⏸ Siz pauzadasiz: yangi yuklar o'zi kelmaydi. Yoqish: «${MENU.resume}»`, menu(driver));
+    if (driver.active === false) await ctx.reply(`⏸ Siz pauzadasiz: yangi ${t.many} o'zi kelmaydi. Yoqish: «${MENU.resume}»`, menu(driver));
   }
 
   let apkFileId = null; // bir marta yuklangach, Telegram fayl id'si bilan qayta yuboriladi
@@ -169,7 +239,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     lines.push(`🤖 Android: ${config.androidUrl ? link(config.androidUrl, "yuklab olish") : config.apkFile ? "o'rnatish fayli pastda 👇" : "tez orada"}`);
     lines.push(`🍏 iPhone: ${config.iosUrl ? link(config.iosUrl, "App Store") : "tez orada"}`);
     if (appUrl()) lines.push(`💬 Telegram ichida: pastdagi «${settingsLabel(driver)}» tugmasi ilovani ochadi`);
-    if (config.channel?.startsWith("@")) lines.push(`📢 Hamma yangi yuklar kanalda: ${config.channel}`);
+    if (config.channelLoads && config.channel?.startsWith("@")) lines.push(`📢 Hamma yangi yuklar kanalda: ${config.channel}`);
     await ctx.reply(lines.join("\n"), html(driver));
     if (!config.apkFile) return;
     if (!apkFileId && !existsSync(config.apkFile)) {
@@ -190,8 +260,14 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   // /start (kanaldagi "🤖 Menga mos yuklar" havolasi ham shu yerga keladi: /start kanal)
   privateChat.command("start", async (ctx) => {
     const driver = rememberUser(ctx);
+    const role = roleOf(driver);
+    if (!role) {
+      await ctx.reply(helpText(driver), html(driver));
+      await askRole(ctx);
+      return;
+    }
     if (driver.profile) {
-      await ctx.reply(`${helpText(driver)}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describeProfile(driver.profile, scope))}`, html(driver));
+      await ctx.reply(`${helpText(driver)}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describeProfile(driver.profile, scope, role))}`, html(driver));
       return;
     }
     if (appUrl()) {
@@ -199,10 +275,11 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
       return;
     }
     await ctx.reply(helpText(driver), html(driver));
-    await startWizard(ctx);
+    await startWizard(ctx, null, role);
   });
 
   privateChat.command("sozlamalar", openSettings);
+  privateChat.command("rol", (ctx) => askRole(ctx, rememberUser(ctx)));
   privateChat.command("pauza", (ctx) => setActive(ctx, false));
   privateChat.command("davom", (ctx) => setActive(ctx, true));
   const showHelp = (ctx) => {
@@ -212,27 +289,31 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   privateChat.command("yordam", showHelp);
   privateChat.command("id", (ctx) => ctx.reply(`Sizning Telegram id: <code>${ctx.from.id}</code>`, { parse_mode: "HTML" }));
 
+  // Admin: .env dagi ADMIN_IDS yoki boshqaruv markazida «Admin» belgisi
   privateChat.command("holat", async (ctx) => {
-    if (!config.admins.includes(ctx.from.id)) return;
+    if (!isAdmin(store.getDriver(ctx.chat.id) ?? { chatId: ctx.from.id }, config.admins ?? [])) return;
     const s = store.stats();
     await ctx.reply(
       [
         `Haydovchilar: ${s.drivers.active} faol / ${s.drivers.total}`,
+        `Yuk beruvchilar: ${s.shippers.active} faol / ${s.shippers.total}`,
         `E'lonlar: ${Object.entries(s.posts).map(([k, v]) => `${k} ${v}`).join(", ") || "yo'q"}`,
-        `Oxirgi 24 soat: ${s.loads24h.total} yangi yuk, ${s.loads24h.sent} ta yuborildi`,
+        `Oxirgi 24 soat: ${s.loads24h.total} yangi yuk (${s.loads24h.sent} ta yuborildi), ` +
+          `${s.trucks24h.total} bo'sh mashina (${s.trucks24h.sent} ta yuborildi)`,
       ].join("\n"),
     );
   });
 
   // Pastki menyu tugmalari (savol-javob o'rtasida bosilsa ham ishlaydi, qoralama saqlanib qoladi)
-  privateChat.hears(MENU.loads, showLoads);
+  privateChat.hears([MENU.loads, MENU.trucks], showMatches);
   privateChat.hears([MENU.settings, MENU.register], openSettings);
   privateChat.hears(MENU.pause, (ctx) => setActive(ctx, false));
   privateChat.hears(MENU.resume, (ctx) => setActive(ctx, true));
   privateChat.hears(MENU.apps, showApps);
   privateChat.hears(MENU.help, showHelp);
 
-  // Mini App formasi "Saqlash" bosilganda: { type: "profile", profile }. Ma'lumotga ishonmaymiz — tekshiramiz.
+  // Mini App formasi "Saqlash" bosilganda: { type: "profile", role?, profile }. Ma'lumotga ishonmaymiz — tekshiramiz.
+  // role bo'lmasa (eski forma) — bazadagi rol; forma boshqa rolni yuborsa — rol ham almashadi.
   privateChat.on("message:web_app_data", async (ctx) => {
     const driver = rememberUser(ctx);
     let data = null;
@@ -241,12 +322,22 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     } catch {
       // buzilgan JSON — pastda xato deb javob beriladi
     }
-    const { profile, error } = data?.type === "profile" ? sanitizeProfile(data.profile, { scope }) : { error: "noma'lum ma'lumot keldi" };
+    const role = validRole(data?.role) ?? roleOf(driver);
+    const { profile, error } = data?.type === "profile" ? sanitizeProfileFor(role, data.profile, { scope }) : { error: "noma'lum ma'lumot keldi" };
     if (error) {
       await ctx.reply(`⚠️ Saqlanmadi: ${error}. Formani qaytadan oching.`, menu(driver));
       return;
     }
-    await saved(ctx, profile);
+    await saved(ctx, profile, role);
+  });
+
+  // "Siz kimsiz?" tugmalari
+  bot.callbackQuery(/^r:(\w+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const role = validRole(ctx.match[1]);
+    if (!role || ctx.chat?.type !== "private") return;
+    await ctx.editMessageText(`✅ ${ROLES[role].choice}`).catch(() => {});
+    await chooseRole(ctx, role);
   });
 
   // Chatdagi savol-javob (Mini App bo'lmasa)
@@ -254,11 +345,13 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     const [, step, value] = ctx.match;
     const driver = store.getDriver(ctx.chat.id);
     await ctx.answerCallbackQuery();
-    if (!driver?.draft) return startWizard(ctx, driver?.profile);
+    const role = roleOf(driver);
+    if (!role) return askRole(ctx);
+    if (!driver.draft) return startWizard(ctx, driver.profile, role);
     const { draft, saved: done } = applyAction(driver.draft, step, value);
     if (done) {
       await ctx.editMessageText("✅ Javoblar qabul qilindi.");
-      await saved(ctx, profileFromDraft(draft));
+      await saved(ctx, profileFromDraft(draft), draft.role ?? role);
       return;
     }
     store.saveDriver(ctx.chat.id, { draft });
@@ -297,9 +390,10 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   bot.catch((error) => log(`Bot xatosi: ${error.error?.message ?? error.message}`));
 
   // --- Yuborish (pipeline shularni chaqiradi) ---
-  // Kanalda pastki menyu bo'lmaydi, shuning uchun u yerda tugmalar xabar ostida
+  // Kanalda pastki menyu bo'lmaydi, shuning uchun u yerda tugmalar xabar ostida.
+  // Faqat CHANNEL_LOADS yoqilganda (standart o'chiq): yuklar haydovchilarga shaxsiy xabarda boradi.
   async function publish(load, post) {
-    if (!config.channel) return null;
+    if (!config.channel || !config.channelLoads) return null;
     const { text, url } = formatLoad(load, post);
     const keyboard = new InlineKeyboard();
     if (url) keyboard.url("📄 Asl e'lon", url);
@@ -325,14 +419,15 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     return driver ? menu(driver) : {};
   }
 
-  async function deliver(chatId, load, post) {
+  // kind — "yuk" (haydovchiga) yoki "mashina" (yuk beruvchiga)
+  async function deliver(chatId, load, post, kind = "yuk") {
     try {
-      await bot.api.sendMessage(chatId, directText(load, post), { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...freshMenu(chatId) });
+      await bot.api.sendMessage(chatId, directText(load, post, kind), { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...freshMenu(chatId) });
       return true;
     } catch (error) {
-      // 403 — haydovchi botni bloklagan yoki o'chirgan: unga boshqa yubormaymiz
+      // 403 — foydalanuvchi botni bloklagan yoki o'chirgan: unga boshqa yubormaymiz
       if (error instanceof GrammyError && error.error_code === 403) store.saveDriver(chatId, { active: false });
-      else log(`Haydovchiga yuborilmadi (${chatId}): ${error.description ?? error.message}`);
+      else log(`Foydalanuvchiga yuborilmadi (${chatId}): ${error.description ?? error.message}`);
       return false;
     }
   }

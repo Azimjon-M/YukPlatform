@@ -24,12 +24,34 @@ import {
 } from "@yuk/shared";
 
 export const STEPS = ["class", "body", "capacity", "size", "sides", "from", "to", "intl", "mode", "done"];
+// Yuk beruvchi (rol "yuk_beruvchi"): yo'nalish va qanday mashina kerakligi — o'z mashinasi yo'q
+export const SHIPPER_STEPS = ["from", "to", "classes", "bodies", "intl", "done"];
 
 // "ichki" doirada xalqaro savoli yo'q
-const stepsFor = (scope) => (intlChoices(scope) ? STEPS : STEPS.filter((s) => s !== "intl"));
+const stepsFor = (draft) => {
+  const steps = draft.role === "yuk_beruvchi" ? SHIPPER_STEPS : STEPS;
+  return intlChoices(draft.scope) ? steps : steps.filter((s) => s !== "intl");
+};
 
-// scope — yo'nalish doirasi (@yuk/shared ROUTE_SCOPES). Qoralama bilan saqlanadi: savol-javob o'rtasida o'zgarmaydi
-export function newDraft(profile = null, scope = DEFAULT_ROUTE_SCOPE) {
+// Yuk beruvchi tanlay oladigan kuzovlar: "Boshqa" ma'nosiz (e'londa kuzov aytilmasa, baribir mos keladi)
+const SHIPPER_BODIES = BODY_TYPES.filter((b) => b.id !== "boshqa");
+
+// scope — yo'nalish doirasi (@yuk/shared ROUTE_SCOPES). Qoralama bilan saqlanadi: savol-javob o'rtasida o'zgarmaydi.
+// role — "haydovchi" (standart) yoki "yuk_beruvchi": savollar ro'yxati shunga qarab
+export function newDraft(profile = null, scope = DEFAULT_ROUTE_SCOPE, role = "haydovchi") {
+  if (role === "yuk_beruvchi") {
+    return {
+      role,
+      scope: validRouteScope(scope),
+      step: "from",
+      fromAreas: [...(profile?.fromAreas ?? [])],
+      toAreas: [...(profile?.toAreas ?? [])],
+      domestic: profile?.domestic ?? true,
+      international: profile?.international ?? false,
+      truckClasses: [...(profile?.truckClasses ?? [])],
+      bodyTypes: [...(profile?.bodyTypes ?? [])],
+    };
+  }
   if (profile) {
     return {
       scope: validRouteScope(scope),
@@ -73,19 +95,32 @@ function areaOptions(scope) {
   return [...regions, ...countries.map((name) => ({ id: name, label: `🌍 ${name}` }))];
 }
 
-function regionStep(step, draft, title, emptyLabel) {
-  const field = step === "from" ? "fromAreas" : "toAreas";
+// Bir nechtasini tanlash mumkin bo'lgan qadam: tugma bosilsa ✅ qo'yiladi/olinadi, "Tayyor" — keyingi qadam.
+// field — qoralamadagi ro'yxat, options — [{ id, label }], emptyLabel — hech narsa tanlanmasa nimani bildiradi
+function pickStep(step, draft, field, options, title, emptyLabel, perRow = 2) {
   const chosen = new Set(draft[field]);
-  const options = areaOptions(draft.scope).map((a) => button(`${chosen.has(a.id) ? "✅ " : ""}${a.label}`, step, `t.${a.id}`));
+  const buttons = options.map((o) => button(`${chosen.has(o.id) ? "✅ " : ""}${o.label}`, step, `t.${o.id}`));
   return {
     text: `${title}\n\nBir nechtasini tanlash mumkin. Hech birini tanlamasangiz — ${emptyLabel.toLowerCase()}.`,
     keyboard: [
-      ...rows(options, 2),
+      ...rows(buttons, perRow),
       [button(chosen.size ? "🧹 Tozalash" : `• ${emptyLabel}`, step, "all"), button("Tayyor ➡️", step, "ok")],
       nav(step),
     ],
   };
 }
+
+function regionStep(step, draft, title, emptyLabel) {
+  return pickStep(step, draft, step === "from" ? "fromAreas" : "toAreas", areaOptions(draft.scope), title, emptyLabel);
+}
+
+// Tanlov qadamlari: qaysi maydon va qaysi qiymatlar ruxsat etilgan
+const PICK_FIELDS = {
+  from: { field: "fromAreas", ids: (d) => areaOptions(d.scope).map((a) => a.id) },
+  to: { field: "toAreas", ids: (d) => areaOptions(d.scope).map((a) => a.id) },
+  classes: { field: "truckClasses", ids: () => TRUCK_CLASSES.map((t) => t.id) },
+  bodies: { field: "bodyTypes", ids: () => SHIPPER_BODIES.map((b) => b.id) },
+};
 
 // Qadamning matni va tugmalari: { text, keyboard: [[{ text, data }]] }
 export function renderStep(draft) {
@@ -130,9 +165,25 @@ export function renderStep(draft) {
       };
     }
     case "from":
-      return regionStep(step, draft, "📍 Qaysi viloyatlardan yuk olasiz?", "Hamma viloyat");
+      return draft.role === "yuk_beruvchi"
+        ? regionStep(step, draft, "📍 Yukingiz qayerda yuklanadi? Shu yerdagi bo'sh mashinalarni yuboramiz.", "Hamma viloyat")
+        : regionStep(step, draft, "📍 Qaysi viloyatlardan yuk olasiz?", "Hamma viloyat");
     case "to":
-      return regionStep(step, draft, "🏁 Qayerga borasiz? (masalan, uyga qaytish yuki uchun)", "Istalgan joy");
+      return draft.role === "yuk_beruvchi"
+        ? regionStep(step, draft, "🏁 Yuk qayerga boradi?", "Istalgan joy")
+        : regionStep(step, draft, "🏁 Qayerga borasiz? (masalan, uyga qaytish yuki uchun)", "Istalgan joy");
+    case "classes":
+      return pickStep(
+        step,
+        draft,
+        "truckClasses",
+        TRUCK_CLASSES.map((t) => ({ id: t.id, label: `${t.name} (${formatT(t.capacityT[0])}–${formatT(t.capacityT[1])} t)` })),
+        "🚚 Qanday mashina kerak?",
+        "Istalgan mashina",
+        1,
+      );
+    case "bodies":
+      return pickStep(step, draft, "bodyTypes", SHIPPER_BODIES.map((b) => ({ id: b.id, label: b.name })), "📦 Qanday kuzov kerak?", "Istalgan kuzov");
     case "intl": {
       const choices = intlChoices(draft.scope);
       return {
@@ -147,7 +198,7 @@ export function renderStep(draft) {
       };
     case "done":
       return {
-        text: `Tekshiring:\n\n${describeProfile(profileFromDraft(draft), draft.scope)}`,
+        text: `Tekshiring:\n\n${describeProfile(profileFromDraft(draft), draft.scope, draft.role)}`,
         keyboard: [[button("✅ Saqlash", step, "save")], [button("✏️ Qaytadan", step, "restart")], nav(step)],
       };
     default:
@@ -155,12 +206,12 @@ export function renderStep(draft) {
   }
 }
 
-const next = (step, scope) => {
-  const steps = stepsFor(scope);
+const next = (step, draft) => {
+  const steps = stepsFor(draft);
   return steps[steps.indexOf(step) + 1];
 };
-const prev = (step, scope) => {
-  const steps = stepsFor(scope);
+const prev = (step, draft) => {
+  const steps = stepsFor(draft);
   return steps[Math.max(0, steps.indexOf(step) - 1)];
 };
 
@@ -173,7 +224,7 @@ export function applyAction(draft, step, value) {
   // Eski xabardagi tugma bosilsa — hech narsa o'zgarmaydi, joriy qadam qayta ko'rsatiladi
   if (step !== draft.step) return { draft };
   const d = structuredClone(draft);
-  if (value === "back") return { draft: { ...d, step: prev(step, d.scope) } };
+  if (value === "back") return { draft: { ...d, step: prev(step, d) } };
 
   switch (step) {
     case "class":
@@ -206,11 +257,13 @@ export function applyAction(draft, step, value) {
       if (value !== "ok") return { draft };
       break;
     case "from":
-    case "to": {
-      const field = step === "from" ? "fromAreas" : "toAreas";
+    case "to":
+    case "classes":
+    case "bodies": {
+      const { field, ids } = PICK_FIELDS[step];
       if (value.startsWith("t.")) {
         const id = value.slice(2);
-        if (!areaOptions(d.scope).some((a) => a.id === id)) return { draft };
+        if (!ids(d).includes(id)) return { draft };
         d[field] = toggle(d[field], id);
         return { draft: d };
       }
@@ -234,10 +287,10 @@ export function applyAction(draft, step, value) {
       break;
     case "done":
       if (value === "save") return { draft: d, saved: true };
-      if (value === "restart") return { draft: newDraft(null, d.scope) };
+      if (value === "restart") return { draft: newDraft(null, d.scope, d.role) };
       return { draft };
   }
-  d.step = next(step, d.scope);
+  d.step = next(step, d);
   return { draft: d };
 }
 
@@ -267,14 +320,14 @@ export function applyText(draft, text) {
     const tonnes = parseCapacityT(text);
     if (tonnes == null) return { draft, error: "Sonni tushunmadim. Masalan: 7,5 yoki 24" };
     d.vehicle.capacityKg = Math.round(tonnes * 1000);
-    d.step = next("capacity", d.scope);
+    d.step = next("capacity", d);
     return { draft: d };
   }
   if (d.step === "size") {
     const body = parseBodySize(text);
     if (!body) return { draft, error: "Uchta sonni yozing: uzunligi eni balandligi. Masalan: 4.85 2.15 1.95" };
     d.vehicle.body = body;
-    d.step = next("size", d.scope);
+    d.step = next("size", d);
     return { draft: d };
   }
   return { draft, error: "Iltimos, tugmalardan birini bosing." };
@@ -287,6 +340,17 @@ export function profileFromDraft(draft) {
   const international = Boolean(intlChoices(draft.scope)) && draft.international;
   const domesticOnly = (list) => list.filter((id) => id !== "xorij" && REGIONS.some((r) => r.id === id));
   const areas = (list) => (international ? [...list] : domesticOnly(list));
+  // Yuk beruvchi (@yuk/shared sanitizeShipperProfile ko'rinishida)
+  if (draft.role === "yuk_beruvchi") {
+    return {
+      fromAreas: areas(draft.fromAreas),
+      toAreas: areas(draft.toAreas),
+      domestic: international ? draft.domestic : true,
+      international,
+      truckClasses: [...draft.truckClasses],
+      bodyTypes: [...draft.bodyTypes],
+    };
+  }
   return {
     vehicle: {
       truckClass: vehicle.truckClass,
@@ -303,8 +367,23 @@ export function profileFromDraft(draft) {
   };
 }
 
-// Profilni haydovchiga ko'rsatish uchun matn. scope — "qo'shni davlatlar" / "xalqaro" yozuvi uchun
-export function describeProfile(profile, scope = DEFAULT_ROUTE_SCOPE) {
+// Yuk beruvchi profilining matni
+export function describeShipperProfile(profile, scope = DEFAULT_ROUTE_SCOPE) {
+  const list = (ids, name, empty) => (ids?.length ? ids.map(name).join(", ") : empty);
+  const areas = (ids, empty) => list(ids, regionLabel, empty);
+  return [
+    `📍 Yuk qayerda: ${areas(profile.fromAreas, "hamma viloyat")}`,
+    `🏁 Qayerga: ${areas(profile.toAreas, "istalgan joy")}`,
+    `🚚 Mashina: ${list(profile.truckClasses, (id) => truckClass(id)?.name ?? id, "istalgan")}`,
+    `📦 Kuzov: ${list(profile.bodyTypes, (id) => BODY_TYPES.find((b) => b.id === id)?.name ?? id, "istalgan")}`,
+    `🌍 ${intlLabel(profile, scope)}`,
+  ].join("\n");
+}
+
+// Profilni foydalanuvchiga ko'rsatish uchun matn. scope — "qo'shni davlatlar" / "xalqaro" yozuvi uchun,
+// role — "yuk_beruvchi" bo'lsa yuk beruvchi profili
+export function describeProfile(profile, scope = DEFAULT_ROUTE_SCOPE, role = "haydovchi") {
+  if (role === "yuk_beruvchi") return describeShipperProfile(profile, scope);
   const v = profile.vehicle ?? {};
   const parts = [truckClass(v.truckClass)?.name ?? "—"];
   if (v.bodyType) parts.push(BODY_TYPES.find((b) => b.id === v.bodyType)?.name ?? v.bodyType);

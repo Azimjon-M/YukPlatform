@@ -39,20 +39,29 @@ function setup({ fail, config: extra = {}, appUrl } = {}) {
 
 const texts = (calls, method = "sendMessage") => calls.filter((c) => c.method === method).map((c) => c.payload.text);
 
-test("/start: salom va birinchi savol, haydovchi bazada", async () => {
-  const { store, calls, command } = setup();
+const inlineButtons = (call) => call.payload.reply_markup.inline_keyboard.flat();
+
+test("/start: avval «Siz kimsiz?», keyin haydovchiga birinchi savol", async () => {
+  const { store, calls, command, press } = setup();
   await command("/start");
-  const sent = texts(calls);
-  assert.match(sent[0], /Yuk Ekspert/);
-  assert.match(sent[1], /Mashinangiz qaysi turdagi/);
-  assert.equal(store.getDriver(42).draft.step, "class");
+  const sent = calls.filter((c) => c.method === "sendMessage");
+  assert.match(sent[0].payload.text, /Yuk Ekspert[\s\S]*haydovchiga[\s\S]*yuk beruvchiga/);
+  assert.match(sent[1].payload.text, /Siz kimsiz/);
+  assert.deepEqual(inlineButtons(sent[1]).map((b) => b.callback_data), ["r:haydovchi", "r:yuk_beruvchi"]);
+  assert.equal(store.getDriver(42).role, null);
   assert.equal(store.getDriver(42).name, "Ali");
+
+  await press("r:haydovchi");
+  assert.match(texts(calls, "editMessageText").at(-1), /Haydovchiman/);
+  assert.equal(store.getDriver(42).role, "haydovchi");
+  assert.match(texts(calls).at(-1), /Mashinangiz qaysi turdagi/);
+  assert.equal(store.getDriver(42).draft.step, "class");
 });
 
 test("tugmalar bilan to'liq ro'yxatdan o'tish va /pauza", async () => {
   const { store, calls, command, press, message } = setup();
   await command("/start");
-  for (const data of ["w:class:isuzu", "w:body:tent", "w:capacity:5", "w:size:std", "w:sides:t.orqa", "w:sides:ok", "w:from:t.toshkent", "w:from:ok", "w:to:ok", "w:intl:yoq", "w:mode:own"]) {
+  for (const data of ["r:haydovchi", "w:class:isuzu", "w:body:tent", "w:capacity:5", "w:size:std", "w:sides:t.orqa", "w:sides:ok", "w:from:t.toshkent", "w:from:ok", "w:to:ok", "w:intl:yoq", "w:mode:own"]) {
     await press(data);
   }
   assert.equal(store.getDriver(42).draft.step, "done");
@@ -75,6 +84,7 @@ test("tugmalar bilan to'liq ro'yxatdan o'tish va /pauza", async () => {
 test("sig'imni matn bilan yozish, noto'g'ri bo'lsa qayta so'raydi", async () => {
   const { store, calls, command, press, message } = setup();
   await command("/start");
+  await press("r:haydovchi");
   await press("w:class:mini_fura");
   await press("w:body:tent");
   await message(PRIVATE, "ko'p");
@@ -102,10 +112,18 @@ test("yopiq guruh havolasi va matnsiz xabar", () => {
   assert.equal(postFromMessage(GROUP, { message_id: 8, date: 10 }), null);
 });
 
-test("kanalga joylash va haydovchiga yuborish; bloklagan haydovchi to'xtatiladi", async () => {
+test("kanalga yuk standart holatda joylanmaydi (CHANNEL_LOADS yo'q)", async () => {
   const load = { fromCity: "Toshkent", toCity: "Samarqand", weightT: 20, phones: ["+998900000001"] };
   const post = { source: "@yuk_guruh", link: "https://t.me/yuk_guruh/5", postedAt: Date.now() };
-  const ok = setup();
+  const off = setup();
+  assert.equal(await off.publish(load, post), null);
+  assert.equal(off.calls.filter((c) => c.method === "sendMessage").length, 0);
+});
+
+test("kanalga joylash (CHANNEL_LOADS=1) va haydovchiga yuborish; bloklagan haydovchi to'xtatiladi", async () => {
+  const load = { fromCity: "Toshkent", toCity: "Samarqand", weightT: 20, phones: ["+998900000001"] };
+  const post = { source: "@yuk_guruh", link: "https://t.me/yuk_guruh/5", postedAt: Date.now() };
+  const ok = setup({ config: { channelLoads: true } });
   assert.equal(await ok.publish(load, post), 101);
   const channelCall = ok.calls.find((c) => c.payload.chat_id === "@Yuk_Ekspert");
   assert.equal(channelCall.payload.parse_mode, "HTML");
@@ -130,24 +148,34 @@ const PROFILE = {
 const lastMarkup = (calls) => calls.filter((c) => c.method === "sendMessage").at(-1).payload.reply_markup;
 const buttons = (markup) => markup.keyboard.flat();
 
-test("pastki menyu: /start Mini App tugmasi bilan, savol-javobsiz", async () => {
-  const { calls, command } = setup({ config: { miniappUrl: MINIAPP } });
+test("pastki menyu: rol tanlangach Mini App tugmasi, savol-javobsiz", async () => {
+  const { calls, command, press } = setup({ config: { miniappUrl: MINIAPP } });
   await command("/start");
+  // Rol hali yo'q — sozlamalar tugmasi oddiy matn (bosilsa "Siz kimsiz?")
+  const first = calls.filter((c) => c.method === "sendMessage")[0].payload.reply_markup;
+  assert.equal(buttons(first).find((b) => b.text === MENU.register).web_app, undefined);
+
+  calls.length = 0;
+  await press("r:haydovchi");
   assert.equal(texts(calls).length, 1);
   assert.match(texts(calls)[0], /Ro'yxatdan o'tish/);
   const markup = lastMarkup(calls);
   assert.equal(markup.is_persistent, true);
   assert.equal(markup.resize_keyboard, true);
   const register = buttons(markup).find((b) => b.text === MENU.register);
-  assert.equal(register.web_app.url, `${MINIAPP}?v=sozlamalar`); // ilova darhol sozlamalar bilan ochiladi
+  assert.equal(register.web_app.url, `${MINIAPP}?v=sozlamalar&r=haydovchi`); // ilova darhol sozlamalar bilan ochiladi
   assert.deepEqual(buttons(markup).map((b) => b.text), [MENU.loads, MENU.register, MENU.pause, MENU.apps, MENU.help]);
 });
 
 test("Mini App formasi saqlanadi; menyudagi manzil yangi sozlamalar bilan", async () => {
   const { store, calls, webAppData } = setup({ config: { miniappUrl: MINIAPP } });
-  await webAppData(JSON.stringify({ type: "profile", profile: { ...PROFILE, hacker: 1 } }));
+  // Rol yo'q va forma ham rol yubormadi — saqlanmaydi
+  await webAppData(JSON.stringify({ type: "profile", profile: PROFILE }));
+  assert.match(texts(calls).at(-1), /Saqlanmadi: Avval kim ekaningizni tanlang/);
+  await webAppData(JSON.stringify({ type: "profile", role: "haydovchi", profile: { ...PROFILE, hacker: 1 } }));
   const driver = store.getDriver(42);
   assert.deepEqual(driver.profile, PROFILE);
+  assert.equal(driver.role, "haydovchi");
   assert.equal(driver.active, true);
   assert.match(texts(calls).at(-1), /Saqlandi[\s\S]*Isuzu/);
   const settings = buttons(lastMarkup(calls)).find((b) => b.text === MENU.settings);
@@ -156,6 +184,7 @@ test("Mini App formasi saqlanadi; menyudagi manzil yangi sozlamalar bilan", asyn
 
 test("Mini App'dan buzilgan yoki noto'g'ri ma'lumot saqlanmaydi", async () => {
   const { store, calls, webAppData } = setup({ config: { miniappUrl: MINIAPP } });
+  store.saveDriver(42, { role: "haydovchi" });
   await webAppData("{buzilgan");
   assert.match(texts(calls).at(-1), /Saqlanmadi/);
   await webAppData(JSON.stringify({ type: "profile", profile: { vehicle: { truckClass: "raketa" } } }));
@@ -165,6 +194,9 @@ test("Mini App'dan buzilgan yoki noto'g'ri ma'lumot saqlanmaydi", async () => {
 
 test("📋 Mos yuklar: faqat mos keladigani, havola matnda, tugmasiz", async () => {
   const { store, calls, message } = setup();
+  await message(PRIVATE, MENU.loads);
+  assert.match(texts(calls).at(-1), /Siz kimsiz/);
+  store.saveDriver(42, { role: "haydovchi" });
   await message(PRIVATE, MENU.loads);
   assert.match(texts(calls).at(-1), /Avval mashinangiz/);
 
@@ -195,9 +227,11 @@ test("⏸ Pauza tugmasi: menyuda ▶️ Davom ettirish chiqadi", async () => {
 test("menyu tugmasi savol-javob o'rtasida ham ishlaydi, qoralama qoladi", async () => {
   const { store, calls, command, press, message } = setup();
   await command("/start");
+  await press("r:haydovchi");
   await press("w:class:isuzu");
   await message(PRIVATE, MENU.apps);
-  assert.match(texts(calls).at(-1), /Android: tez orada[\s\S]*@Yuk_Ekspert/);
+  assert.match(texts(calls).at(-1), /Android: tez orada/);
+  assert.doesNotMatch(texts(calls).at(-1), /@Yuk_Ekspert/, "yuklar kanalga chiqmaydi — kanalni ko'rsatmaymiz");
   assert.equal(store.getDriver(42).draft.step, "body");
 });
 
@@ -233,6 +267,16 @@ test("config: POST_MAX_AGE_HOURS — standart 3 soat, 0 — cheklovsiz, vergul h
   for (const bad of ["abc", "-1", "3 soat"]) assert.throws(() => age(bad), /POST_MAX_AGE_HOURS/, bad);
 });
 
+test("config: CHANNEL_LOADS — standart o'chiq, 1 / ha / true yoqadi", () => {
+  const token = `123456:${"x".repeat(35)}`;
+  const flag = (value) => readConfig({ BOT_TOKEN: token, CHANNEL_ID: "@Yuk_Ekspert", CHANNEL_LOADS: value }).channelLoads;
+  assert.equal(flag(undefined), false);
+  assert.equal(flag(""), false);
+  assert.equal(flag("0"), false);
+  assert.equal(flag("yo'q"), false);
+  for (const on of ["1", "ha", "true", " ON "]) assert.equal(flag(on), true, on);
+});
+
 test("tunnel manzili o'zgarsa: yuk xabari bilan pastki menyu yangi manzilga yangilanadi", async () => {
   let url = "https://bir-ikki-uch-tort.trycloudflare.com/";
   const { store, calls, command, deliver } = setup({ appUrl: () => url });
@@ -263,4 +307,83 @@ test("tunnel manzili o'zgarsa: yuk xabari bilan pastki menyu yangi manzilga yang
   const markup = sent().reply_markup;
   assert.equal(settingsUrl(markup), null);
   assert.ok(buttons(markup).some((b) => b.text === MENU.settings));
+});
+
+test("yuk beruvchi: rol → savol-javob → saqlash; menyuda «🚚 Bo'sh mashinalar»", async () => {
+  const { store, calls, command, press, message } = setup();
+  await command("/start");
+  await press("r:yuk_beruvchi");
+  assert.match(texts(calls).at(-1), /Yukingiz qayerda yuklanadi/);
+  for (const data of ["w:from:t.samarqand", "w:from:ok", "w:to:ok", "w:classes:t.fura", "w:classes:ok", "w:bodies:ok", "w:intl:yoq"]) {
+    await press(data);
+  }
+  await press("w:done:save");
+  const user = store.getDriver(42);
+  assert.equal(user.role, "yuk_beruvchi");
+  assert.equal(user.active, true);
+  assert.deepEqual(user.profile.truckClasses, ["fura"]);
+  assert.match(texts(calls).at(-1), /Saqlandi\. Endi mos bo'sh mashinalar[\s\S]*Yuk qayerda: Samarqand/);
+  assert.deepEqual(buttons(lastMarkup(calls)).map((b) => b.text), [MENU.trucks, MENU.settings, MENU.pause, MENU.apps, MENU.help]);
+
+  // 24 soatdagi bo'sh mashinalar: mos keladigani (Samarqand, fura); boshqa viloyat va yuk e'loni — yo'q
+  const post = store.addPost({ source: "@yuk_guruh", messageId: 9, link: "https://t.me/yuk_guruh/9", text: "Samarqanddan bo'sh fura bor", postedAt: Date.now() });
+  store.addLoad({ postId: post.id, key: "m1", kind: "mashina", load: { fromCity: "Samarqand", fromRegion: "samarqand", truckClass: "fura", bodyType: "tent", weightT: 22, phones: ["+998900000009"] } });
+  store.addLoad({ postId: post.id, key: "m2", kind: "mashina", load: { fromCity: "Nukus", fromRegion: "qoraqalpogiston", truckClass: "fura", phones: ["+998900000008"] } });
+  store.addLoad({ postId: post.id, key: "y1", load: { fromCity: "Samarqand", fromRegion: "samarqand", toCity: "Toshkent", weightT: 20, phones: ["+998900000007"] } });
+  calls.length = 0;
+  await message(PRIVATE, MENU.trucks);
+  const sent = calls.filter((c) => c.method === "sendMessage");
+  assert.equal(sent.length, 2);
+  assert.match(sent[0].payload.text, /mos 1 ta bo'sh mashina/);
+  assert.match(sent[1].payload.text, /Bo'sh mashina: Samarqand → istalgan joyga[\s\S]*22 t ko'taradi[\s\S]*\+998900000009/);
+  // Eski «📋 Mos yuklar» tugmasi bosilsa ham — hozirgi rol bo'yicha
+  calls.length = 0;
+  await message(PRIVATE, MENU.loads);
+  assert.match(texts(calls)[0], /bo'sh mashina/);
+});
+
+test("/rol: boshqa rolga o'tsa eski sozlamalar o'chadi, o'sha rol bosilsa hech narsa o'zgarmaydi", async () => {
+  const { store, calls, command, press } = setup();
+  store.saveDriver(42, { profile: PROFILE, active: true }); // rollardan oldingi haydovchi (role ustuni bo'sh)
+  await command("/rol");
+  assert.match(texts(calls).at(-1), /Hozir siz: <b>🚚 Haydovchi/);
+  await press("r:haydovchi");
+  assert.match(texts(calls).at(-1), /hech narsa o'zgarmadi/);
+  assert.deepEqual(store.getDriver(42).profile, PROFILE);
+
+  await press("r:yuk_beruvchi");
+  const user = store.getDriver(42);
+  assert.equal(user.role, "yuk_beruvchi");
+  assert.equal(user.profile, null);
+  assert.equal(user.draft.step, "from");
+  assert.equal(store.activeUsers("haydovchi").length, 0, "endi unga yuk bormaydi");
+});
+
+test("bo'sh mashina xabari yuk beruvchiga; Mini App rol bilan; admin menyusida «🛠 Boshqaruv»", async () => {
+  const { store, calls, deliver, command } = setup({ config: { miniappUrl: MINIAPP, admins: [42] } });
+  const empty = { fromAreas: [], toAreas: [], domestic: true, international: false, truckClasses: [], bodyTypes: [] };
+  store.saveDriver(42, { role: "yuk_beruvchi", profile: empty, active: true });
+  const truck = { fromCity: "Andijon", fromRegion: "andijon", toCity: "Toshkent", truckClass: "isuzu", bodyType: "tent", phones: ["+998900000005"] };
+  assert.equal(await deliver(42, truck, { link: "https://t.me/yuk_guruh/7" }, "mashina"), true);
+  const payload = calls.filter((c) => c.method === "sendMessage").at(-1).payload;
+  assert.match(payload.text, /^🚚 <b>Bo'sh mashina: Andijon → Toshkent<\/b>[\s\S]*Isuzu[\s\S]*href="https:\/\/t\.me\/yuk_guruh\/7"/);
+
+  await command("/start");
+  const menuButtons = buttons(lastMarkup(calls));
+  const settings = new URL(menuButtons.find((b) => b.text === MENU.settings).web_app.url);
+  assert.equal(settings.searchParams.get("r"), "yuk_beruvchi");
+  assert.deepEqual(decodeProfile(settings.searchParams.get("p"), { role: "yuk_beruvchi" }), empty);
+  const admin = new URL(menuButtons.find((b) => b.text === MENU.admin).web_app.url);
+  assert.equal(admin.searchParams.get("v"), "admin");
+
+  // Admin emas — tugma yo'q, /holat javob bermaydi
+  const plain = setup({ config: { miniappUrl: MINIAPP } });
+  plain.store.saveDriver(42, { role: "haydovchi", profile: PROFILE, active: true });
+  await plain.command("/start");
+  assert.ok(!buttons(lastMarkup(plain.calls)).some((b) => b.text === MENU.admin));
+  const before = plain.calls.length;
+  await plain.command("/holat");
+  assert.equal(plain.calls.length, before);
+  await command("/holat");
+  assert.match(texts(calls).at(-1), /Yuk beruvchilar: 1 faol \/ 1/);
 });
