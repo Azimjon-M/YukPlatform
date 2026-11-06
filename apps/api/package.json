@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=../../.env --disable-warning=ExperimentalWarning src/server.js",
     "dev": "node --env-file-if-exists=../../.env --disable-warning=ExperimentalWarning --watch-path=src src/server.js --no-autostart",
+    "nginx": "node --env-file-if-exists=../../.env --disable-warning=ExperimentalWarning src/edge/nginx.js",
+    "tunnel": "node --env-file-if-exists=../../.env --disable-warning=ExperimentalWarning src/edge/tunnel.js",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
   },
   "dependencies": {

@@ -10,8 +10,10 @@ import { BATCH_SCHEMA } from "./schema.js";
 export const DEFAULT_EFFORT = "low"; // qanchalik chuqur o'ylashi — hozircha faqat Claude'da ishlatiladi
 // Bitta so'rovdagi e'lonlar soni (bot ishchisi navbatdan shuncha oladi). 1 — har e'lon alohida so'rov (eski usul).
 export const DEFAULT_BATCH_SIZE = 10;
-// Navbatda batch'dan kam e'lon bo'lsa, bot eng eski e'lon joylanganidan shuncha soniya o'tguncha yig'ilishini kutadi
-export const DEFAULT_BATCH_WAIT_SEC = 60;
+// Navbatda batch'dan kam e'lon bo'lsa, bot eng eski e'lon navbatga tushganidan shuncha soniya o'tguncha yig'ilishini
+// kutadi. 90 — collector'ning ikki aylanishi (~75 s dan): 2026-11-05 dagi oqimda 60 s → so'rovga 6,3 ta e'lon,
+// 90 s → 8,7 ta (so'rovlar 809 → 580), e'lonning qo'shimcha kutishi ikkalasida ham o'rtacha ~32 s
+export const DEFAULT_BATCH_WAIT_SEC = 90;
 
 // .env dagi son: bo'sh, "abc" yoki min'dan kichik bo'lsa — standart qiymat
 function numberSetting(value, fallback, min) {

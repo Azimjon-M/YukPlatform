@@ -12,6 +12,8 @@
     "api:dev": "npm run dev -w @yuk/api",
     "admin": "npm run dev -w @yuk/admin",
     "admin:build": "npm run build -w @yuk/admin",
+    "nginx": "npm run nginx -w @yuk/api",
+    "tunnel": "npm run tunnel -w @yuk/api",
     "parse": "npm run parse -w @yuk/parser --",
     "parse:eval": "npm run eval -w @yuk/parser --",
     "tg:login": "npm run login -w @yuk/collector",

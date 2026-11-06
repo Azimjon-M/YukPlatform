@@ -6,8 +6,9 @@ Bitta kod ikki joyda ishlaydi:
 - **Telegram Mini App** — botning pastki menyusidagi «⚙️ Sozlamalar» / «🚚 Ro'yxatdan o'tish» tugmasi;
 - **oddiy sayt** — brauzerda, «Telegram bilan kirish» tugmasi orqali.
 
-Ilovani `apps/api` dagi **haydovchilar serveri** (3001-port, `src/public.js`) ochadi va ma'lumot beradi.
-`npm start` bilan u o'zi ishga tushadi: **http://localhost:3001**.
+Ilovani `apps/api` dagi **haydovchilar serveri** (3001-port, `src/public.js`) ochadi va ma'lumot beradi; oldida
+**nginx** turadi. `npm start` bilan hammasi o'zi ishga tushadi: **http://localhost** (nginx) yoki http://localhost:3001,
+internetda — tunnel bergan `https://....trycloudflare.com`.
 
 ## Bo'limlar
 
@@ -46,9 +47,9 @@ qismini 5173 manziliga qo'shing.
 
 ## Internetga chiqarish
 
-Eng oson yo'l — 3001-portni tunnel bilan chiqarish: ilova ham, uning API'si ham bitta manzilda bo'ladi.
-Qadamlar: [apps/api/README.md → «Internetga chiqarish»](../api/README.md#internetga-chiqarish).
-Keyin `.env` da `MINIAPP_URL` = tunnel manzili — bot tugmalari ilovani shu manzildan ochadi.
+`npm start` buni o'zi qiladi: nginx + tekin Cloudflare tunnel, ilova ham, API ham bitta https manzilda.
+Bot Mini App tugmasini tunnel manzili bilan beradi (manzil o'zgarsa — o'zi yangilaydi).
+O'rnatish: [apps/api/README.md → «Internetga chiqarish: nginx + tunnel»](../api/README.md#internetga-chiqarish-nginx--tunnel).
 
 Ilovani alohida joylash ham mumkin (Cloudflare Pages, GitHub Pages — `base: "./"`, istalgan papkadan ochiladi).
 Unda API manzilini yig'ishda bering: `VITE_API_URL=https://...` (`apps/web/.env` yoki buyruq oldidan).

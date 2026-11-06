@@ -301,12 +301,60 @@ test("worker: guruh to'lmagan va e'lonlar yangi bo'lsa yig'ilishini kutadi (limi
   assert.equal(await worker.runOnce({ fillWaitMs: 60_000 }), 2, "eng eski e'lon 1 daqiqadan oshdi — kutmaydi");
   assert.equal(store.stats().posts.done, 2);
 
+  // Kutish e'lon joylangan vaqtdan emas, navbatga tushgan vaqtdan: collector 5 daqiqa oldingi e'lonni hozir
+  // olib kelgan bo'lsa ham, unga sherik e'lonlar yig'ilishi uchun kutamiz
+  const late = setup([]);
+  late.deps.parser = batchParser([], [yuk(LOAD)]).parser; // bitta e'lon — oddiy so'rov
+  late.add(1, undefined, Date.now() - 5 * 60_000);
+  let lateClock = Date.now();
+  const lateWorker = createWorker(late.deps, { batch: 5, log: () => {}, now: () => lateClock });
+  assert.equal(await lateWorker.runOnce({ fillWaitMs: 90_000 }), 0, "joylanganiga 5 daqiqa, lekin navbatga hozir tushdi");
+  lateClock += 91_000;
+  assert.equal(await lateWorker.runOnce({ fillWaitMs: 90_000 }), 1);
+
   // Guruh to'lsa — darhol
   const full = setup([]);
   full.deps.parser = batchParser([[yuk(LOAD), yuk(BUXORO)]]).parser;
   full.add(1);
   full.add(2);
   assert.equal(await createWorker(full.deps, { batch: 2, log: () => {} }).runOnce({ fillWaitMs: 60_000 }), 2);
+});
+
+test("worker: joylanganiga 3 soatdan oshgan e'lon AI'ga bormaydi, «Eskirgan» deb yopiladi", async () => {
+  const { store, deps, published, add } = setup([]);
+  const { parser, calls } = batchParser([], [yuk(LOAD)]);
+  deps.parser = parser;
+  const HOUR = 3_600_000;
+  add(1, "kechagi yuk Toshkent Samarqand xxxxxxxxxx", Date.now() - 4 * HOUR);
+  add(2, "yangi yuk Toshkent Samarqand xxxxxxxxxxxx");
+  const logs = [];
+  let clock = Date.now();
+  const worker = createWorker(deps, { log: (m) => logs.push(m), now: () => clock, maxAgeMs: 3 * HOUR });
+
+  assert.equal(await worker.runOnce(), 1, "faqat yangisi");
+  assert.deepEqual(calls.single, ["yangi yuk Toshkent Samarqand xxxxxxxxxxxx"]);
+  assert.equal(published.length, 1);
+  const old = store.db.prepare("SELECT status, error FROM posts WHERE message_id = 1").get();
+  assert.equal(old.status, "done");
+  assert.match(old.error, /^Eskirgan: joylanganiga 3 soatdan oshgan/);
+  assert.ok(logs.some((m) => /1 ta e'lon eskirgan/.test(m)));
+
+  // Daqiqada bir martadan ko'p tekshirilmaydi; daqiqa o'tgach — yana
+  add(3, "yana bir kechagi e'lon xxxxxxxxxxxxxxxxxx", Date.now() - 5 * HOUR);
+  assert.equal(await worker.runOnce(), 1, "hali bir daqiqa o'tmagan — oddiy e'londek oladi");
+  add(4, "uchinchi kechagi e'lon xxxxxxxxxxxxxxxxxxx", Date.now() - 5 * HOUR);
+  clock += 61_000;
+  assert.equal(await worker.runOnce(), 0);
+  assert.equal(store.db.prepare("SELECT status FROM posts WHERE message_id = 4").get().status, "done");
+});
+
+test("worker: maxAgeMs berilmasa (--dry-run, eski testlar) eski e'lon ham tahlil qilinadi", async () => {
+  const { deps, add } = setup([]);
+  const { parser, calls } = batchParser([], [yuk(LOAD)]);
+  deps.parser = parser;
+  add(1, undefined, Date.now() - 24 * 3_600_000);
+  assert.equal(await createWorker(deps, { log: () => {} }).runOnce(), 1);
+  assert.equal(calls.single.length, 1);
 });
 
 // --- Bir nechta AI ulanishi parallel (start) ---

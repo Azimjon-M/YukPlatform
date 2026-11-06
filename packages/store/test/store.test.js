@@ -21,6 +21,31 @@ test("e'lon navbatga tushadi, bir xil xabar ikki marta yozilmaydi", () => {
   assert.equal(store.takeNewPosts().length, 0);
 });
 
+test("expireOldPosts: faqat navbatdagi eski e'lonlarni izoh bilan yopadi, AI'dagilarga tegmaydi", () => {
+  const store = openStore({ file: ":memory:", now: () => 50_000 });
+  const old = store.addPost({ source: "@a", messageId: 1, text: "Toshkentdan Samarqandga 20 t", postedAt: 1_000 });
+  const busy = store.addPost({ source: "@a", messageId: 2, text: "Buxorodan Navoiyga 10 t", postedAt: 2_000 });
+  const fresh = store.addPost({ source: "@a", messageId: 3, text: "Andijondan Farg'onaga 5 t", postedAt: 40_000 });
+  const finished = store.addPost({ source: "@a", messageId: 4, text: "Qarshidan Termizga 22 t", postedAt: 1_000 });
+  store.finishPost(finished.id, "failed", "AI xatosi");
+
+  assert.equal(store.expireOldPosts({ before: 30_000, error: "Eskirgan", exclude: [busy.id] }), 1);
+  const rows = Object.fromEntries(store.db.prepare("SELECT id, status, error, done_at FROM posts").all().map((r) => [r.id, r]));
+  assert.deepEqual({ ...rows[old.id] }, { id: old.id, status: "done", error: "Eskirgan", done_at: 50_000 });
+  assert.equal(rows[busy.id].status, "new", "AI'da turgan e'lon");
+  assert.equal(rows[fresh.id].status, "new", "yangi e'lon");
+  assert.equal(rows[finished.id].error, "AI xatosi", "navbatda bo'lmagan e'lon o'zgarmaydi");
+  assert.equal(store.expireOldPosts({ before: 30_000, error: "Eskirgan" }), 1, "endi AI'dagisi ham");
+});
+
+test("takeNewPosts: joylangan va navbatga tushgan vaqt alohida (bot batch kutishini navbat vaqtidan hisoblaydi)", () => {
+  const store = openStore({ file: ":memory:", now: () => 90_000 });
+  store.addPost({ source: "@a", messageId: 1, text: "Toshkentdan Samarqandga 20 t", postedAt: 30_000 });
+  const [post] = store.takeNewPosts();
+  assert.equal(post.postedAt, 30_000);
+  assert.equal(post.queuedAt, 90_000);
+});
+
 test("boshqa guruhga tashlangan o'sha matn AI'ga bormaydi (duplicate)", () => {
   const store = openStore({ file: ":memory:" });
   const window = 60_000;

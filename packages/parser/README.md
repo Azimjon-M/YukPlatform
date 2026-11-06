@@ -67,7 +67,19 @@ Aniqlik (gold, 32 e'lon / 424 maydon, 2026-11-05). Asosiy model limiti tugagani 
 - Asosiy model (`gemini-3.5-flash-lite`) da limit tugaguncha 10 talik bitta guruh o'lchandi: 178/180, xuddi shu 10 e'londa v5 (bittadan) 180/180.
 - Kiruvchi tokenlar e'lon boshiga ~5 600 → ~800 (ko'rsatma bir marta yuboriladi).
 
-Bot navbatda 10 tadan kam e'lon bo'lsa, eng eski e'lon joylanganidan 60 soniya o'tguncha ko'proq yig'ilishini kutadi (`PARSER_BATCH_WAIT`) — aks holda navbat bo'sh paytda har 1–2 e'lon uchun alohida so'rov ketardi.
+Bot navbatda 10 tadan kam e'lon bo'lsa, eng eski e'lon **navbatga tushganidan** 90 soniya o'tguncha ko'proq yig'ilishini kutadi (`PARSER_BATCH_WAIT`) — aks holda navbat bo'sh paytda har 1–2 e'lon uchun alohida so'rov ketardi.
+
+Nega joylangan vaqtdan emas: collector guruhlarni har ~1 daqiqada o'qiydi, e'lon navbatga o'rtacha 40 s kechikib tushadi. 2026-11-05 da kutish joylangan vaqtdan 60 s edi — amalda ~20 s, so'rovga o'rtacha 4–5 ta e'lon ketdi va kunlik bepul limit 21:20 da tugadi. O'sha kungi haqiqiy oqim ustidagi simulyatsiya (5 062 ta noyob e'lon, batch 10):
+
+| Kutish | So'rovlar | E'lon / so'rov | E'lonning qo'shimcha kutishi |
+|---|---|---|---|
+| joylangan vaqtdan 60 s (eski) | 1 134 | 4,5 | ~7 s |
+| navbat vaqtidan 60 s | 809 | 6,3 | ~32 s |
+| **navbat vaqtidan 90 s (standart)** | **580** | **8,7** | **~32 s** |
+| navbat vaqtidan 180 s | 543 | 9,3 | ~40 s |
+| navbat vaqtidan 180 s, batch 15 | 389 | 13,0 | ~53 s |
+
+Limit yana yetmasa — `PARSER_BATCH=15` (aniqlik biroz pasayadi, jadval yuqorida) va `PARSER_BATCH_WAIT=180`.
 
 ## Bir nechta AI parallel (pool)
 
@@ -110,7 +122,7 @@ zid bo'lishi mumkin (akkaunt bloklanishi mumkin). Xavfsiz yo'l — bitta kalitda
 | `PARSER_MODEL` | provayderga qarab | `--models` ro'yxatidan tanlanadi |
 | `PARSER_EFFORT` | `low` | Faqat Claude: `low` / `medium` / `high` |
 | `PARSER_BATCH` | `10` | Bitta so'rovdagi e'lonlar soni (bot va `npm run parse`). `1` — har e'lon alohida |
-| `PARSER_BATCH_WAIT` | `60` | Soniya: navbatda batch'dan kam e'lon bo'lsa, bot eng eski e'lon shuncha "eskirguncha" yig'ilishini kutadi. `0` — kutmaydi |
+| `PARSER_BATCH_WAIT` | `90` | Soniya: navbatda batch'dan kam e'lon bo'lsa, bot eng eski e'lon navbatga tushganidan shuncha vaqt o'tguncha yig'ilishini kutadi. `0` — kutmaydi |
 | `PARSER_PARALLEL` | `8` | Bot bir vaqtda nechta AI so'rovi yuboradi (ulanishlar sonidan ko'p bo'lmaydi) |
 
 Bot uchun `PARSER_PROVIDER`, `PARSER_MODEL` va kalit faqat **birinchi marta** o'qiladi (ro'yxatga «.env kaliti» bo'lib qo'shiladi).

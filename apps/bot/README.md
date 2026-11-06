@@ -30,6 +30,7 @@
    | `ANDROID_URL`, `IOS_URL` | `https://play.google.com/...` | Ixtiyoriy: «📱 Ilovalar» tugmasidagi havolalar |
    | `APK_FILE` | `data/apk/yuk-ekspert.apk` | Ixtiyoriy: Android o'rnatish fayli (50 MB gacha), bot o'zi yuboradi |
    | `ROUTE_SCOPE` | `qoshni` | Qaysi yo'nalishlar: `qoshni` (standart) — O'zbekiston ichi va O'zbekiston ↔ Qozog'iston, Qirg'iziston, Tojikiston, Turkmaniston, Afg'oniston; `ichki` — faqat O'zbekiston ichi; `hammasi` — cheklovsiz. Haydovchi sozlamalarida (savol-javob, Mini App) ham faqat shu doiradagi davlatlar chiqadi |
+   | `POST_MAX_AGE_HOURS` | `3` | Joylanganiga shuncha soatdan oshgan e'lon AI'ga bormaydi: boshqaruv markazida «Tayyor», izohi «Eskirgan». Bot o'chib turganda to'plangan kechagi e'lonlar kanalga "yangi yuk" bo'lib chiqmaydi va bepul AI limitini yemaydi. `0` — cheklovsiz. `--dry-run` bu cheklovni ishlatmaydi |
 
 3. Botni kanalga **admin** qiling. Telefonda shu havolani oching va kanalni tanlang:
    <https://t.me/Yuk_Ekspert_agent?startchannel&admin=post_messages>

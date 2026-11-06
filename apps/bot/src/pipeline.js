@@ -70,6 +70,13 @@ function pauseText(ms, now) {
   return `${until} gacha`;
 }
 
+// Vaqt matni: 3 soat → "3 soat", 1,5 soat → "1,5 soat", yarim soat → "30 daqiqa"
+function formatHours(ms) {
+  const hours = ms / 3_600_000;
+  if (hours < 1) return `${Math.round(ms / 60_000)} daqiqa`;
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1).replace(".", ",")} soat`;
+}
+
 // Navbatni doimiy o'qib turadigan ishchi.
 //
 // AI bosqichi PARALLEL: har bir bo'sh AI ulanishi (kalit + model) navbatdan o'z guruhini oladi.
@@ -78,15 +85,20 @@ function pauseText(ms, now) {
 //
 // deps.pool yoki deps.parser (bitta parser — eski usul, testlar va --dry-run).
 // batch — bitta AI so'rovidagi e'lonlar soni (standart: .env dagi PARSER_BATCH).
-// fillWaitMs — navbatda batch'dan kam e'lon bo'lsa, eng eski e'lon joylanganidan shuncha vaqt o'tguncha yana
+// fillWaitMs — navbatda batch'dan kam e'lon bo'lsa, eng eski e'lon NAVBATGA TUSHGANIDAN shuncha vaqt o'tguncha yana
 // yig'ilishini kutamiz (standart: PARSER_BATCH_WAIT). Aks holda navbat bo'sh paytda har 5 soniyada 1–2 ta e'lon
 // uchun so'rov ketadi va batch limitni tejamaydi.
+// Nega joylangan vaqt (postedAt) emas: e'lon navbatga o'rtacha 40 s kechikib tushadi, 60 s lik kutish amalda ~20 s
+// bo'lib qolardi va so'rovga o'rtacha 4–5 ta e'lon ketardi (kunlik bepul limit 21:20 da tugagan).
 // maxParallel — bir vaqtda nechta AI so'rovi (standart: .env dagi PARSER_PARALLEL yoki 8).
-export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = console.log, now = Date.now, maxParallel } = {}) {
+// maxAgeMs — joylanganiga shundan ko'p vaqt o'tgan e'lon AI'ga bormaydi, "Eskirgan" deb yopiladi (0 — cheklovsiz;
+// bot .env dagi POST_MAX_AGE_HOURS ni beradi, standart 3 soat). Yukni odatda bir soat ichida olib bo'lishadi:
+// kechagi e'lonni "yangi yuk" deb kanalga chiqarish haydovchini chalg'itadi va bepul AI limitini behuda yeydi.
+export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = console.log, now = Date.now, maxParallel, maxAgeMs = 0 } = {}) {
   const { store } = deps;
   const pool = deps.pool ?? poolFromParser(deps.parser);
   const size = batch ?? pool.batchSize ?? 10;
-  const fillWait = fillWaitMs ?? pool.batchWaitMs ?? 60_000;
+  const fillWait = fillWaitMs ?? pool.batchWaitMs ?? 90_000;
   const parallel = maxParallel ?? (Math.floor(Number(process.env.PARSER_PARALLEL)) || 8);
   const controller = new AbortController();
   const sleep = (ms) => wait(ms, undefined, { signal: controller.signal }).catch(() => {});
@@ -112,11 +124,24 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
     });
   }
 
+  // Eskirgan e'lonlarni yopish. Daqiqada bir martadan ko'p emas: har 5 soniyada bazaga yozish shart emas,
+  // bir daqiqalik farq esa 3 soatlik chegarada sezilmaydi.
+  const ageText = `${formatHours(maxAgeMs)}dan oshgan`;
+  let expiredAt = -Infinity;
+  function expire() {
+    if (!(maxAgeMs > 0) || now() - expiredAt < 60_000) return;
+    expiredAt = now();
+    const error = `Eskirgan: joylanganiga ${ageText}, AI'ga yuborilmadi`;
+    const count = store.expireOldPosts({ before: now() - maxAgeMs, error, exclude: [...claimed] });
+    if (count) log(`${count} ta e'lon eskirgan (joylanganiga ${ageText}) — AI'ga yuborilmadi`);
+  }
+
   // Navbatdan bir guruh (eng yangilari, boshqa AI olganlaridan tashqari). Guruh to'lmagan va yangi bo'lsa — [] (kutamiz)
   function take(fill) {
     const posts = store.takeNewPosts(size, { newest: true, exclude: [...claimed] });
     if (posts.length === 0) return [];
-    if (posts.length < size && fill > 0 && now() - Math.min(...posts.map((p) => p.postedAt)) < fill) return [];
+    const oldest = Math.min(...posts.map((p) => p.queuedAt ?? p.postedAt));
+    if (posts.length < size && fill > 0 && now() - oldest < fill) return [];
     for (const post of posts) claimed.add(post.id);
     return posts;
   }
@@ -185,6 +210,7 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
   // Bitta guruh, ketma-ket (testlar va --dry-run): AI → yuborish. Ulanish limitga tushsa — shu yerda kutadi.
   // → olingan e'lonlar soni (0 — ish yo'q yoki bo'sh ulanish yo'q).
   async function runOnce({ fillWaitMs: fill = 0 } = {}) {
+    expire();
     const lease = pool.acquire();
     if (!lease) return 0;
     const posts = take(fill);
@@ -233,6 +259,8 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
       const count = pool.size();
       log(count ? `AI: ${count} ta ulanish, bir vaqtda ${Math.min(count, parallel)} tagacha so'rov` : "AI: ulanish yo'q");
       while (!controller.signal.aborted) {
+        // Hamma AI dam olayotgan bo'lsa ham: kechasi to'plangan e'lonlar navbatda "kutib" turmasin
+        expire();
         // Yuborish ortda qolsa yoki hamma yo'lak band — kutamiz (Telegram'dan tezroq tahlil qilishning foydasi yo'q)
         if (lanes.size >= parallel || waiting >= size * 3) {
           await nap(idleMs);

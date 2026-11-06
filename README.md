@@ -64,12 +64,13 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 1. `npm install` — barcha paketlarni o'rnatadi (npm workspaces: `apps/*` va `packages/*` bitta buyruq bilan).
 2. `.env.example` faylidan nusxa olib, `.env` deb nomlang.
 3. Kalitlarni **o'zingiz** yozing. `.env` faylni hech qachon gitga yoki chatga yubormang.
+4. Internetga chiqish uchun (ixtiyoriy): nginx'ni `tools/` ga va `cloudflared` ni o'rnating — [apps/api/README.md](apps/api/README.md) → «Internetga chiqarish».
 
 ## Buyruqlar
 
 | Buyruq | Nima qiladi |
 |---|---|
-| **`npm start`** | **Hammasi bitta buyruq bilan**: boshqaruv markazi http://localhost:3000/admin + haydovchilar ilovasi http://localhost:3001 + bot + collector. To'xtatish: `Ctrl+C` |
+| **`npm start`** | **Hammasi bitta buyruq bilan**: boshqaruv markazi http://localhost:3000/admin + nginx (haydovchilar ilovasi http://localhost) + tunnel (internet manzili konsolda: `[tunnel] 🌐 Manzil`) + bot + collector. To'xtatish: `Ctrl+C` |
 | `npm test` | Barcha testlar |
 | `npm run tg:login` | Telegram'ga kirish (bir marta, o'z terminalingizda) |
 | `npm run tg:dialogs` | Akkaunt a'zo bo'lgan guruh/kanallar |
@@ -82,7 +83,8 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 | `npm run tg:live` | Guruhlardan yangi e'lonlarni bot navbatiga yig'adi (guruhlar ro'yxati — boshqaruv markazining «Manbalar» bo'limida) |
 | `npm run web` | Haydovchilar ilovasini dasturlash rejimida (http://localhost:5173; server ishlab turishi kerak) |
 | `npm run web:build` | Haydovchilar ilovasini yig'adi (`apps/web/dist`) |
-| `npm run api` | Faqat serverlar: boshqaruv markazi + haydovchilar ilovasi (bot va collector'ni web'dan yoqasiz) |
+| `npm run api` | Faqat serverlar: boshqaruv markazi + haydovchilar ilovasi (nginx, tunnel, bot, collector'ni web'dan yoqasiz) |
+| `npm run nginx` · `npm run tunnel` | Faqat nginx / faqat tunnel (o'rnatish: [apps/api/README.md](apps/api/README.md) → «Internetga chiqarish») |
 | `npm run admin` | Boshqaruv markazi web'ini dasturlash rejimida (http://localhost:5174/admin/) |
 
 Batafsil: [apps/api/README.md](apps/api/README.md), [apps/bot/README.md](apps/bot/README.md), [apps/web/README.md](apps/web/README.md), [apps/collector/README.md](apps/collector/README.md), [packages/parser/README.md](packages/parser/README.md)

@@ -1,4 +1,5 @@
-// Bot va collector'ni boshqaruv markazidan yoqish / o'chirish. Har biri alohida Node jarayoni (fork), loglari xotirada.
+// Bot, collector, nginx va tunnelni boshqaruv markazidan yoqish / o'chirish. Har biri alohida Node jarayoni (fork), loglari xotirada.
+// nginx va tunnel — tashqi dasturlar (.exe); ularni src/edge/ dagi kichik Node dasturi ishga tushiradi va to'xtatadi.
 // To'xtatish: avval "stop" xabari (dastur o'zi yumshoq tugaydi), 8 s ichida tugamasa — majburan.
 // Kutilmaganda to'xtasa — 10 s dan keyin o'zi qayta ishga tushadi (10 daqiqada 5 martagacha).
 import { fork } from "node:child_process";
@@ -12,6 +13,8 @@ const NODE_FLAGS = ["--env-file-if-exists=../../.env", "--disable-warning=Experi
 export const PROCESSES = {
   bot: { title: "Bot", cwd: path.join(ROOT, "apps/bot"), module: "src/main.js", args: [] },
   collector: { title: "Collector", cwd: path.join(ROOT, "apps/collector"), module: "src/cli.js", args: ["live"] },
+  nginx: { title: "nginx", cwd: path.join(ROOT, "apps/api"), module: "src/edge/nginx.js", args: [] },
+  tunnel: { title: "Tunnel", cwd: path.join(ROOT, "apps/api"), module: "src/edge/tunnel.js", args: [] },
 };
 
 const MAX_LINES = 1000;

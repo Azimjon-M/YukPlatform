@@ -51,5 +51,20 @@ export function readConfig(env = process.env) {
   // Qaysi yo'nalishlar (@yuk/shared scope.js): qoshni (standart) | ichki | hammasi
   const routeScope = routeScopeFrom(env);
 
-  return { token, channel, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope };
+  const maxPostAgeMs = readMaxPostAge(env);
+
+  return { token, channel, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope, maxPostAgeMs };
+}
+
+// Joylanganiga necha soatdan oshgan e'lon AI'ga bormaydi va «Eskirgan» deb yopiladi.
+// Bo'sh — 3 soat (Azimjonning qarori, 2026-11-06); 0 — cheklovsiz; 1.5 yoki 1,5 — bir yarim soat.
+export const DEFAULT_MAX_POST_AGE_HOURS = 3;
+function readMaxPostAge(env) {
+  const raw = env.POST_MAX_AGE_HOURS?.trim();
+  if (!raw) return DEFAULT_MAX_POST_AGE_HOURS * 3_600_000;
+  const hours = Number(raw.replace(",", "."));
+  if (!Number.isFinite(hours) || hours < 0) {
+    throw new Error("POST_MAX_AGE_HOURS soat bo'lishi kerak: masalan 3 yoki 1.5 (0 — cheklovsiz).");
+  }
+  return Math.round(hours * 3_600_000);
 }

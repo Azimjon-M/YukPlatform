@@ -13,10 +13,10 @@ const PRIVATE = { id: 42, type: "private", first_name: "Ali" };
 const GROUP = { id: -1001234567890, type: "supergroup", title: "Yuk guruh", username: "yuk_guruh" };
 const CHANNEL = { id: -1009876543210, type: "channel", title: "Yuk Ekspert", username: "Yuk_Ekspert" };
 
-function setup({ fail, config: extra = {} } = {}) {
+function setup({ fail, config: extra = {}, appUrl } = {}) {
   const store = openStore({ file: ":memory:" });
   const config = { channel: "@Yuk_Ekspert", channelId: CHANNEL.id, admins: [], miniappUrl: null, ...extra };
-  const { bot, publish, deliver } = createBot({ token: `123456:${"x".repeat(35)}`, store, config, log: () => {}, botInfo: BOT_INFO });
+  const { bot, publish, deliver } = createBot({ token: `123456:${"x".repeat(35)}`, store, config, log: () => {}, botInfo: BOT_INFO, appUrl });
   const calls = [];
   let messageId = 100;
   bot.api.config.use(async (_prev, method, payload) => {
@@ -220,4 +220,47 @@ test("config: Mini App faqat https, APK yo'li YukPlatform papkasiga nisbatan", (
   const config = readConfig({ BOT_TOKEN: token, MINIAPP_URL: "https://yuk-ekspert.pages.dev", APK_FILE: "data/apk/yuk.apk" });
   assert.equal(config.miniappUrl, "https://yuk-ekspert.pages.dev/");
   assert.match(config.apkFile.split("\\").join("/"), /YukPlatform\/data\/apk\/yuk\.apk$/);
+});
+
+test("config: POST_MAX_AGE_HOURS — standart 3 soat, 0 — cheklovsiz, vergul ham bo'ladi", () => {
+  const token = `123456:${"x".repeat(35)}`;
+  const age = (value) => readConfig({ BOT_TOKEN: token, POST_MAX_AGE_HOURS: value }).maxPostAgeMs;
+  assert.equal(age(undefined), 3 * 3_600_000);
+  assert.equal(age(" "), 3 * 3_600_000);
+  assert.equal(age("0"), 0);
+  assert.equal(age("1,5"), 5_400_000);
+  assert.equal(age("6"), 6 * 3_600_000);
+  for (const bad of ["abc", "-1", "3 soat"]) assert.throws(() => age(bad), /POST_MAX_AGE_HOURS/, bad);
+});
+
+test("tunnel manzili o'zgarsa: yuk xabari bilan pastki menyu yangi manzilga yangilanadi", async () => {
+  let url = "https://bir-ikki-uch-tort.trycloudflare.com/";
+  const { store, calls, command, deliver } = setup({ appUrl: () => url });
+  const load = { fromCity: "Toshkent", toCity: "Samarqand", weightT: 5, phones: ["+998900000001"] };
+  const post = { source: "@yuk_guruh", link: "https://t.me/yuk_guruh/5", postedAt: Date.now() };
+  store.saveDriver(42, { profile: PROFILE, active: true });
+  const sent = () => calls.filter((c) => c.method === "sendMessage" && c.payload.chat_id === 42).at(-1).payload;
+  const settingsUrl = (markup) => buttons(markup).find((b) => b.text === MENU.settings)?.web_app?.url ?? null;
+
+  // Bot qayta yoqilgandan keyin birinchi yuk — menyu bilan (haydovchida qaysi manzil turgani noma'lum)
+  await deliver(42, load, post);
+  assert.match(settingsUrl(sent().reply_markup), /^https:\/\/bir-ikki-uch-tort\.trycloudflare\.com\/\?v=sozlamalar/);
+  // Manzil o'sha — keyingi yuk menyusiz (ortiqcha narsa yuborilmaydi)
+  await deliver(42, load, post);
+  assert.equal(sent().reply_markup, undefined);
+  await command("/start");
+  await deliver(42, load, post);
+  assert.equal(sent().reply_markup, undefined, "/start allaqachon shu manzil bilan menyu berdi");
+
+  // Tunnel qayta yoqildi — yangi manzil
+  url = "https://besh-olti-yetti-sakkiz.trycloudflare.com/";
+  await deliver(42, load, post);
+  assert.match(settingsUrl(sent().reply_markup), /besh-olti-yetti-sakkiz/);
+
+  // Tunnel o'chdi — tugma oddiy matnga aylanadi (bosilsa chatda savol-javob)
+  url = null;
+  await deliver(42, load, post);
+  const markup = sent().reply_markup;
+  assert.equal(settingsUrl(markup), null);
+  assert.ok(buttons(markup).some((b) => b.text === MENU.settings));
 });

@@ -1,11 +1,14 @@
 // Boshqaruv markazi: API + web + bot va collector'ni boshqarish. Ishga tushirish (YukPlatform papkasida):
 //   npm start        — web'larni yig'adi, serverlarni ochadi, bot va collector'ni o'zi yoqadi → http://localhost:3000/admin
 //   npm run api      — faqat serverlar (bot va collector'ni yoqmaydi), web'dan yoqasiz; web dasturlash rejimida: `npm run admin`
-// Sozlamalar (.env, ixtiyoriy): API_PORT=3000, PUBLIC_PORT=3001, AUTOSTART=bot,collector (none — hech birini yoqmaydi)
+// Sozlamalar (.env, ixtiyoriy): API_PORT=3000, PUBLIC_PORT=3001, NGINX_PORT=80,
+//   AUTOSTART=nginx,tunnel,bot,collector (standart: o'rnatilganlari hammasi; none — hech birini yoqmaydi)
 //
 // Ikki server ochiladi, ikkalasi ham faqat shu kompyuterda (127.0.0.1):
 //   3000 — boshqaruv markazi (siz uchun; internetga HECH QACHON chiqarilmaydi)
-//   3001 — haydovchilar web'i va Mini App API'si (public.js; internetga tunnel orqali chiqariladi — README)
+//   3001 — haydovchilar web'i va Mini App API'si (public.js)
+// Old eshik: nginx (http://localhost, src/edge/nginx.js) ilova fayllarini beradi va /pub ni 3001 ga uzatadi;
+// tunnel (src/edge/tunnel.js) nginx'ni internetga chiqaradi. Ikkalasi ham bot va collector kabi jarayon.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSettings } from "@yuk/parser";
@@ -14,6 +17,7 @@ import { loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
 import { createProcessManager } from "./processes.js";
 import { createPublicApp } from "./public.js";
+import { findCloudflared, findNginx } from "./edge/tools.js";
 import { createSessions } from "./telegramAuth.js";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -25,8 +29,9 @@ const PUBLIC_LOCAL_URL = `http://localhost:${PUBLIC_PORT}`;
 const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
 const log = (message) => console.log(`[${time()}] ${message}`);
 
-// AUTOSTART bo'sh yoki yozilmagan — ikkalasi ham; "none" — hech biri
-const wanted = process.env.AUTOSTART?.trim() || "bot,collector";
+// AUTOSTART bo'sh yoki yozilmagan — hammasi (nginx va tunnel — kompyuterda o'rnatilgan bo'lsa); "none" — hech biri
+const defaults = [findNginx() && "nginx", findCloudflared() && "tunnel", "bot", "collector"].filter(Boolean).join(",");
+const wanted = process.env.AUTOSTART?.trim() || defaults;
 const autostart = process.argv.includes("--no-autostart") || wanted === "none" ? [] : wanted.split(/[,\s]+/).filter(Boolean);
 
 const store = openStore();
@@ -63,7 +68,12 @@ function failed(port, name) {
 
 const publicServer = publicApp.listen(PUBLIC_PORT, HOST, () => {
   const tunnel = process.env.PUBLIC_URL?.trim();
-  log(`Haydovchilar web'i: ${PUBLIC_LOCAL_URL}${tunnel ? `  (internetda: ${tunnel})` : "  (internetga chiqarish: apps/api/README.md → «Internetga chiqarish»)"}`);
+  const internet = tunnel
+    ? `  (internetda: ${tunnel})`
+    : autostart.includes("tunnel")
+      ? "  (internet manzilini [tunnel] chiqaradi)"
+      : "  (internetga chiqarish: apps/api/README.md → «Internetga chiqarish»)";
+  log(`Haydovchilar web'i: ${PUBLIC_LOCAL_URL}${internet}`);
 });
 publicServer.on("error", failed(PUBLIC_PORT, "haydovchilar web'i"));
 
@@ -84,7 +94,7 @@ let closing = false;
 async function shutdown() {
   if (closing) return;
   closing = true;
-  log("To'xtatilyapti: bot va collector yumshoq to'xtatiladi...");
+  log("To'xtatilyapti: bot, collector, nginx va tunnel yumshoq to'xtatiladi...");
   await processes.shutdown();
   server.close();
   publicServer.close();

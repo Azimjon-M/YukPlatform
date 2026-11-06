@@ -4,6 +4,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
+import { tunnelUrl } from "@yuk/store";
 import { createAiTools } from "./ai.js";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -18,14 +19,16 @@ export function normalizeSourceName(input) {
   return /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username) ? `@${username}` : null;
 }
 
-// .env haqida faqat bor-yo'qligi; kanal, Mini App va haydovchilar web'i manzili maxfiy emas
-export function configInfo(env, { publicUrl = null } = {}) {
+// .env haqida faqat bor-yo'qligi; kanal, Mini App va haydovchilar web'i manzili maxfiy emas.
+// tunnel — ishlab turgan tunnel bergan manzil (@yuk/store tunnelUrl): .env da MINIAPP_URL bo'lmasa, bot Mini App'ni shu bilan ochadi
+export function configInfo(env, { publicUrl = null, tunnel = null } = {}) {
   return {
     botToken: Boolean(env.BOT_TOKEN),
     channel: env.CHANNEL_ID || null,
-    miniappUrl: env.MINIAPP_URL || null,
+    miniappUrl: env.MINIAPP_URL || tunnel || null,
+    miniappFromTunnel: !env.MINIAPP_URL && Boolean(tunnel),
     publicUrl,
-    publicTunnel: env.PUBLIC_URL || null,
+    publicTunnel: tunnel || env.PUBLIC_URL || null,
     telegramApi: Boolean(env.TG_API_ID && env.TG_API_HASH),
     parser: {
       provider: env.PARSER_PROVIDER || "gemini",
@@ -76,7 +79,7 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
   });
 
   api.get("/overview", (req, res) => {
-    res.json({ metrics: store.metrics(), processes: processes.list(), config: configInfo(env, { publicUrl }) });
+    res.json({ metrics: store.metrics(), processes: processes.list(), config: configInfo(env, { publicUrl, tunnel: tunnelUrl(store) }) });
   });
 
   // --- Yuklar va navbat ---

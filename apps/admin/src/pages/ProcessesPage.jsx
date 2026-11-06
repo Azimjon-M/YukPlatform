@@ -1,4 +1,4 @@
-// Jarayonlar: bot va collector loglari jonli (har 2 s), holati va boshqarish tugmalari.
+// Jarayonlar: bot, collector, nginx va tunnel loglari jonli (har 2 s), holati va boshqarish tugmalari.
 // Loglar API xotirasida (oxirgi 1000 qator) — faqat shu server ishga tushirgan jarayonlarniki.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { get } from "../api.js";
@@ -122,7 +122,7 @@ export function ProcessesPage() {
 
   return (
     <>
-      <PageHeader title="Jarayonlar" subtitle="Bot va collector: holati, boshqarish va jonli loglar" />
+      <PageHeader title="Jarayonlar" subtitle="Bot, collector, nginx va tunnel: holati, boshqarish va jonli loglar" />
       <Async state={state}>
         {({ items }) => {
           const current = items.find((p) => p.name === selected) ?? items[0];

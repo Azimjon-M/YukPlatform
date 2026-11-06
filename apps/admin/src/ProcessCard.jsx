@@ -1,4 +1,4 @@
-// Bitta jarayon (bot yoki collector): holati, PID, qancha ishlayapti, Yoqish / O'chirish / Qayta ishga tushirish.
+// Bitta jarayon (bot, collector, nginx, tunnel): holati, PID, qancha ishlayapti, Yoqish / O'chirish / Qayta ishga tushirish.
 // Terminalda ishga tushirilgan bo'lsa (external) — bu yerdan boshqarib bo'lmaydi, API 409 qaytaradi.
 import { useState } from "react";
 import { post } from "./api.js";
@@ -10,6 +10,8 @@ import { Badge, Button, useToast } from "./ui.jsx";
 const DESCRIPTIONS = {
   bot: "Navbatdagi e'lonlarni AI bilan tahlil qiladi, kanalga va haydovchilarga yuboradi",
   collector: "Manba guruhlardan yangi e'lonlarni o'qib, navbatga yozadi",
+  nginx: "Kompyuterning «old eshigi»: haydovchilar ilovasini beradi va /pub so'rovlarini serverga uzatadi (http://localhost)",
+  tunnel: "Haydovchilar ilovasini internetga chiqaradi (Cloudflare, tekin). Manzil har yoqilganda yangi — bot o'zi oladi",
 };
 
 const DONE_TEXT = { start: "yoqildi", stop: "o'chirildi", restart: "qayta ishga tushirildi" };

@@ -64,7 +64,9 @@ export function postFromMessage(chat, message) {
 }
 
 // botInfo — testda Telegram'ga ulanmasdan ishlatish uchun (odatda init() o'zi oladi)
-export function createBot({ token, store, config, log = console.log, botInfo }) {
+// appUrl — Mini App manzili HOZIR: .env dagi MINIAPP_URL yoki ishlab turgan tunnel bergani (main.js). Tunnel qayta yoqilsa,
+// manzil o'zgaradi — shuning uchun har safar shu funksiyadan so'raladi, ishga tushganda bir marta emas.
+export function createBot({ token, store, config, log = console.log, botInfo, appUrl = () => config.miniappUrl }) {
   const bot = new Bot(token, botInfo ? { botInfo } : undefined);
   // Telegram "juda tez" (429) desa, aytilgan vaqtcha kutib qayta yuboradi
   bot.api.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 60 }));
@@ -78,7 +80,13 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
     message.via_bot?.id === bot.botInfo?.id;
 
   const scope = config.routeScope; // yo'nalish doirasi: sozlamalarda qaysi davlatlar tanlanadi
-  const menu = (driver) => ({ reply_markup: mainMenu(driver, config.miniappUrl, scope) });
+  // Har bir haydovchiga oxirgi marta qaysi Mini App manzili bilan menyu berilgan (xotirada; bot qayta yoqilsa — bo'sh)
+  const shownUrl = new Map();
+  const menu = (driver) => {
+    const url = appUrl() ?? null;
+    if (driver?.chatId != null) shownUrl.set(driver.chatId, url);
+    return { reply_markup: mainMenu(driver, url, scope) };
+  };
   const html = (driver) => ({ parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...menu(driver) });
 
   function rememberUser(ctx) {
@@ -115,7 +123,7 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
   // Sozlamalar: Mini App bo'lsa — pastki menyudagi tugma uni ochadi; bo'lmasa — chatda savol-javob
   async function openSettings(ctx) {
     const driver = rememberUser(ctx);
-    if (!config.miniappUrl) return startWizard(ctx, driver.profile);
+    if (!appUrl()) return startWizard(ctx, driver.profile);
     await ctx.reply(`Pastdagi «${settingsLabel(driver)}» tugmasini bosing — forma ochiladi. To'ldirib, «Saqlash» ni bosasiz.`, menu(driver));
   }
 
@@ -160,7 +168,7 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
     const lines = ["📱 <b>Yuk Ekspert ilovalari</b>", ""];
     lines.push(`🤖 Android: ${config.androidUrl ? link(config.androidUrl, "yuklab olish") : config.apkFile ? "o'rnatish fayli pastda 👇" : "tez orada"}`);
     lines.push(`🍏 iPhone: ${config.iosUrl ? link(config.iosUrl, "App Store") : "tez orada"}`);
-    if (config.miniappUrl) lines.push(`💬 Telegram ichida: pastdagi «${settingsLabel(driver)}» tugmasi ilovani ochadi`);
+    if (appUrl()) lines.push(`💬 Telegram ichida: pastdagi «${settingsLabel(driver)}» tugmasi ilovani ochadi`);
     if (config.channel?.startsWith("@")) lines.push(`📢 Hamma yangi yuklar kanalda: ${config.channel}`);
     await ctx.reply(lines.join("\n"), html(driver));
     if (!config.apkFile) return;
@@ -186,7 +194,7 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
       await ctx.reply(`${helpText(driver)}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describeProfile(driver.profile, scope))}`, html(driver));
       return;
     }
-    if (config.miniappUrl) {
+    if (appUrl()) {
       await ctx.reply(`${helpText(driver)}\n\n👇 Boshlash uchun «${settingsLabel(driver)}» tugmasini bosing — 1 daqiqalik forma.`, html(driver));
       return;
     }
@@ -309,9 +317,17 @@ export function createBot({ token, store, config, log = console.log, botInfo }) 
     }
   }
 
+  // Yuk bilan birga pastki menyu ham yangilanadi — faqat Mini App manzili haydovchida turganidan farq qilsa
+  // (tunnel qayta yoqildi yoki bot qayta ishga tushdi). Aks holda eski tugma o'chgan manzilni ochardi.
+  function freshMenu(chatId) {
+    if (shownUrl.has(chatId) && shownUrl.get(chatId) === (appUrl() ?? null)) return {};
+    const driver = store.getDriver(chatId);
+    return driver ? menu(driver) : {};
+  }
+
   async function deliver(chatId, load, post) {
     try {
-      await bot.api.sendMessage(chatId, directText(load, post), { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+      await bot.api.sendMessage(chatId, directText(load, post), { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...freshMenu(chatId) });
       return true;
     } catch (error) {
       // 403 — haydovchi botni bloklagan yoki o'chirgan: unga boshqa yubormaymiz

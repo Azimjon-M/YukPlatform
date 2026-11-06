@@ -11,6 +11,7 @@ import { createAiQueries } from "./ai.js";
 
 export { acquireRunLock, isAlive, readRunLock, RUN_DIR } from "./lock.js";
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
+export { TUNNEL_URL_KEY, tunnelUrl } from "./tunnel.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // YUK_DB — boshqa fayl bilan sinash uchun (masalan, YUK_DB=data/sinov.db); yo'l YukPlatform papkasiga nisbatan
@@ -149,6 +150,10 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
        ORDER BY posted_at DESC, id DESC LIMIT ?`,
     ),
     finishPost: db.prepare("UPDATE posts SET status = ?, error = ?, done_at = ? WHERE id = ?"),
+    expirePosts: db.prepare(
+      `UPDATE posts SET status = 'done', error = ?, done_at = ?
+       WHERE status = 'new' AND posted_at < ? AND id NOT IN (SELECT value FROM json_each(?))`,
+    ),
     recentLoad: db.prepare("SELECT id FROM loads WHERE key = ? AND created_at > ? LIMIT 1"),
     insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, created_at) VALUES (?, ?, ?, ?)"),
     loadDelivery: db.prepare("UPDATE loads SET sent_to = ?, channel_message_id = ? WHERE id = ?"),
@@ -205,11 +210,21 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
         link: row.link,
         text: row.text,
         postedAt: row.posted_at,
+        // Navbatga tushgan vaqt. postedAt'dan keyin: collector guruhni har ~1 daqiqada o'qigani uchun
+        // e'lon navbatga o'rtacha 40 s kechikib keladi (2026-11-05 o'lchovi)
+        queuedAt: row.created_at,
       }));
     },
 
     finishPost(id, status, error = null) {
       q.finishPost.run(status, error, now(), id);
+    },
+
+    // Navbatda `before` dan oldin JOYLANGAN e'lonlarni AI'siz yopadi: done + izoh (admin «Tayyor» ichida izohi bilan
+    // ko'rsatadi, xuddi "Boshqa yo'nalish" kabi). exclude — hozir AI'da turgan e'lonlar (ularga tegmaymiz).
+    // → nechta e'lon yopildi
+    expireOldPosts({ before, error, exclude = [] }) {
+      return Number(q.expirePosts.run(error, now(), before, JSON.stringify(exclude)).changes);
     },
 
     // --- Yuklar ---

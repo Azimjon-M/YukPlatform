@@ -6,20 +6,23 @@ Bitta buyruq bilan hammasi: **`npm start`** (YukPlatform papkasida) →
 2. ikkita server ochadi:
    - **http://localhost:3000/admin** — boshqaruv markazi (siz uchun),
    - **http://localhost:3001** — haydovchilar ilovasi: yuklar lentasi, xarita, sozlamalar (Telegram Mini App ham shu),
-3. bot va collector'ni o'zi ishga tushiradi (alohida jarayonlar; loglari web'da va shu oynada `[bot] ...`).
+3. to'rtta jarayonni o'zi ishga tushiradi (loglari web'da «Jarayonlar» bo'limida va shu oynada `[bot] ...`):
+   - **nginx** — kompyuterning «old eshigi»: **http://localhost** → haydovchilar ilovasi,
+   - **tunnel** — nginx'ni internetga chiqaradi: `[tunnel] 🌐 Manzil: https://....trycloudflare.com`,
+   - **bot** va **collector**.
 
-To'xtatish: shu oynada `Ctrl+C` — bot va collector ham yumshoq to'xtaydi.
+To'xtatish: shu oynada `Ctrl+C` — hammasi yumshoq to'xtaydi.
 
-Ikkala server ham faqat shu kompyuterdan ochiladi (`127.0.0.1`): tarmoqdan va internetdan kirib bo'lmaydi.
-Haydovchilar ilovasini internetga **tunnel** orqali chiqarasiz (pastda: «Internetga chiqarish»). Boshqaruv markazini
-(3000) hech qachon internetga chiqarmang.
+Serverlar faqat shu kompyuterdan ochiladi (`127.0.0.1`). Internetdan faqat tunnel orqali, faqat haydovchilar
+ilovasiga kiriladi. Boshqaruv markaziga (3000) internetdan yo'l yo'q.
 Bot va collector bilan bitta baza (`data/yuk.db`) ishlatiladi.
 
 ## Buyruqlar
 
 | Buyruq | Nima qiladi |
 |---|---|
-| `npm start` | web'ni yig'adi + server + bot + collector |
+| `npm start` | web'ni yig'adi + serverlar + nginx + tunnel + bot + collector |
+| `npm run nginx` · `npm run tunnel` | faqat nginx / faqat tunnel (alohida oynada; odatda `npm start` o'zi yoqadi) |
 | `npm run api` | faqat server (bot va collector'ni yoqmaydi — web'dan yoqasiz) |
 | `npm run api:dev` | server, `src/` o'zgarsa o'zi qayta yuklanadi (bot/collector yoqilmaydi) |
 | `npm run admin` | web'ni dasturlash rejimida: http://localhost:5174/admin/ (API'ni `npm run api` bilan oching) |
@@ -30,9 +33,13 @@ Bot va collector bilan bitta baza (`data/yuk.db`) ishlatiladi.
 | O'zgaruvchi | Standart | Ma'nosi |
 |---|---|---|
 | `API_PORT` | `3000` | boshqaruv markazi porti |
-| `PUBLIC_PORT` | `3001` | haydovchilar ilovasi porti (tunnel shunga ulanadi) |
-| `PUBLIC_URL` | — | haydovchilar ilovasining internetdagi manzili (tunnel bergan https). Faqat ko'rsatish uchun: konsol va boshqaruv markazi |
-| `AUTOSTART` | `bot,collector` | `npm start` da nimalar o'zi yoqiladi; `AUTOSTART=none` — hech biri |
+| `PUBLIC_PORT` | `3001` | haydovchilar ilovasi serveri porti (nginx `/pub` ni shunga uzatadi) |
+| `NGINX_PORT` | `80` | nginx porti (80 band bo'lsa — masalan `8080`) |
+| `AUTOSTART` | o'rnatilganlari hammasi | `npm start` da nimalar o'zi yoqiladi: `nginx,tunnel,bot,collector`; `AUTOSTART=none` — hech biri |
+| `MINIAPP_URL` | — | doimiy https manzil (o'z domeningiz bo'lsa). Yozilmasa — bot ishlab turgan tunnel manzilini oladi |
+| `PUBLIC_URL` | — | doimiy manzil, faqat ko'rsatish uchun (tunnel ishlasa, uning manzili ko'rsatiladi) |
+| `TUNNEL_TARGET` | nginx | tunnel qayerga ulanadi (nginx yo'q bo'lsa — `http://127.0.0.1:3001`). 3000 ga ruxsat yo'q |
+| `NGINX_EXE` · `CLOUDFLARED_EXE` | o'zi topadi | dastur boshqa joyda bo'lsa, `.exe` ning to'liq yo'li |
 | `PARSER_PARALLEL` | `8` | bot bir vaqtda nechta AI so'rovi yuboradi |
 
 ## Bitta nusxa
@@ -120,31 +127,38 @@ Kirgandan keyin server o'z tokenini beradi (30 kun). Ilova uni har so'rovda `Aut
 Kirmagan odamga `config` va `auth` dan boshqa hech narsa berilmaydi (401). Bir manzildan daqiqasiga 240 ta so'rov,
 kirishga 20 ta urinish. Telefon raqamlari faqat kirgan haydovchiga ko'rinadi.
 
-## Internetga chiqarish
+## Internetga chiqarish: nginx + tunnel
 
-Bot, baza va server sizning kompyuteringizda, shuning uchun haydovchilar ilovasini internetga **tunnel** chiqaradi:
-tunnel kompyuteringizdan Cloudflare'ga ulanadi va unga https manzil beradi. Kompyuterda port ochish shart emas.
+```
+haydovchi telefoni → https://....trycloudflare.com → Cloudflare → cloudflared (tunnel) → nginx :80 → ilova fayllari
+                                                                                              └─ /pub → :3001 (API)
+bot, collector → Telegram'ga o'zlari ulanadi (nginx'dan o'tmaydi)      boshqaruv markazi :3000 — faqat shu kompyuter
+```
 
-**Sinash uchun (bepul, akkauntsiz):**
+- **nginx** (`src/edge/nginx.js`) — ilova fayllarini o'zi beradi (gzip, kesh), `/pub` ni 3001 ga uzatadi, `/admin` va
+  `/api` ga 404. Sozlamasi `src/edge/nginxConfig.js` da; ish papkasi `data/nginx/` (`nginx.conf`, `logs/access.log`).
+  Xatolari «Jarayonlar → nginx» da. Serverga (VPS) ko'chganda xuddi shu sozlama ishlatiladi.
+- **tunnel** (`src/edge/tunnel.js`) — Cloudflare'ning tekin «quick tunnel»i: akkaunt va routerda port ochish shart emas.
+  Olgan manzilini bazaga yozadi; bot Mini App tugmasini shu manzil bilan beradi, boshqaruv markazi bosh sahifada ko'rsatadi.
 
-1. `cloudflared` ni o'rnating (bir marta): `winget install --id Cloudflare.cloudflared`
-2. `npm start` ishlab turgan holda, **boshqa oynada**: `cloudflared tunnel --url http://localhost:3001`
-3. U bergan `https://....trycloudflare.com` manzilni `.env` ga o'zingiz yozing:
-   ```
-   PUBLIC_URL=https://....trycloudflare.com
-   MINIAPP_URL=https://....trycloudflare.com
-   ```
-4. @BotFather → `/setdomain` → shu domen (saytdagi «Telegram bilan kirish» uchun).
-5. `npm start` ni qayta ishga tushiring (Ctrl+C, keyin `npm start`).
+**O'rnatish (bir marta):**
 
-Kamchiligi: `cloudflared` har qayta ishga tushganda **manzil o'zgaradi** — 3–5-qadamlarni takrorlash kerak.
-Faqat sinov uchun.
+1. nginx: <https://nginx.org/en/download.html> → **Stable version** → `nginx/Windows-...` zip →
+   `YukPlatform/tools/` ichiga oching (`tools/nginx-1.30.6/nginx.exe` bo'ladi). `tools/` gitga tushmaydi.
+2. cloudflared: `winget install --id Cloudflare.cloudflared`
+3. `npm start` — ikkalasi o'zi yoqiladi.
+
+**Tekin tunnelning kamchiligi — manzil har yoqilganda yangi.** Buni bot o'zi hal qiladi: haydovchiga keyingi yuk
+xabari bilan pastki menyu yangi manzilga yangilanadi (tunnel o'chiq bo'lsa — sozlamalar chatda savol-javob).
+Faqat saytdagi «Telegram bilan kirish» tugmasi uchun @BotFather → `/setdomain` ga yangi domenni qo'lda yozish kerak
+(Telegram ichidagi Mini App bunga muhtoj emas).
 
 **Doimiy manzil:** o'z domeningiz (masalan `yukekspert.uz`) + Cloudflare'ning nomli tunneli (bepul) →
-`https://app.yukekspert.uz` o'zgarmaydi. Domen pullik (yiliga bir necha dollar), shuning uchun haydovchilar
-ko'paygach qilinadi.
+`https://app.yukekspert.uz` o'zgarmaydi, `.env` ga `MINIAPP_URL` yoziladi. Domen pullik (yiliga bir necha dollar),
+shuning uchun haydovchilar ko'paygach qilinadi.
 
-> Faqat **3001** ni tunnel qiling. 3000 (boshqaruv markazi) — sizning panelingiz, u internetga chiqmasligi kerak.
+> Tunnel faqat nginx'ga (yoki 3001 ga) ulanadi. 3000 (boshqaruv markazi) — sizning panelingiz, u internetga chiqmaydi.
+> Kompyuter o'chsa yoki uxlasa — bot ham, ilova ham to'xtaydi.
 
 Xarita OpenStreetMap rasmlarini ishlatadi (bepul, ko'p foydalanuvchi uchun mo'ljallanmagan). Haydovchilar
 ko'paysa — boshqa xarita xizmatiga o'tish kerak (MapTiler, Stadia — bepul limitli).
@@ -152,5 +166,6 @@ ko'paysa — boshqa xarita xizmatiga o'tish kerak (MapTiler, Stadia — bepul li
 ## Keyingi bosqichlar
 
 - ✅ Haydovchilar uchun web: Telegram orqali kirish, yuklar lentasi, xarita (yuqorida).
+- ✅ nginx + tunnel: `npm start` bilan internetga chiqadi (manzil o'zgaruvchan).
 - Doimiy internet manzil (domen + nomli tunnel) yoki server.
 - Serverga ko'chganda: PostgreSQL, parol bilan kirish, HTTPS.

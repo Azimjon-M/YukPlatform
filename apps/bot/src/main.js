@@ -5,7 +5,7 @@
 import { existsSync, statSync } from "node:fs";
 import { createParser, createParserPool, resolveSettings } from "@yuk/parser";
 import { ROUTE_SCOPES, routeScopeFrom } from "@yuk/shared";
-import { acquireRunLock, loadSecret, openStore } from "@yuk/store";
+import { acquireRunLock, loadSecret, openStore, tunnelUrl } from "@yuk/store";
 import { createBot } from "./bot.js";
 import { readConfig } from "./config.js";
 import { formatLoad } from "./format.js";
@@ -52,9 +52,11 @@ function createAiPool(store) {
 }
 
 // Mini App va "📱 Ilovalar" tugmasi sozlamalari
-function checkApps(config) {
+function checkApps(config, store) {
+  const tunnel = tunnelUrl(store);
   if (config.miniappUrl) console.log(`✅ Mini App: ${config.miniappUrl} — pastki menyudagi «Sozlamalar» tugmasi ochadi.`);
-  else console.log("ℹ️  MINIAPP_URL yozilmagan: sozlamalar chatda savol-javob bilan. Mini App'ni joylash: apps/web/README.md");
+  else if (tunnel) console.log(`✅ Mini App: ${tunnel} (tunnel; manzil o'zgarsa, bot yangisini o'zi oladi).`);
+  else console.log("ℹ️  Mini App manzili yo'q: tunnel o'chiq va MINIAPP_URL yozilmagan — sozlamalar chatda savol-javob bilan. Tunnel: npm start yoki npm run tunnel");
   if (!config.apkFile) return;
   if (!existsSync(config.apkFile)) {
     console.log(`⚠️  APK_FILE topilmadi: ${config.apkFile}`);
@@ -89,7 +91,7 @@ async function check(config) {
     }
     await checkLinkedGroup(bot, config.channel, links);
   }
-  checkApps(config);
+  checkApps(config, store);
   console.log(`✅ Yo'nalishlar: ${ROUTE_SCOPES[config.routeScope].title}.`);
   const ai = createAiPool(store).list();
   if (ai.length) console.log(`✅ AI: ${ai.length} ta ulanish (${ai.map((s) => s.label).join(", ")})`);
@@ -129,10 +131,12 @@ async function main() {
   acquireRunLock("bot");
   const store = openStore();
   const pool = createAiPool(store);
-  const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log });
+  // Mini App: .env dagi doimiy manzil, bo'lmasa — ishlab turgan tunnel bergani (har so'rovda yangidan o'qiladi)
+  const appUrl = () => config.miniappUrl ?? tunnelUrl(store);
+  const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log, appUrl });
   await init();
-  const { routeScope } = config;
-  const worker = createWorker({ pool, store, publish, deliver, routeScope }, { log });
+  const { routeScope, maxPostAgeMs } = config;
+  const worker = createWorker({ pool, store, publish, deliver, routeScope }, { log, maxAgeMs: maxPostAgeMs });
 
   const stop = async () => {
     log("To'xtatilyapti...");
@@ -148,6 +152,10 @@ async function main() {
 
   log(`Bot ishga tushdi: @${bot.botInfo.username}${config.channel ? `, kanal ${config.channel}` : ""}. To'xtatish: Ctrl+C`);
   log(`Yo'nalishlar: ${ROUTE_SCOPES[routeScope].title} (.env: ROUTE_SCOPE=${routeScope})`);
+  log(maxPostAgeMs > 0
+    ? `Eski e'lonlar: joylanganiga ${maxPostAgeMs / 3_600_000} soatdan oshgani AI'ga bormaydi (.env: POST_MAX_AGE_HOURS)`
+    : "Eski e'lonlar: cheklovsiz, hammasi AI'ga boradi (.env: POST_MAX_AGE_HOURS=0)");
+  log(config.miniappUrl ? `Mini App: ${config.miniappUrl}` : "Mini App: tunnel manzili (tunnel o'chiq bo'lsa — sozlamalar chatda savol-javob)");
   worker.start();
   await bot.start({ allowed_updates: ["message", "channel_post", "callback_query"] });
 }
