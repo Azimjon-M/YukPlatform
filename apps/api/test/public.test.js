@@ -77,9 +77,9 @@ let server, base, store, sessions, adminServer, adminBase;
 const env = { BOT_TOKEN };
 const HOUR = 3600 * 1000;
 
-function addLoad(id, load, { hoursAgo = 1 } = {}) {
+function addLoad(id, load, { hoursAgo = 1, kind = "yuk" } = {}) {
   const post = store.addPost({ source: "@yuk", messageId: id, link: `https://t.me/yuk/${id}`, text: `e'lon ${id}`, postedAt: NOW - hoursAgo * HOUR });
-  return store.addLoad({ postId: post.id, key: `k${id}`, load });
+  return store.addLoad({ postId: post.id, key: `k${id}`, load, kind });
 }
 
 before(async () => {
@@ -90,6 +90,9 @@ before(async () => {
   // doiradan tashqarida (qoshni): Rossiya — ko'rsatilmaydi
   addLoad(3, { fromRegion: "toshkent_sh", toRegion: "xorij", toCountry: "Rossiya", toCity: "Moskva", truckClass: "fura" });
   addLoad(4, { fromRegion: "toshkent_sh", fromCity: "Toshkent", toRegion: "xorij", toCountry: "Qozog'iston", toCity: "Olmaota", truckClass: "fura", weightT: 20 });
+  // bo'sh mashinalar (yuk beruvchilarga)
+  addLoad(5, { fromRegion: "samarqand", fromCity: "Samarqand", truckClass: "fura", bodyType: "tent", weightT: 22, phones: ["+998905556677"] }, { kind: "mashina" });
+  addLoad(6, { fromRegion: "andijon", fromCity: "Andijon", toRegion: "toshkent_sh", truckClass: "isuzu" }, { kind: "mashina" });
   time = NOW;
   store.setSetting("bot_username", "Yuk_Ekspert_agent");
   sessions = createSessions(randomBytes(32), { now: () => NOW });
@@ -140,7 +143,7 @@ test("config: bot username va doira; CORS va OPTIONS", async () => {
 test("kirish: Mini App initData → token; haydovchi bazaga yoziladi; xato imzo — 401", async () => {
   const { token, me } = await login();
   assert.ok(token);
-  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", profile: null, active: false });
+  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false });
   assert.equal(store.getDriver(555).name, "Ali Valiyev");
 
   const bad = await call("POST", "/pub/auth", { body: { initData: "user=%7B%22id%22%3A1%7D&auth_date=1&hash=00" } });
@@ -165,7 +168,7 @@ test("yuklar: hammasi — faqat doiradagilar, eng yangisi birinchi, telefon bila
   const { token } = await login();
   const all = await call("GET", "/pub/loads?view=all", { token });
   assert.equal(all.status, 200);
-  assert.equal(all.body.total, 3); // Rossiya yo'q
+  assert.equal(all.body.total, 3); // Rossiya yo'q, bo'sh mashinalar ham yo'q
   assert.deepEqual(all.body.items.map((i) => i.load.toCity ?? i.load.toRegion), ["Olmaota", "samarqand", "Toshkent"]);
   assert.deepEqual(all.body.items.at(-1).load.phones, ["+998901112233"]);
   assert.equal(all.body.items.at(-1).post.link, "https://t.me/yuk/1");
@@ -178,8 +181,16 @@ test("yuklar: hammasi — faqat doiradagilar, eng yangisi birinchi, telefon bila
   assert.equal((await call("GET", "/pub/loads?view=all&hours=1", { token })).body.total, 0);
 });
 
-test("mos yuklar: profil bo'lmasa — 409 no_profile; saqlangach — faqat mosi", async () => {
+test("mos yuklar: rol yoki profil bo'lmasa — 409; saqlangach — faqat mosi", async () => {
   const { token } = await login();
+  const noRole = await call("GET", "/pub/loads", { token });
+  assert.equal(noRole.status, 409);
+  assert.equal(noRole.body.code, "no_role");
+  assert.equal((await call("PUT", "/pub/me/profile", { token, body: { profile: {} } })).body.code, "no_role");
+
+  assert.equal((await call("PUT", "/pub/me/role", { token, body: { role: "kosmonavt" } })).status, 400);
+  const chosen = await call("PUT", "/pub/me/role", { token, body: { role: "haydovchi" } });
+  assert.equal(chosen.body.role, "haydovchi");
   const none = await call("GET", "/pub/loads", { token });
   assert.equal(none.status, 409);
   assert.equal(none.body.code, "no_profile");
@@ -217,6 +228,44 @@ test("pauza / davom", async () => {
   // profili yo'q haydovchi yoqa olmaydi
   const fresh = sessions.issue(556);
   assert.equal((await call("PATCH", "/pub/me", { token: fresh, body: { active: true } })).status, 409);
+});
+
+test("yuk beruvchi: rol almashsa eski sozlamalar o'chadi; bo'sh mashinalar — mosi va hammasi", async () => {
+  const token = sessions.issue(557);
+  store.saveDriver(557, { name: "Karim", profile: { vehicle: { truckClass: "fura" }, fromAreas: [], toAreas: [] }, active: true }); // eski haydovchi
+  assert.equal((await call("GET", "/pub/me", { token })).body.role, "haydovchi");
+  // haydovchiga «mos mashinalar» yo'q
+  assert.equal((await call("GET", "/pub/trucks", { token })).body.code, "role");
+
+  const switched = await call("PUT", "/pub/me/role", { token, body: { role: "yuk_beruvchi" } });
+  assert.equal(switched.status, 200);
+  assert.equal(switched.body.role, "yuk_beruvchi");
+  assert.equal(switched.body.profile, null);
+  assert.equal((await call("GET", "/pub/trucks", { token })).body.code, "no_profile");
+  assert.equal((await call("GET", "/pub/loads", { token })).body.code, "role");
+  assert.equal((await call("GET", "/pub/loads?view=all", { token })).status, 200, "yuklarni ko'rish mumkin");
+
+  const shipper = { fromAreas: ["samarqand", "Rossiya"], toAreas: [], domestic: true, international: false, truckClasses: ["fura"], bodyTypes: ["tent", "boshqa"] };
+  const saved = await call("PUT", "/pub/me/profile", { token, body: { profile: shipper } });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body.profile, { fromAreas: ["samarqand"], toAreas: [], domestic: true, international: false, truckClasses: ["fura"], bodyTypes: ["tent"] });
+  assert.equal(saved.body.active, true);
+
+  const mine = await call("GET", "/pub/trucks", { token });
+  assert.equal(mine.status, 200);
+  assert.deepEqual(mine.body.items.map((i) => i.load.fromCity), ["Samarqand"]);
+  assert.deepEqual(mine.body.items[0].load.phones, ["+998905556677"]);
+  const all = await call("GET", "/pub/trucks?view=all", { token });
+  assert.deepEqual(all.body.items.map((i) => i.load.fromCity).sort(), ["Andijon", "Samarqand"]);
+
+  // Haydovchi profili yuk beruvchiga to'g'ri kelmaydi — rol forma bilan birga kelsa, rol ham almashadi
+  const back = await call("PUT", "/pub/me/profile", {
+    token,
+    body: { role: "haydovchi", profile: { vehicle: { truckClass: "isuzu", bodyType: "tent", capacityKg: 5000, loadingSides: [] }, fromAreas: [], toAreas: [], mode: "own" } },
+  });
+  assert.equal(back.status, 200);
+  assert.equal(back.body.role, "haydovchi");
+  assert.equal(store.getDriver(557).role, "haydovchi");
 });
 
 test("web fayllari: / va boshqa sahifalar index.html; noma'lum /pub — JSON 404", async () => {

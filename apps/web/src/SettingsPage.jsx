@@ -1,22 +1,11 @@
 // Sozlamalar: haydovchining mashinasi va yo'nalishi — bitta sahifali forma.
-// Saqlash: server bilan aloqa bo'lsa — server orqali (istalgan joydan ochilganda ham ishlaydi);
-// bo'lmasa, Telegram ichida — botga sendData bilan (faqat pastki menyudagi tugmadan ochilganda).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  BODY_TYPES,
-  CAPACITY_OPTIONS,
-  LOADING_SIDES,
-  MODE_OPTIONS,
-  REGIONS,
-  SIDE_LABELS,
-  TRUCK_CLASSES,
-  intlChoices,
-  regionLabel,
-  scopeCountries,
-} from "@yuk/shared";
-import { saveProfile } from "./api.js";
+// Saqlash: server orqali, aloqa bo'lmasa — Telegram ichida botga sendData bilan (settingsParts.jsx submitProfile).
+// Yuk beruvchi sozlamalari — ShipperSettings.jsx.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BODY_TYPES, CAPACITY_OPTIONS, LOADING_SIDES, MODE_OPTIONS, SIDE_LABELS, TRUCK_CLASSES } from "@yuk/shared";
 import { classBody, formFromProfile, profileFromForm, selectClass, sizeSummary, toggle } from "./form.js";
-import { canSendData, haptic, inTelegram, sendToBot, setUnsaved, showAlert, useMainButton } from "./telegram.js";
+import { Areas, OPEN_FROM_MENU, submitProfile, useScopeChoices } from "./settingsParts.jsx";
+import { canSendData, haptic, inTelegram, setUnsaved, showAlert, useMainButton } from "./telegram.js";
 import { Chips, Section } from "./ui.jsx";
 
 const fmt = (n) => String(n).replace(".", ",");
@@ -26,24 +15,6 @@ const CLASS_OPTIONS = TRUCK_CLASSES.map((t) => ({ id: t.id, label: t.name, sub: 
 const BODY_OPTIONS = BODY_TYPES.map((b) => ({ id: b.id, label: b.name }));
 const SIDE_OPTIONS = LOADING_SIDES.map((s) => ({ id: s.id, label: SIDE_LABELS[s.id] }));
 const MODE_CHOICES = Object.entries(MODE_OPTIONS).map(([id, label]) => ({ id, label }));
-const REGION_OPTIONS = REGIONS.filter((r) => r.id !== "xorij").map((r) => ({ id: r.id, label: regionLabel(r.id) }));
-
-// Viloyatlar (va xalqaro bo'lsa — doiradagi davlatlar). Hech biri tanlanmasa — hammasi.
-function Areas({ values, allLabel, international, countries, abroadTitle, onChange }) {
-  const pick = (id) => onChange(id === "*" ? [] : toggle(values, id));
-  const selected = (id) => (id === "*" ? values.length === 0 : values.includes(id));
-  return (
-    <>
-      <Chips options={[{ id: "*", label: allLabel }, ...REGION_OPTIONS]} selected={selected} onPick={pick} />
-      {international && (
-        <>
-          <p className="group">{abroadTitle}</p>
-          <Chips options={countries} selected={selected} onPick={pick} />
-        </>
-      )}
-    </>
-  );
-}
 
 function SizeInput({ label, value, onChange }) {
   return (
@@ -66,18 +37,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved }) {
   const [busy, setBusy] = useState(false);
   const initial = useRef(JSON.stringify(form));
 
-  // Yo'nalish doirasi: qaysi davlatlarni tanlash mumkin ("ichki" doirada xalqaro savoli yo'q)
-  const { intl, intlChoicesList, countries } = useMemo(() => {
-    const choices = intlChoices(scope);
-    return {
-      intl: choices,
-      intlChoicesList: choices ? Object.entries(choices.options).map(([id, o]) => ({ id, label: o.label })) : [],
-      countries: [
-        { id: "xorij", label: scope === "hammasi" ? "Istalgan davlat" : "Istalgan qo'shni davlat" },
-        ...scopeCountries(scope).map((name) => ({ id: name, label: name })),
-      ],
-    };
-  }, [scope]);
+  const { intl, intlOptions, countries, abroadTitle } = useScopeChoices(scope);
 
   useEffect(() => setUnsaved(JSON.stringify(form) !== initial.current), [form]);
   useEffect(() => () => setUnsaved(false), []);
@@ -98,29 +58,23 @@ export function SettingsPage({ me, initialProfile, scope, onSaved }) {
       if (inTelegram) showAlert(result.error);
       return;
     }
-    if (online) {
-      setBusy(true);
-      try {
-        const saved = await saveProfile(result.profile);
+    setBusy(true);
+    try {
+      const done = await submitProfile({ online, role: "haydovchi", profile: result.profile });
+      if (done.me || done.sent) {
         haptic.success();
         initial.current = JSON.stringify(form);
         setUnsaved(false);
-        onSaved(saved);
-      } catch (error) {
-        haptic.error();
-        setProblem({ field: "class", error: error.message });
-        showAlert(error.message);
-      } finally {
-        setBusy(false);
       }
-    } else if (canSendData) {
-      haptic.success();
-      sendToBot({ type: "profile", profile: result.profile });
-    } else if (inTelegram) {
-      showAlert("Saqlash uchun formani botdagi pastki menyudan — «⚙️ Sozlamalar» tugmasi bilan oching.");
-    } else {
+      if (done.me) onSaved(done.me);
       // Oddiy brauzer, server yo'q (sinov): botga ketadigan ma'lumotni ko'rsatamiz
-      setPreview(result.profile);
+      if (done.preview) setPreview(done.preview);
+    } catch (error) {
+      haptic.error();
+      setProblem({ field: "class", error: error.message });
+      showAlert(error.message);
+    } finally {
+      setBusy(false);
     }
   }, [form, scope, online, busy, onSaved]);
 
@@ -129,7 +83,6 @@ export function SettingsPage({ me, initialProfile, scope, onSaved }) {
   const standard = classBody(form.truckClass);
   const summary = sizeSummary(form);
   const international = Boolean(intl?.options[form.intl]?.international);
-  const abroadTitle = scope === "hammasi" ? "Xorij" : "Qo'shni davlatlar";
 
   return (
     <>
@@ -139,9 +92,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved }) {
           : "Mashinangiz va yo'nalishingizni belgilang — mos yuklarni shaxsiy xabarda yuboramiz."}
       </p>
 
-      {!online && inTelegram && !canSendData && (
-        <div className="notice">Saqlash uchun formani botdagi pastki menyudan — «⚙️ Sozlamalar» tugmasi bilan oching.</div>
-      )}
+      {!online && inTelegram && !canSendData && <div className="notice">{OPEN_FROM_MENU}</div>}
 
       <Section id="class" title="🚚 Mashina turi" error={errorFor("class")}>
         <Chips
@@ -208,7 +159,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved }) {
 
       {intl && (
         <Section id="intl" title="🌍 Qayerda ishlaysiz?" hint={intl.question}>
-          <Chips layout="list" options={intlChoicesList} selected={(id) => form.intl === id} onPick={(id) => update({ intl: id })} />
+          <Chips layout="list" options={intlOptions} selected={(id) => form.intl === id} onPick={(id) => update({ intl: id })} />
         </Section>
       )}
 

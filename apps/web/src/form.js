@@ -1,4 +1,4 @@
-// Formaning holati ↔ haydovchi profili. React'siz — node --test bilan tekshiriladi.
+// Formaning holati ↔ haydovchi yoki yuk beruvchi profili. React'siz — node --test bilan tekshiriladi.
 // Profil qoidalari @yuk/shared/profile.js da (bot ham xuddi shu qoidalar bilan tekshiradi).
 import {
   CAPACITY_LIMITS_KG,
@@ -6,10 +6,12 @@ import {
   REGION_IDS,
   TRUCK_CLASSES,
   emptyProfile,
+  emptyShipperProfile,
   intlChoices,
   intlOption,
   sanitizeBody,
   sanitizeProfile,
+  sanitizeShipperProfile,
   vehiclePallets,
   vehicleVolumeM3,
 } from "@yuk/shared";
@@ -67,6 +69,15 @@ export function sizeSummary(form) {
   return { volumeM3: vehicleVolumeM3(vehicle), pallets: vehiclePallets(vehicle) };
 }
 
+// "Qayerda ishlaydi" tanlovi. scope — yo'nalish doirasi (bot ?s= bilan beradi): doiradan tashqaridagi davlatlar tashlanadi;
+// "ichki" doirada xalqaro savoli yo'q — faqat O'zbekiston. areas(list) — faqat O'zbekiston tanlansa,
+// oldin belgilangan xorijiy davlatlarni tashlaydi
+function intlFor(id, scope) {
+  const options = scope === undefined ? INTL_OPTIONS : (intlChoices(scope)?.options ?? { yoq: INTL_OPTIONS.yoq });
+  const intl = options[id] ?? INTL_OPTIONS.yoq;
+  return { intl, areas: (list) => (intl.international ? list : list.filter((a) => REGION_IDS.includes(a))) };
+}
+
 // → { profile } yoki { error, field } — field: qaysi bo'limga qaytish kerak
 export function profileFromForm(form, scope) {
   if (!form.truckClass) return { error: "Mashina turini tanlang", field: "class" };
@@ -79,12 +90,7 @@ export function profileFromForm(form, scope) {
   if (form.sizeMode === "custom" && !body) {
     return { error: "Kuzov o'lchamini to'g'ri yozing: uzunligi 1–20, eni 1–3.2, balandligi 0.5–4.5 metr", field: "size" };
   }
-  // scope — yo'nalish doirasi (bot ?s= bilan beradi): doiradan tashqaridagi davlatlar tashlanadi.
-  // "ichki" doirada xalqaro savoli yo'q — faqat O'zbekiston
-  const options = scope === undefined ? INTL_OPTIONS : (intlChoices(scope)?.options ?? { yoq: INTL_OPTIONS.yoq });
-  const intl = options[form.intl] ?? INTL_OPTIONS.yoq;
-  // Faqat O'zbekiston tanlansa, oldin belgilangan xorijiy davlatlar tashlanadi
-  const areas = (list) => (intl.international ? list : list.filter((a) => REGION_IDS.includes(a)));
+  const { intl, areas } = intlFor(form.intl, scope);
   const result = sanitizeProfile({
     vehicle: { truckClass: form.truckClass, bodyType: form.bodyType, capacityKg, body, loadingSides: form.loadingSides },
     fromAreas: areas(form.fromAreas),
@@ -94,4 +100,32 @@ export function profileFromForm(form, scope) {
     mode: form.mode,
   }, { scope });
   return result.error ? { ...result, field: "class" } : result;
+}
+
+// --- Yuk beruvchi (rol "yuk_beruvchi"): yuk qayerda va qayerga, qanday mashina va kuzov kerak ---
+export function shipperFormFromProfile(profile) {
+  const p = profile ?? emptyShipperProfile();
+  return {
+    fromAreas: [...p.fromAreas],
+    toAreas: [...p.toAreas],
+    intl: intlOption(p),
+    truckClasses: [...p.truckClasses],
+    bodyTypes: [...p.bodyTypes],
+  };
+}
+
+// → { profile } yoki { error }. Hech narsa tanlanmasa — hammasi (istalgan joy, istalgan mashina)
+export function shipperProfileFromForm(form, scope) {
+  const { intl, areas } = intlFor(form.intl, scope);
+  return sanitizeShipperProfile(
+    {
+      fromAreas: areas(form.fromAreas),
+      toAreas: areas(form.toAreas),
+      domestic: intl.domestic,
+      international: intl.international,
+      truckClasses: form.truckClasses,
+      bodyTypes: form.bodyTypes,
+    },
+    { scope },
+  );
 }

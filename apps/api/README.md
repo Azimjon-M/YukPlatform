@@ -96,7 +96,7 @@ Bot ro'yxatni har 15 s da qayta o'qiydi — kalit qo'shgandan keyin botni qayta 
 | `src/app.js` | Express yo'llari, himoya, web fayllar |
 | `src/processes.js` | bot va collector jarayonlari: yoqish, to'xtatish, loglar, qayta ishga tushirish |
 | `src/ai.js` | «AI» bo'limi uchun: kalit bilan modellar ro'yxati, sinov so'rovi |
-| `src/public.js` | haydovchilar ilovasi serveri (3001): kirish, profil, yuklar lentasi, web fayllari |
+| `src/public.js` | ilova serveri (3001): kirish, rol, profil, yuklar va bo'sh mashinalar lentasi, web fayllari |
 | `src/telegramAuth.js` | Telegram imzosini tekshirish (Mini App `initData`, saytdagi vidjet) va sessiya tokeni |
 
 ## Haydovchilar ilovasi (3001-port)
@@ -119,10 +119,12 @@ Kirgandan keyin server o'z tokenini beradi (30 kun). Ilova uni har so'rovda `Aut
 |---|---|
 | `GET /pub/config` | bot username (vidjet uchun), yo'nalish doirasi |
 | `POST /pub/auth {initData}` yoki `{widget}` | kirish → `{ token, me }` |
-| `GET /pub/me` | haydovchi: ism, profil, faolmi |
-| `PUT /pub/me/profile {profile}` | sozlamalarni saqlash (bot bilan bir xil tekshiruv) — yuk yuborish yoqiladi |
+| `GET /pub/me` | foydalanuvchi: ism, `role` (haydovchi / yuk_beruvchi / null), `plan`, `isAdmin`, profil, faolmi |
+| `PUT /pub/me/role {role}` | rol tanlash; boshqa rolga o'tilsa eski sozlamalar o'chadi |
+| `PUT /pub/me/profile {profile, role?}` | sozlamalarni saqlash, rolga qarab tekshiruv (bot bilan bir xil) — yuborish yoqiladi. Rol yo'q — 409 `no_role` |
 | `PATCH /pub/me {active}` | pauza / davom |
-| `GET /pub/loads?view=mine\|all&from&to&hours&limit&offset` | yuklar, e'lon vaqti bo'yicha eng yangisi birinchi; `mine` — bot yuboradigan mos yuklar |
+| `GET /pub/loads?view=mine\|all&from&to&hours&limit&offset` | yuklar, e'lon vaqti bo'yicha eng yangisi birinchi; `mine` — bot yuboradigan mos yuklar (faqat haydovchiga, boshqasiga 409 `role`) |
+| `GET /pub/trucks?...` | xuddi shunday — bo'sh mashinalar; `mine` — yuk beruvchiga mos (`matchTruck`) |
 
 Kirmagan odamga `config` va `auth` dan boshqa hech narsa berilmaydi (401). Bir manzildan daqiqasiga 240 ta so'rov,
 kirishga 20 ta urinish. Telefon raqamlari faqat kirgan haydovchiga ko'rinadi.

@@ -1,6 +1,6 @@
-# web — haydovchilar ilovasi (Telegram Mini App + sayt)
+# web — Yuk Ekspert ilovasi: haydovchi va yuk beruvchi (Telegram Mini App + sayt)
 
-**Bosqich:** 1 ✅ sozlamalar formasi · 2 ✅ yuklar lentasi, xarita, Telegram orqali kirish
+**Bosqich:** 1 ✅ sozlamalar formasi · 2 ✅ yuklar lentasi, xarita, Telegram orqali kirish · 3 ✅ rollar (2026-11-06)
 
 Bitta kod ikki joyda ishlaydi:
 - **Telegram Mini App** — botning pastki menyusidagi «⚙️ Sozlamalar» / «🚚 Ro'yxatdan o'tish» tugmasi;
@@ -10,13 +10,22 @@ Ilovani `apps/api` dagi **haydovchilar serveri** (3001-port, `src/public.js`) oc
 **nginx** turadi. `npm start` bilan hammasi o'zi ishga tushadi: **http://localhost** (nginx) yoki http://localhost:3001,
 internetda — tunnel bergan `https://....trycloudflare.com`.
 
+## Rollar
+
+Birinchi ochilganda — «Siz kimsiz?»: 🚚 haydovchi yoki 📦 yuk beruvchi (botdagi `/rol` bilan bir xil, rol serverda saqlanadi).
+Sozlamalar ostida «Rolni almashtirish»: boshqa rolga o'tilsa, eski sozlamalar o'chadi.
+Bot Mini App tugmasida rolni `?r=` bilan beradi — server bilan aloqa bo'lmasa ham to'g'ri forma ochiladi.
+
 ## Bo'limlar
+
+Haydovchi: 📋 Yuklar · 🗺 Xarita · ⚙️ Sozlamalar. Yuk beruvchi: 🚚 Mashinalar · ⚙️ Sozlamalar.
 
 | Bo'lim | Nima |
 |---|---|
 | 📋 Yuklar | «Menga mos» — bot shaxsiy xabarda yuboradigan yuklar; «Hammasi» — doiradagi barcha yuklar. Qayerdan bo'yicha filtr, 6 / 24 / 72 soat. Telefonni bosib qo'ng'iroq, «Asl e'lon» — guruhdagi xabar. Har daqiqada yangilanadi |
 | 🗺 Xarita | Oxirgi 24 soat: har doira — bitta shahar, kattaligi — yuk soni. «Yuklash joyi» / «Tushirish joyi». Doira bosilsa — o'sha joydagi yuklar pastda va ular qayerga borishi chiziq bilan. Uzuq chiziqli doira — e'londa faqat viloyat yoki davlat yozilgan |
-| ⚙️ Sozlamalar | Mashina va yo'nalish formasi (bot ham shu sozlamalar bo'yicha yuboradi). Saqlansa — botda yuk yuborish yoqiladi |
+| 🚚 Mashinalar | Yuk beruvchiga: «Menga mos» — bot yuboradigan bo'sh mashinalar (yuk qayerda yuklanadi, qanday mashina kerak); «Hammasi» — doiradagi barcha bo'sh mashinalar. Lenta yuklarnikidek |
+| ⚙️ Sozlamalar | Haydovchi — mashina va yo'nalish; yuk beruvchi — yuk qayerdan qayerga, mashina turlari, kuzovlar (hech biri tanlanmasa — istalgani). Bot ham shu sozlamalar bo'yicha yuboradi. Saqlansa — botda yuborish yoqiladi |
 
 Yuqorida: ⏸ Pauza / ▶️ Yoqish (botdagi shaxsiy xabarlar) va saytda «Chiqish».
 Profili yo'q haydovchi «Hammasi» ni ko'radi va ilova uni sozlamalarga olib boradi.
@@ -59,11 +68,13 @@ Tunnel manzili o'zgarsa — qayta yig'ish kerak, shuning uchun hozircha birinchi
 
 | Fayl | Vazifasi |
 |---|---|
-| `src/App.jsx` | Ilova qobig'i: kirish holati, bo'limlar, pauza, xabarlar |
+| `src/App.jsx` | Ilova qobig'i: kirish holati, rolga qarab bo'limlar, pauza, xabarlar |
+| `src/RolePage.jsx` | «Siz kimsiz?» / «Rolni almashtirish» |
 | `src/api.js` | Server bilan aloqa: token saqlash, `#token=` havolasi, kirish, yuklar, profil |
-| `src/LoadsPage.jsx` · `src/LoadCard.jsx` | Yuklar lentasi va bitta yuk kartochkasi |
+| `src/LoadsPage.jsx` · `src/LoadCard.jsx` | Lenta (yuklar yoki bo'sh mashinalar) va kartochkalar (`LoadCard`, `TruckCard`) |
 | `src/MapPage.jsx` · `src/mapData.js` | Xarita (Leaflet + OpenStreetMap); yuklarni joy bo'yicha guruhlash (testlangan) |
-| `src/SettingsPage.jsx` · `src/form.js` | Sozlamalar formasi; forma ↔ profil, xatoni qaysi bo'limga ko'rsatish (testlangan) |
+| `src/SettingsPage.jsx` · `src/ShipperSettings.jsx` · `src/form.js` | Haydovchi va yuk beruvchi sozlamalari; forma ↔ profil, xatoni qaysi bo'limga ko'rsatish (testlangan) |
+| `src/settingsParts.jsx` | Ikkala forma uchun: joy tanlash, doiradagi davlatlar, saqlash (server yoki `sendData`) |
 | `src/LoginPage.jsx` | «Telegram bilan kirish» vidjeti |
 | `src/telegram.js` | Telegram bilan aloqa: asosiy tugma, tebranish, mavzu ranglari, havolalarni ochish, `sendData` |
 | `src/ui.jsx` | Umumiy kichik qismlar: bo'lim, tanlov tugmalari, xabar, aylanuvchi belgi |

@@ -88,6 +88,20 @@ export function vehicleText(load) {
   return parts.join(" · ");
 }
 
+// --- Bo'sh mashina (mashina_bor e'loni, yuk beruvchiga). Parser uni yuk maydonlarida yozadi: weightT — necha tonna ko'taradi ---
+const knownPlace = (load, side) => load[`${side}City`] || load[`${side}Region`] || load[`${side}Country`] || load[`${side}Place`];
+
+// "Qayerga" ko'pincha yozilmaydi ("Samarqanddan yuk olaman") — demak istalgan joyga
+export function truckPlaceText(truck, side) {
+  if (knownPlace(truck, side)) return placeText(truck, side);
+  return side === "to" ? "istalgan joyga" : "?";
+}
+
+// "Fura · tent · 22 t ko'taradi"
+export function truckVehicleText(truck) {
+  return [vehicleText(truck), truck.weightT != null ? `${weightText(truck.weightT)} ko'taradi` : null].filter(Boolean).join(" · ");
+}
+
 // "un · 22 t · 80 kub · 33 palet"
 export function cargoText(load) {
   return [load.cargo, weightText(load.weightT), load.volumeM3 != null ? `${load.volumeM3} kub` : null, load.pallets ? `${load.pallets} palet` : null]

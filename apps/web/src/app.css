@@ -449,3 +449,67 @@ select:focus-visible {
 :root[data-scheme="dark"] .leaflet-tile {
   filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
 }
+
+/* --- Rol: «Siz kimsiz?» ekrani va sozlamalar ostidagi «Rolni almashtirish» --- */
+.roles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.roles h2 {
+  margin: 8px 4px 0;
+  font-size: 22px;
+}
+
+.role-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.role-card.on {
+  border-color: var(--accent);
+}
+
+.role-card strong {
+  display: block;
+  font-size: 17px;
+}
+
+.role-card small {
+  display: block;
+  margin-top: 2px;
+  color: var(--hint);
+  font-size: 14px;
+}
+
+.role-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.roles .link {
+  align-self: center;
+  padding: 10px;
+}
+
+.role-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 4px 16px;
+  color: var(--hint);
+  font-size: 14px;
+}

@@ -5,14 +5,16 @@
 //
 //   GET  /pub/config           bot username (saytdagi «Telegram bilan kirish» uchun), yo'nalish doirasi
 //   POST /pub/auth             { initData } (Mini App) yoki { widget } (sayt) → { token, me }
-//   GET  /pub/me               haydovchi: ism, profil, faolmi
-//   PUT  /pub/me/profile       { profile } — sozlamalarni saqlash (bot ham shu qoidalar bilan tekshiradi)
+//   GET  /pub/me               foydalanuvchi: ism, rol, obuna, admin, profil, faolmi
+//   PUT  /pub/me/role          { role } — haydovchi | yuk_beruvchi (boshqa rolga o'tsa, eski sozlamalar o'chadi)
+//   PUT  /pub/me/profile       { profile, role? } — sozlamalarni saqlash (bot ham shu qoidalar bilan tekshiradi)
 //   PATCH /pub/me              { active } — pauza / davom
-//   GET  /pub/loads            ?view=mine|all&from&to&hours&limit&offset — yuklar, eng yangisi birinchi
+//   GET  /pub/loads            ?view=mine|all&from&to&hours&limit&offset — yuklar (haydovchiga), eng yangisi birinchi
+//   GET  /pub/trucks           xuddi shunday — bo'sh mashinalar (yuk beruvchiga)
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
-import { matchLoad, routeInScope, sameArea, sanitizeProfile } from "@yuk/shared";
+import { KIND_MATCHERS, KIND_ROLE, isAdmin, parseAdminIds, roleOf, routeInScope, sameArea, sanitizeProfileFor, validRole } from "@yuk/shared";
 import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -43,13 +45,12 @@ export function createRateLimiter({ limit, windowMs = 60_000, now = () => Date.n
 const clientIp = (req) =>
   req.get("cf-connecting-ip") || req.get("x-forwarded-for")?.split(",")[0].trim() || req.socket.remoteAddress || "?";
 
-const meOf = (driver) => ({
-  chatId: driver.chatId,
-  name: driver.name,
-  username: driver.username,
-  profile: driver.profile,
-  active: driver.active,
-});
+// Sozlamalar to'ldirilmagan bo'lsa nima deymiz (rolga qarab)
+const NEED_PROFILE = {
+  haydovchi: "Avval sozlamalarda mashina va yo'nalishni kiriting",
+  yuk_beruvchi: "Avval sozlamalarda yo'nalishingizni kiriting",
+};
+const NEED_ROLE = "Avval kim ekaningizni tanlang: haydovchi yoki yuk beruvchi";
 
 // Joy filtri: area — viloyat kodi (Toshkent shahri = viloyati) yoki davlat nomi
 function atArea(load, side, area) {
@@ -66,6 +67,19 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
   const botToken = env.BOT_TOKEN?.trim() || null;
   const limitAll = createRateLimiter({ limit: 240, now });
   const limitAuth = createRateLimiter({ limit: 20, now });
+  const adminIds = parseAdminIds(env.ADMIN_IDS);
+
+  // Web'ga ketadigan foydalanuvchi ma'lumoti. role — rollardan oldingi yozuvda ham (profil bor → haydovchi)
+  const meOf = (driver) => ({
+    chatId: driver.chatId,
+    name: driver.name,
+    username: driver.username,
+    role: roleOf(driver),
+    plan: driver.plan ?? "free",
+    isAdmin: isAdmin(driver, adminIds),
+    profile: driver.profile,
+    active: driver.active,
+  });
 
   const pub = express.Router();
   pub.use((req, res, next) => {
@@ -118,22 +132,36 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
 
   pub.get("/me", (req, res) => res.json(meOf(req.driver)));
 
-  // Botdagi «Saqlash» bilan bir xil: profil tekshiriladi, saqlanadi va yuk yuborish yoqiladi
+  // Rol: botdagi /rol bilan bir xil — boshqa rolga o'tsa, eski sozlamalar o'chadi (haydovchi profili yuk beruvchiga to'g'ri kelmaydi)
+  pub.put("/me/role", (req, res) => {
+    const role = validRole(req.body?.role);
+    if (!role) throw httpError(400, "role: haydovchi yoki yuk_beruvchi bo'lishi kerak");
+    if (roleOf(req.driver) === role) return res.json(meOf(req.driver));
+    res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile: null, draft: null, active: true })));
+  });
+
+  // Botdagi «Saqlash» bilan bir xil: profil rolga qarab tekshiriladi, saqlanadi va yuborish yoqiladi.
+  // role kelmasa — bazadagi rol
   pub.put("/me/profile", (req, res) => {
-    const result = sanitizeProfile(req.body?.profile, { scope });
+    const role = validRole(req.body?.role) ?? roleOf(req.driver);
+    if (!role) throw httpError(409, NEED_ROLE, "no_role");
+    const result = sanitizeProfileFor(role, req.body?.profile, { scope });
     if (result.error) throw httpError(400, result.error);
-    res.json(meOf(store.saveDriver(req.driver.chatId, { profile: result.profile, draft: null, active: true })));
+    res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile: result.profile, draft: null, active: true })));
   });
 
   pub.patch("/me", (req, res) => {
     const active = req.body?.active;
     if (typeof active !== "boolean") throw httpError(400, "active: true yoki false bo'lishi kerak");
-    if (active && !req.driver.profile) throw httpError(409, "Avval sozlamalarda mashina va yo'nalishni kiriting", "no_profile");
+    const role = roleOf(req.driver);
+    if (active && !role) throw httpError(409, NEED_ROLE, "no_role");
+    if (active && !req.driver.profile) throw httpError(409, NEED_PROFILE[role], "no_profile");
     res.json(meOf(store.saveDriver(req.driver.chatId, { active })));
   });
 
-  // view=mine — haydovchining mashinasi va yo'nalishiga mos (bot yuboradiganlari), view=all — hammasi
-  pub.get("/loads", (req, res) => {
+  // kind "yuk" — yuklar (haydovchiga), "mashina" — bo'sh mashinalar (yuk beruvchiga).
+  // view=mine — shu foydalanuvchiga mos (bot yuboradiganlari), view=all — hammasi
+  const listing = (kind) => (req, res) => {
     const view = req.query.view === "all" ? "all" : "mine";
     const hours = clamp(Number(req.query.hours) || 24, 1, MAX_HOURS);
     const limit = clamp(Number(req.query.limit) || 30, 1, MAX_LIMIT);
@@ -141,12 +169,20 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     const from = text(req.query.from);
     const to = text(req.query.to);
     const { profile } = req.driver;
-    if (view === "mine" && !profile) throw httpError(409, "Avval sozlamalarda mashina va yo'nalishni kiriting", "no_profile");
+    const role = roleOf(req.driver);
+    if (view === "mine") {
+      if (!role) throw httpError(409, NEED_ROLE, "no_role");
+      if (role !== KIND_ROLE[kind]) {
+        throw httpError(409, kind === "yuk" ? "«Menga mos» yuklar — haydovchilar uchun" : "«Menga mos» mashinalar — yuk beruvchilar uchun", "role");
+      }
+      if (!profile) throw httpError(409, NEED_PROFILE[role], "no_profile");
+    }
+    const matches = KIND_MATCHERS[kind];
 
     const rows = store
-      .recentLoads({ sinceMs: hours * HOUR, limit: 5000 })
+      .recentLoads({ sinceMs: hours * HOUR, limit: 5000, kind })
       .filter(({ load }) => routeInScope(load, scope) && atArea(load, "from", from) && atArea(load, "to", to))
-      .filter(({ load }) => view === "all" || matchLoad(load, profile).ok)
+      .filter(({ load }) => view === "all" || matches(load, profile).ok)
       // E'lon guruhda chiqqan vaqt bo'yicha: bot navbatdagi eng yangi e'lonni birinchi oladi,
       // shuning uchun bazadagi tartib (id) e'lon vaqti bilan har doim ham bir xil emas
       .sort((a, b) => b.post.postedAt - a.post.postedAt || b.id - a.id);
@@ -156,7 +192,9 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
       total: rows.length,
       items: rows.slice(offset, offset + limit).map(({ id, load, post, createdAt }) => ({ id, load, post, createdAt })),
     });
-  });
+  };
+  pub.get("/loads", listing("yuk"));
+  pub.get("/trucks", listing("mashina"));
 
   pub.use((req, res, next) => next(httpError(404, "Topilmadi")));
   app.use("/pub", pub);
@@ -181,8 +219,8 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     // express.json buzilgan JSON uchun 400 beradi; boshqa kutilmagan xato — 500
     const status = error.status ?? error.statusCode ?? 500;
     if (status >= 500) console.error(error);
-    // code — web nima qilishini biladi: auth → qayta kirish, no_profile → sozlamalarga
-    const code = ["auth", "no_profile"].includes(error.code) ? { code: error.code } : {};
+    // code — web nima qilishini biladi: auth → qayta kirish, no_profile → sozlamalarga, no_role → rol tanlash
+    const code = ["auth", "no_profile", "no_role", "role", "forbidden"].includes(error.code) ? { code: error.code } : {};
     res.status(status).json({ error: status >= 500 ? "Server xatosi" : error.message, ...code });
   });
 

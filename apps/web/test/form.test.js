@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formFromProfile, profileFromForm, selectClass, sizeSummary, toggle } from "../src/form.js";
+import { formFromProfile, profileFromForm, selectClass, shipperFormFromProfile, shipperProfileFromForm, sizeSummary, toggle } from "../src/form.js";
 
 const PROFILE = {
   vehicle: { truckClass: "fura", bodyType: "tent", capacityKg: 22000, body: { lengthM: 13.6, widthM: 2.45, heightM: 2.7 }, loadingSides: ["orqa"] },
@@ -58,4 +58,19 @@ test("yo'nalish doirasi: qo'shni — Rossiya tashlanadi, Qozog'iston qoladi; ich
   assert.deepEqual([qoshni.fromAreas, qoshni.toAreas, qoshni.international], [["toshkent", "Qozog'iston"], ["andijon"], true]);
   const ichki = profileFromForm({ ...form, intl: "faqat" }, "ichki").profile;
   assert.deepEqual([ichki.fromAreas, ichki.toAreas, ichki.domestic, ichki.international], [["toshkent"], ["andijon"], true, false]);
+});
+
+test("yuk beruvchi formasi: bo'sh — hammasi; profilga va qaytib; faqat O'zbekiston tanlansa davlat tashlanadi", () => {
+  const empty = shipperProfileFromForm(shipperFormFromProfile(null), "qoshni").profile;
+  assert.deepEqual(empty, { fromAreas: [], toAreas: [], domestic: true, international: false, truckClasses: [], bodyTypes: [] });
+
+  const shipper = { fromAreas: ["samarqand", "Qozog'iston"], toAreas: [], domestic: true, international: true, truckClasses: ["fura", "isuzu"], bodyTypes: ["tent"] };
+  const form = shipperFormFromProfile(shipper);
+  assert.equal(form.intl, "ham");
+  assert.deepEqual(shipperProfileFromForm(form, "qoshni").profile, shipper);
+  const domestic = shipperProfileFromForm({ ...form, intl: "yoq" }, "qoshni").profile;
+  assert.deepEqual([domestic.fromAreas, domestic.international], [["samarqand"], false]);
+  // "Boshqa" kuzov va noma'lum mashina turi tashlanadi
+  const odd = shipperProfileFromForm({ ...form, truckClasses: ["raketa", "fura"], bodyTypes: ["boshqa", "ref"] }, "qoshni").profile;
+  assert.deepEqual([odd.truckClasses, odd.bodyTypes], [["fura"], ["ref"]]);
 });

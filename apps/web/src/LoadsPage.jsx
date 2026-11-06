@@ -1,9 +1,9 @@
-// Yuklar lentasi: «Menga mos» (bot yuboradiganlari) yoki «Hammasi», qayerdan filtri, eng yangisi tepada.
-// Har daqiqada o'zi yangilanadi.
+// Lenta: yuklar (haydovchiga) yoki bo'sh mashinalar (kind "mashina", yuk beruvchiga).
+// «Menga mos» (bot yuboradiganlari) yoki «Hammasi», qayerdan filtri, eng yangisi tepada. Har daqiqada o'zi yangilanadi.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { REGIONS, regionLabel, scopeCountries } from "@yuk/shared";
-import { getLoads } from "./api.js";
-import { LoadCard } from "./LoadCard.jsx";
+import { getLoads, getTrucks } from "./api.js";
+import { LoadCard, TruckCard } from "./LoadCard.jsx";
 import { Notice, Segmented, Spinner } from "./ui.jsx";
 
 const PAGE = 30;
@@ -14,6 +14,26 @@ export const VIEW_OPTIONS = [
 ];
 const HOUR_OPTIONS = [6, 24, 72];
 
+// Turga qarab: qayerdan so'raladi, kartochka va so'zlar
+const KINDS = {
+  yuk: {
+    fetch: getLoads,
+    Card: LoadCard,
+    one: "yuk",
+    fromLabel: "Qayerdan",
+    needProfile: "«Menga mos» yuklarni ko'rsatish uchun mashina turi va yo'nalishingiz kerak.",
+    needTitle: "Mashinangizni kiriting",
+  },
+  mashina: {
+    fetch: getTrucks,
+    Card: TruckCard,
+    one: "bo'sh mashina",
+    fromLabel: "Qayerda",
+    needProfile: "«Menga mos» mashinalarni ko'rsatish uchun yukingiz qayerdan qayerga borishi kerak.",
+    needTitle: "Yo'nalishingizni kiriting",
+  },
+};
+
 export function areaOptions(scope) {
   return [
     ...REGIONS.filter((r) => r.id !== "xorij").map((r) => ({ id: r.id, label: regionLabel(r.id) })),
@@ -21,7 +41,8 @@ export function areaOptions(scope) {
   ];
 }
 
-export function LoadsPage({ scope, view, onView, onNeedProfile, onAuthLost }) {
+export function LoadsPage({ kind = "yuk", scope, view, onView, onNeedProfile, onAuthLost }) {
+  const k = KINDS[kind];
   const [from, setFrom] = useState("");
   const [hours, setHours] = useState(24);
   const [state, setState] = useState({ items: [], total: 0, loading: true, error: null });
@@ -33,7 +54,7 @@ export function LoadsPage({ scope, view, onView, onNeedProfile, onAuthLost }) {
     async (count, { silent = false } = {}) => {
       if (!silent) setState((s) => ({ ...s, loading: true, error: null }));
       try {
-        const data = await getLoads({ view, from, hours, limit: Math.min(count, 500) });
+        const data = await k.fetch({ view, from, hours, limit: Math.min(count, 500) });
         shown.current = count;
         setNow(Date.now());
         setState({ items: data.items, total: data.total, loading: false, error: null });
@@ -42,7 +63,7 @@ export function LoadsPage({ scope, view, onView, onNeedProfile, onAuthLost }) {
         setState((s) => ({ ...s, loading: false, error: silent && s.items.length ? null : error }));
       }
     },
-    [view, from, hours, onAuthLost],
+    [k, view, from, hours, onAuthLost],
   );
 
   useEffect(() => {
@@ -58,12 +79,12 @@ export function LoadsPage({ scope, view, onView, onNeedProfile, onAuthLost }) {
   return (
     <>
       <div className="toolbar">
-        <Segmented label="Qaysi yuklar" options={VIEW_OPTIONS} value={view} onChange={onView} />
+        <Segmented label={kind === "mashina" ? "Qaysi mashinalar" : "Qaysi yuklar"} options={VIEW_OPTIONS} value={view} onChange={onView} />
         <div className="filters">
           <label className="select">
-            <span className="sr-only">Qayerdan</span>
+            <span className="sr-only">{k.fromLabel}</span>
             <select value={from} onChange={(e) => setFrom(e.target.value)}>
-              <option value="">📍 Qayerdan: hamma joy</option>
+              <option value="">📍 {k.fromLabel}: hamma joy</option>
               {areaOptions(scope).map((o) => (
                 <option key={o.id} value={o.id}>
                   📍 {o.label}
@@ -86,14 +107,14 @@ export function LoadsPage({ scope, view, onView, onNeedProfile, onAuthLost }) {
 
       {error?.code === "no_profile" ? (
         <Notice
-          title="Mashinangizni kiriting"
+          title={k.needTitle}
           action={
             <button type="button" className="primary" onClick={onNeedProfile}>
               ⚙️ Sozlamalarni to'ldirish
             </button>
           }
         >
-          «Menga mos» yuklarni ko'rsatish uchun mashina turi va yo'nalishingiz kerak. Hozircha «Hammasi» ni ko'rishingiz mumkin.
+          {k.needProfile} Hozircha «Hammasi» ni ko'rishingiz mumkin.
         </Notice>
       ) : error ? (
         <Notice
@@ -109,19 +130,19 @@ export function LoadsPage({ scope, view, onView, onNeedProfile, onAuthLost }) {
       ) : loading && !items.length ? (
         <Spinner />
       ) : !items.length ? (
-        <Notice title="Hozircha yuk yo'q">
+        <Notice title={`Hozircha ${k.one} yo'q`}>
           {view === "mine"
-            ? `Oxirgi ${hours} soatda sizga mos yuk chiqmadi. Yangisi chiqishi bilan botda ham xabar beramiz.`
-            : `Oxirgi ${hours} soatda bu yo'nalishda yuk yo'q.`}
+            ? `Oxirgi ${hours} soatda sizga mos ${k.one} chiqmadi. Yangisi chiqishi bilan botda ham xabar beramiz.`
+            : `Oxirgi ${hours} soatda bu yo'nalishda ${k.one} yo'q.`}
         </Notice>
       ) : (
         <>
           <p className="count">
-            {total} ta yuk{loading && " · yangilanyapti..."}
+            {total} ta {k.one}{loading && " · yangilanyapti..."}
           </p>
           <div className="loads">
             {items.map((item) => (
-              <LoadCard key={item.id} item={item} now={now} />
+              <k.Card key={item.id} item={item} now={now} />
             ))}
           </div>
           {items.length < total && (

@@ -95,11 +95,15 @@ export async function resume() {
 }
 
 export const logout = () => tokenStore.set(null);
-export const saveProfile = (profile) => request("PUT", "/pub/me/profile", { body: { profile } });
+// role — "haydovchi" | "yuk_beruvchi": profil shu rol qoidalari bilan tekshiriladi
+export const saveProfile = (profile, role) => request("PUT", "/pub/me/profile", { body: role ? { role, profile } : { profile } });
+// Boshqa rolga o'tilsa, server eski sozlamalarni o'chiradi
+export const setRole = (role) => request("PUT", "/pub/me/role", { body: { role } });
 export const setActive = (active) => request("PATCH", "/pub/me", { body: { active } });
 
+const query = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+
 // view: mine | all; hours, from, to, limit, offset
-export function getLoads(params = {}) {
-  const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""));
-  return request("GET", `/pub/loads?${query}`);
-}
+export const getLoads = (params = {}) => request("GET", `/pub/loads?${query(params)}`);
+// Bo'sh mashinalar (yuk beruvchiga) — parametrlar xuddi shunday
+export const getTrucks = (params = {}) => request("GET", `/pub/trucks?${query(params)}`);

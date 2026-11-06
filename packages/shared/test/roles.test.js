@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  truckPlaceText,
+  truckVehicleText,
   decodeProfile,
   emptyShipperProfile,
   encodeProfile,
@@ -100,4 +102,14 @@ test("matchTruck: xalqaro mashina faqat xalqaro rejimdagi yuk beruvchiga", () =>
   assert.deepEqual(matchTruck(kz, emptyShipperProfile()).reasons, ["xalqaro mashina"]);
   assert.equal(matchTruck(kz, { ...emptyShipperProfile(), international: true }).ok, true);
   assert.deepEqual(matchTruck(truck(), { ...emptyShipperProfile(), domestic: false, international: true }).reasons, ["O'zbekiston ichidagi mashina"]);
+});
+
+test("bo'sh mashina matni: qayerga yozilmasa — istalgan joyga; tonna — ko'taradi", () => {
+  const truck = { fromRegion: "samarqand", fromCity: "Samarqand", truckClass: "fura", bodyType: "tent", weightT: 22 };
+  assert.equal(truckPlaceText(truck, "from"), "Samarqand");
+  assert.equal(truckPlaceText(truck, "to"), "istalgan joyga");
+  assert.equal(truckPlaceText({}, "from"), "?");
+  assert.equal(truckPlaceText({ toRegion: "xorij", toCountry: "Qozog'iston" }, "to"), "Qozog'iston");
+  assert.equal(truckVehicleText(truck), "Fura · tent · 22 t ko'taradi");
+  assert.equal(truckVehicleText({}), "");
 });
