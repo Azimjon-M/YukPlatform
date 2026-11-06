@@ -1,0 +1,2 @@
+# .bat fayllar Windows qator oxiri (CRLF) bilan bo'lishi shart, aks holda cmd ularni noto'g'ri o'qiydi
+*.bat text eol=crlf

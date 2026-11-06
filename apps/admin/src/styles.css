@@ -1804,9 +1804,52 @@ input[type="checkbox"] {
   overflow-wrap: anywhere;
 }
 
-.key-title h3 .link-button {
-  font-weight: 400;
+/* Kalit nomi (".env kaliti", "Asosiy kalit") — provayder sarlavhasi ostida, kichikroq */
+.key-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  color: var(--text-2);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.key-label .link-button {
   font-size: 12.5px;
+}
+
+/* «Qanday ishlaydi» — yig'iladigan karta: sarlavhani bosish ochadi/yopadi */
+.help-card > summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.help-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.help-card > summary::before {
+  content: "▸";
+  color: var(--text-2);
+  transition: transform 0.15s;
+}
+
+.help-card[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.help-card > summary h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.help-card[open] .help-hint {
+  display: none;
 }
 
 .key-meta {

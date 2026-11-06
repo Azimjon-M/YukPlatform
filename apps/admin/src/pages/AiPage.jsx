@@ -194,6 +194,7 @@ function KeyCard({ apiKey, provider, now, botRunning, reload }) {
   const [removing, setRemoving] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const providerTitle = provider?.title ?? apiKey.provider;
 
   useEffect(() => setEnabled(apiKey.enabled), [apiKey.enabled]);
   const models = apiKey.models.map((m) => m.model);
@@ -247,7 +248,8 @@ function KeyCard({ apiKey, provider, now, botRunning, reload }) {
     <article className={`key-card ${enabled ? "" : "is-off"}`}>
       <div className="key-head">
         <div className="key-title">
-          <span className="muted small">{provider?.title ?? apiKey.provider}</span>
+          {/* Sarlavha — provayder (ikkala .env kaliti ham «.env kaliti» deb atalgani uchun nomi ostida, kichikroq) */}
+          <h3>{providerTitle}</h3>
           {editing ? (
             <form className="label-edit" onSubmit={saveLabel}>
               <input
@@ -278,12 +280,12 @@ function KeyCard({ apiKey, provider, now, botRunning, reload }) {
               </Button>
             </form>
           ) : (
-            <h3>
-              {apiKey.label || "Nomsiz kalit"}{" "}
+            <div className="key-label">
+              <span>{apiKey.label || "Nomsiz kalit"}</span>
               <button type="button" className="link-button" onClick={() => setEditing(true)}>
                 nomini o'zgartirish
               </button>
-            </h3>
+            </div>
           )}
           <div className="key-meta">
             <code title="Kalitning faqat oxirgi 4 belgisi">{apiKey.keyHint}</code>
@@ -301,7 +303,7 @@ function KeyCard({ apiKey, provider, now, botRunning, reload }) {
           onChange={toggle}
           busy={toggling}
           label={enabled ? "Yoqilgan" : "O'chirilgan"}
-          ariaLabel={`Kalitni ishlatish: ${apiKey.label || "Nomsiz kalit"} ${apiKey.keyHint ?? ""}`.trim()}
+          ariaLabel={`Kalitni ishlatish: ${providerTitle}, ${apiKey.label || "Nomsiz kalit"} ${apiKey.keyHint ?? ""}`.trim()}
         />
       </div>
 
@@ -560,6 +562,38 @@ function Summary({ totals, bot, parallel }) {
   );
 }
 
+// «Qanday ishlaydi» — standart yopiq (kalitlar tepaga chiqadi). Ochiq/yopiqligi shu brauzerda eslab qolinadi.
+const HELP_KEY = "yuk-admin:ai-help-open";
+function readHelpOpen() {
+  try {
+    return localStorage.getItem(HELP_KEY) === "1";
+  } catch {
+    return false; // maxfiy oyna yoki saqlash taqiqlangan — shunchaki yopiq
+  }
+}
+
+function HowItWorks({ children }) {
+  const [open, setOpen] = useState(readHelpOpen);
+  function toggle(event) {
+    const next = event.currentTarget.open;
+    setOpen(next);
+    try {
+      localStorage.setItem(HELP_KEY, next ? "1" : "0");
+    } catch {
+      // eslab qolinmasa ham sahifa ishlayveradi
+    }
+  }
+  return (
+    <details className="card help-card" open={open} onToggle={toggle}>
+      <summary>
+        <h2>Qanday ishlaydi</h2>
+        <span className="muted small help-hint">ochish uchun bosing</span>
+      </summary>
+      {children}
+    </details>
+  );
+}
+
 export function AiPage() {
   useTitle("AI kalitlari");
   const now = useNow(10_000);
@@ -596,7 +630,7 @@ export function AiPage() {
                   </div>
                 )}
 
-                <Card title="Qanday ishlaydi">
+                <HowItWorks>
                   <ul className="plain-list">
                     <li>
                       <strong>Ulanish = API kalit + model.</strong> Gemini'da har bir modelning o'z kunlik bepul limiti bor, shuning uchun bitta kalitga 2–3 model
@@ -619,7 +653,7 @@ export function AiPage() {
                     <li>Bot ro'yxatni har 15 soniyada qayta o'qiydi — o'zgarishdan keyin qayta ishga tushirish shart emas. Telegram'ga yuborish esa ketma-ket qoladi.</li>
                     <li>Har xil model har xil aniqlikda ishlaydi — yangi modelni qo'shgach «Sinash» bilan tekshiring.</li>
                   </ul>
-                </Card>
+                </HowItWorks>
 
                 {data.keys.length === 0 ? (
                   <Empty title="Hali AI ulanishi yo'q">Pastdagi formadan Gemini kalitini qo'shing — u bepul. Bot kalitsiz e'lonlarni tahlil qila olmaydi.</Empty>

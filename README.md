@@ -70,6 +70,7 @@ Turlar boshidan umumiy qilinadi (**fura / yengil / pochta / yo'lovchi**), lekin 
 
 | Buyruq | Nima qiladi |
 |---|---|
+| **`ishga-tushirish.bat`** | Windows'da ikki marta bosish kifoya: bitta oynada `npm start` (kutubxonalar yo'q bo'lsa avval `npm install`). Bot, collector, nginx, tunnel'ni alohida oynada ochmang — alohida oynadagi botni boshqaruv markazi qayta yoqa olmaydi |
 | **`npm start`** | **Hammasi bitta buyruq bilan**: boshqaruv markazi http://localhost:3000/admin + nginx (haydovchilar ilovasi http://localhost) + tunnel (internet manzili konsolda: `[tunnel] 🌐 Manzil`) + bot + collector. To'xtatish: `Ctrl+C` |
 | `npm test` | Barcha testlar |
 | `npm run tg:login` | Telegram'ga kirish (bir marta, o'z terminalingizda) |
