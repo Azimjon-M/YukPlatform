@@ -13,7 +13,7 @@ internetda — tunnel bergan `https://....trycloudflare.com`.
 ## Rollar
 
 Birinchi ochilganda — «Siz kimsiz?»: 🚚 haydovchi yoki 📦 yuk beruvchi (botdagi `/rol` bilan bir xil, rol serverda saqlanadi).
-Sozlamalar ostida «Rolni almashtirish»: boshqa rolga o'tilsa, eski sozlamalar o'chadi.
+Sozlamalar ostida «Rolni almashtirish»: har rolning sozlamalari alohida saqlanadi — avval to'ldirilgan rolga qaytilsa, sozlamalari tiklanadi va ilova darhol ro'yxatni ochadi.
 Bot Mini App tugmasida rolni `?r=` bilan beradi — server bilan aloqa bo'lmasa ham to'g'ri forma ochiladi.
 
 ## Bo'limlar

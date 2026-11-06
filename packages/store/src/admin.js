@@ -109,6 +109,9 @@ export function createAdminQueries(db, now) {
           active: row.active === 1,
           plan: row.plan ?? "free",
           isAdmin: row.is_admin === 1,
+          // O'z raqami (ixtiyoriy). Faqat boshqaruv markazida (localhost) ko'rsatiladi, Mini App'dagi admin ro'yxatida — yo'q
+          phone: row.phone ?? null,
+          phoneAt: row.phone_at ?? null,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
         }));

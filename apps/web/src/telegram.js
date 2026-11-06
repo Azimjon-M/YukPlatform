@@ -53,6 +53,14 @@ export function setUnsaved(unsaved) {
   else tg.disableClosingConfirmation();
 }
 
+// Telefon raqami (ixtiyoriy): Telegram «Raqamingizni ulashasizmi?» deb so'raydi. Rozi bo'lsa, raqam BOTGA kontakt
+// xabari bo'lib boradi va bot uni saqlaydi (faqat o'z kontakti) — ilova uni serverdan (/pub/me) ko'radi.
+// → Promise<boolean>: ulashdimi. Telegram 6.9 dan eski bo'lsa — tugma ko'rsatilmaydi (botda /raqam).
+export const canRequestContact = inTelegram && atLeast("6.9");
+export function requestContact() {
+  return new Promise((resolve) => tg.requestContact((shared) => resolve(Boolean(shared))));
+}
+
 // Ma'lumot botga "web_app_data" xabari bo'lib boradi, Mini App o'zi yopiladi
 export function sendToBot(payload) {
   setUnsaved(false);

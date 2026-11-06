@@ -1,8 +1,9 @@
-// Foydalanuvchilar: GET /api/drivers — kim (haydovchi / yuk beruvchi), qanday mashina, qaysi yo'nalish, faolmi.
+// Foydalanuvchilar: GET /api/drivers — kim (haydovchi / yuk beruvchi), qanday mashina, qaysi yo'nalish, faolmi,
+// o'zi ulashgan telefon raqami (ixtiyoriy; faqat shu sahifada).
 // Faol — unga yuk (yuk beruvchiga — bo'sh mashina) yuboriladi. «Admin» — Mini App'dagi «🛠 Boshqaruv» huquqi:
 // faqat shu yerdan (localhost) beriladi, internetdagi ilova orqali emas.
 import { useState } from "react";
-import { PLANS, ROLES } from "@yuk/shared";
+import { PLANS, ROLES, formatContactPhone } from "@yuk/shared";
 import { get, patch, post } from "../api.js";
 import { formatNumber, profileSummary } from "../format.js";
 import { useApi, useNow } from "../hooks.js";
@@ -158,6 +159,14 @@ export function DriversPage() {
                               "username yo'q"
                             )}
                           </div>
+                          {/* O'zi botga ulashgan raqami (ixtiyoriy) — faqat shu yerda, Mini App'dagi ro'yxatda yo'q */}
+                          {d.phone && (
+                            <div className="small">
+                              <a href={`tel:${d.phone}`} title={d.phoneAt ? `Ulashgan: ${new Date(d.phoneAt).toLocaleString("ru-RU")}` : undefined}>
+                                📱 {formatContactPhone(d.phone)}
+                              </a>
+                            </div>
+                          )}
                         </td>
                         <td data-label="Rol">
                           <RoleBadge driver={d} />

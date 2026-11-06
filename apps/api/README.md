@@ -120,15 +120,15 @@ Kirgandan keyin server o'z tokenini beradi (30 kun). Ilova uni har so'rovda `Aut
 |---|---|
 | `GET /pub/config` | bot username (vidjet uchun), yo'nalish doirasi |
 | `POST /pub/auth {initData}` yoki `{widget}` | kirish → `{ token, me }` |
-| `GET /pub/me` | foydalanuvchi: ism, `role` (haydovchi / yuk_beruvchi / null), `plan`, `isAdmin`, profil, faolmi |
-| `PUT /pub/me/role {role}` | rol tanlash; boshqa rolga o'tilsa eski sozlamalar o'chadi |
+| `GET /pub/me` | foydalanuvchi: ism, `role` (haydovchi / yuk_beruvchi / null), `plan`, `isAdmin`, profil, faolmi, `phone` — o'zi botga ulashgan raqami yoki null (admin boshqa odamni o'zgartirgandagi javobda raqam yo'q) |
+| `PUT /pub/me/role {role}` | rol tanlash; har rolning sozlamalari alohida saqlanadi — bu rolda avval to'ldirgan bo'lsa, javobdagi `profile` tiklangan, bo'lmasa `null` |
 | `PUT /pub/me/profile {profile, role?}` | sozlamalarni saqlash, rolga qarab tekshiruv (bot bilan bir xil) — yuborish yoqiladi. Rol yo'q — 409 `no_role` |
 | `PATCH /pub/me {active}` | pauza / davom |
 | `GET /pub/loads?view=mine\|all&from&to&hours&limit&offset` | yuklar, e'lon vaqti bo'yicha eng yangisi birinchi; `mine` — bot yuboradigan mos yuklar (faqat haydovchiga, boshqasiga 409 `role`) |
 | `GET /pub/trucks?...` | xuddi shunday — bo'sh mashinalar; `mine` — yuk beruvchiga mos (`matchTruck`) |
 | `GET /pub/admin/overview` | **faqat adminlar** (`ADMIN_IDS` yoki boshqaruv markazidagi belgi; boshqalarga 403 `forbidden`): navbat, yuklar, foydalanuvchilar, AI ulanishlari (kalitsiz) |
 | `GET /pub/admin/users?q&role` | adminlar: foydalanuvchilar (ism, @username, rol, holat; telefon yo'q), 200 tagacha |
-| `PATCH /pub/admin/users/:id {active?, role?}` | adminlar: yoqish / to'xtatish, rolni almashtirish (sozlamalari o'chadi). Admin qilish va obuna bu yerdan **mumkin emas** |
+| `PATCH /pub/admin/users/:id {active?, role?}` | adminlar: yoqish / to'xtatish, rolni almashtirish (sozlamalari saqlanadi, qaytsa tiklanadi). Admin qilish va obuna bu yerdan **mumkin emas** |
 
 Kirmagan odamga `config` va `auth` dan boshqa hech narsa berilmaydi (401). Bir manzildan daqiqasiga 240 ta so'rov,
 kirishga 20 ta urinish. Telefon raqamlari faqat kirgan haydovchiga ko'rinadi.

@@ -1,7 +1,8 @@
 // Yozuv qatori ostidagi doimiy menyu (reply keyboard). Tugma bosilsa, chatga oddiy matn ketadi va bot uni hears() bilan ushlaydi.
 // Sozlamalar tugmasi Mini App'ni ochadi (MINIAPP_URL yoki tunnel bo'lsa). Forma ma'lumotni sendData bilan qaytaradi —
 // Telegram buni faqat shu pastki menyudagi tugmadan ochilgan Mini App uchun ruxsat beradi.
-// Menyu rolga qarab: haydovchi — «📋 Mos yuklar», yuk beruvchi — «🚚 Bo'sh mashinalar»; adminga — «🛠 Boshqaruv».
+// Menyu rolga qarab: haydovchi — «📋 Mos yuklar», yuk beruvchi — «🚚 Bo'sh mashinalar»; «🔄 Rolni almashtirish»
+// (rol tanlangach); adminga — «🛠 Boshqaruv».
 import { Keyboard } from "grammy";
 import { encodeProfile, roleOf } from "@yuk/shared";
 
@@ -13,6 +14,7 @@ export const MENU = {
   pause: "⏸ Pauza",
   resume: "▶️ Davom ettirish",
   apps: "📱 Ilovalar",
+  role: "🔄 Rolni almashtirish",
   help: "❓ Yordam",
   admin: "🛠 Boshqaruv",
 };
@@ -29,6 +31,25 @@ export function miniAppUrl(base, profile, scope = null, { view = "sozlamalar", r
   if (profile) url.searchParams.set("p", encodeProfile(profile));
   if (scope) url.searchParams.set("s", scope);
   return url.toString();
+}
+
+// Telefon raqamini so'rash (ixtiyoriy, @yuk/shared contact.js). Bu alohida, bir martalik klaviatura:
+// «📱 Raqamni ulashish» — Telegram foydalanuvchining O'Z raqamini kontakt qilib yuboradi (request_contact faqat
+// shunday pastki tugmada ishlaydi, inline tugmada emas). Ikkinchi tugma bosilsa, bot asosiy menyuni qaytaradi.
+export const PHONE = {
+  share: "📱 Raqamni ulashish",
+  later: "⏭ Keyinroq",
+  keep: "↩️ O'zgartirmaslik",
+};
+
+// hasPhone — raqami bor (/raqam bilan almashtirmoqchi): ikkinchi tugma «O'zgartirmaslik»
+export function phoneKeyboard(hasPhone = false) {
+  return new Keyboard()
+    .requestContact(PHONE.share)
+    .row()
+    .text(hasPhone ? PHONE.keep : PHONE.later)
+    .resized()
+    .oneTime();
 }
 
 export const settingsLabel = (driver) => (driver?.profile ? MENU.settings : MENU.register);
@@ -50,10 +71,13 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false } = {
     .row()
     .text(paused ? MENU.resume : MENU.pause)
     .text(MENU.apps)
-    .row()
-    .text(MENU.help);
+    .row();
+  // Rolni almashtirish (haydovchi ↔ yuk beruvchi) — /rol bilan bir xil. Odamda bugun yuk, ertaga bo'sh mashina bo'lishi
+  // mumkin, /rol ni esa hamma ham topavermaydi. Rol tanlanmagan bo'lsa tugma yo'q: bot baribir «Siz kimsiz?» deb so'raydi
+  if (role) keyboard.text(MENU.role);
+  keyboard.text(MENU.help);
   // Boshqaruv — faqat Mini App ichida (Azimjon: "botda telegram webi orqali ochib ishlaydigan bo'lsin")
   const adminUrl = admin ? miniAppUrl(miniappUrl, null, scope, { view: "admin", role }) : null;
-  if (adminUrl) keyboard.webApp(MENU.admin, adminUrl);
+  if (adminUrl) keyboard.row().webApp(MENU.admin, adminUrl);
   return keyboard.resized().persistent().placeholder("Menyudan tanlang");
 }

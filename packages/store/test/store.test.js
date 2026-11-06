@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { unlinkSync } from "node:fs";
 import { openStore, textKey } from "../src/index.js";
 
 function fakeClock(start = 1_000_000) {
@@ -88,6 +89,86 @@ test("haydovchi: qoralama, profil, faol/pauza", () => {
   store.saveDriver(42, { active: false });
   assert.equal(store.activeDrivers().length, 0);
   assert.deepEqual(store.stats().drivers, { total: 1, active: 0 });
+});
+
+test("telefon raqami (ixtiyoriy): saqlash, o'chirish, so'ralgan vaqt; foydalanuvchini butunlay o'chirish", () => {
+  const clock = fakeClock(5_000);
+  const store = openStore({ file: ":memory:", now: clock.now });
+  let user = store.saveDriver(42, { name: "Ali", role: "haydovchi", profile: { fromAreas: [] }, active: true });
+  assert.deepEqual([user.phone, user.phoneAt, user.phoneAskedAt], [null, null, null]);
+
+  store.saveDriver(42, { phoneAskedAt: 4_000 });
+  clock.advance(1_000);
+  user = store.saveDriver(42, { phone: "+998901234567" });
+  assert.deepEqual([user.phone, user.phoneAt, user.phoneAskedAt], ["+998901234567", 6_000, 4_000]);
+  assert.equal(store.listDrivers()[0].phone, "+998901234567", "boshqaruv markazi ro'yxatida bor");
+  assert.equal(store.saveDriver(42, { active: false }).phone, "+998901234567", "berilmagan maydon o'zgarmaydi");
+
+  user = store.saveDriver(42, { phone: null });
+  assert.deepEqual([user.phone, user.phoneAt, user.phoneAskedAt], [null, null, 4_000]);
+
+  assert.equal(store.deleteDriver(42), true);
+  assert.equal(store.getDriver(42), null);
+  assert.equal(store.deleteDriver(42), false);
+});
+
+test("switchRole: har rolning sozlamalari alohida saqlanadi, qaytganda tiklanadi", () => {
+  const store = openStore({ file: ":memory:" });
+  const truck = { vehicle: { truckClass: "isuzu" }, fromAreas: ["toshkent"] };
+  const cargo = { fromAreas: ["samarqand"], truckClasses: ["fura"] };
+  store.saveDriver(42, { name: "Ali", role: "haydovchi", profile: truck, active: true });
+
+  // Yuk beruvchi bo'ldi — u rolda hali sozlama yo'q
+  let user = store.switchRole(42, "yuk_beruvchi");
+  assert.equal(user.role, "yuk_beruvchi");
+  assert.equal(user.profile, null);
+  assert.deepEqual(user.profiles, { haydovchi: truck }, "haydovchi sozlamalari yashirildi");
+  assert.equal(store.activeUsers("haydovchi").length, 0, "endi yuk olmaydi");
+
+  store.saveDriver(42, { profile: cargo });
+  user = store.switchRole(42, "haydovchi");
+  assert.deepEqual(user.profile, truck, "mashinasi qaytdi");
+  assert.equal(user.active, true);
+  assert.deepEqual(user.profiles, { haydovchi: truck, yuk_beruvchi: cargo });
+  assert.deepEqual(store.activeUsers("haydovchi").map((u) => u.chatId), [42]);
+
+  assert.deepEqual(store.switchRole(42, "yuk_beruvchi").profile, cargo);
+  assert.equal(store.switchRole(42, "yuk_beruvchi").role, "yuk_beruvchi", "o'sha rol — o'zgarmaydi");
+  assert.deepEqual(store.getDriver(42).profile, cargo);
+
+  // Rollardan oldingi yozuv: role yo'q, profil bor → haydovchi hisoblanadi va saqlanadi
+  store.saveDriver(7, { profile: truck, active: true });
+  store.db.exec("UPDATE drivers SET role = NULL WHERE chat_id = 7");
+  assert.deepEqual(store.switchRole(7, "yuk_beruvchi").profiles, { haydovchi: truck });
+  assert.deepEqual(store.switchRole(7, "haydovchi").profile, truck);
+
+  // Yangi foydalanuvchi — yozuv yaratiladi
+  user = store.switchRole(99, "haydovchi");
+  assert.deepEqual([user.role, user.profile, user.profiles], ["haydovchi", null, {}]);
+});
+
+test("eski baza: telefon va profiles ustunlari migratsiyada qo'shiladi, yozuvlar saqlanadi", () => {
+  const file = `${process.env.TEMP ?? "/tmp"}/yuk-migrate-${process.pid}-${Date.now()}.db`;
+  const old = openStore({ file });
+  old.saveDriver(7, { name: "Eski", role: "haydovchi", profile: { fromAreas: [] }, active: true });
+  // Ustunlarsiz eski bazani yasaymiz (DROP COLUMN — SQLite 3.35+)
+  for (const column of ["phone", "phone_at", "phone_asked_at", "profiles"]) old.db.exec(`ALTER TABLE drivers DROP COLUMN ${column}`);
+  old.close();
+  const store = openStore({ file });
+  const user = store.getDriver(7);
+  assert.equal(user.name, "Eski");
+  assert.equal(user.phone, null);
+  assert.deepEqual(user.profiles, {});
+  assert.deepEqual(store.switchRole(7, "yuk_beruvchi").profiles, { haydovchi: { fromAreas: [] } });
+  assert.equal(store.saveDriver(7, { phone: "+998901234567" }).phone, "+998901234567");
+  store.close();
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      unlinkSync(file + suffix);
+    } catch {
+      // yo'q bo'lsa — mayli
+    }
+  }
 });
 
 test("collector kursori", () => {

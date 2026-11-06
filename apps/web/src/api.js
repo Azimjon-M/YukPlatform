@@ -95,9 +95,11 @@ export async function resume() {
 }
 
 export const logout = () => tokenStore.set(null);
+// Foydalanuvchining hozirgi holati (masalan, bot raqamni saqladimi)
+export const getMe = () => request("GET", "/pub/me");
 // role — "haydovchi" | "yuk_beruvchi": profil shu rol qoidalari bilan tekshiriladi
 export const saveProfile = (profile, role) => request("PUT", "/pub/me/profile", { body: role ? { role, profile } : { profile } });
-// Boshqa rolga o'tilsa, server eski sozlamalarni o'chiradi
+// Boshqa rolga o'tilsa, server eski rolning sozlamalarini saqlab qo'yadi; yangi rolda avval to'ldirilgani bo'lsa — me.profile da
 export const setRole = (role) => request("PUT", "/pub/me/role", { body: { role } });
 export const setActive = (active) => request("PATCH", "/pub/me", { body: { active } });
 
@@ -112,5 +114,5 @@ export const getTrucks = (params = {}) => request("GET", `/pub/trucks?${query(pa
 export const getAdminOverview = () => request("GET", "/pub/admin/overview");
 // q — ism / @username / id; role — haydovchi | yuk_beruvchi | none
 export const getAdminUsers = (params = {}) => request("GET", `/pub/admin/users?${query(params)}`);
-// { active } yoki { role } (boshqa rolga o'tsa, uning sozlamalari o'chadi)
+// { active } yoki { role } (boshqa rolga o'tsa, uning sozlamalari saqlanib qoladi, yangi roldagisi bo'lsa — tiklanadi)
 export const updateAdminUser = (chatId, body) => request("PATCH", `/pub/admin/users/${chatId}`, { body });

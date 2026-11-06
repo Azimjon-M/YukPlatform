@@ -5,7 +5,7 @@ import { openStore } from "@yuk/store";
 import { decodeProfile } from "@yuk/shared";
 import { createBot, directText, postFromMessage } from "../src/bot.js";
 import { readConfig } from "../src/config.js";
-import { MENU } from "../src/menu.js";
+import { MENU, PHONE } from "../src/menu.js";
 
 const BOT_INFO = { id: 999, is_bot: true, first_name: "Yuk Ekspert", username: "Yuk_Ekspert_agent", can_join_groups: true, can_read_all_group_messages: false, supports_inline_queries: false };
 const USER = { id: 42, is_bot: false, first_name: "Ali" };
@@ -71,7 +71,9 @@ test("tugmalar bilan to'liq ro'yxatdan o'tish va /pauza", async () => {
   assert.equal(driver.active, true);
   assert.equal(driver.draft, null);
   assert.equal(driver.profile.vehicle.capacityKg, 5000);
-  assert.match(texts(calls).at(-1), /Saqlandi/);
+  assert.match(texts(calls).at(-2), /Saqlandi/);
+  // Birinchi marta saqlagach — raqam so'raladi (ixtiyoriy)
+  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi/);
 
   await command("/pauza");
   assert.equal(store.getDriver(42).active, false);
@@ -154,6 +156,7 @@ test("pastki menyu: rol tanlangach Mini App tugmasi, savol-javobsiz", async () =
   // Rol hali yo'q — sozlamalar tugmasi oddiy matn (bosilsa "Siz kimsiz?")
   const first = calls.filter((c) => c.method === "sendMessage")[0].payload.reply_markup;
   assert.equal(buttons(first).find((b) => b.text === MENU.register).web_app, undefined);
+  assert.ok(!buttons(first).some((b) => b.text === MENU.role), "rol tanlanmagan — almashtirish tugmasi yo'q");
 
   calls.length = 0;
   await press("r:haydovchi");
@@ -164,7 +167,21 @@ test("pastki menyu: rol tanlangach Mini App tugmasi, savol-javobsiz", async () =
   assert.equal(markup.resize_keyboard, true);
   const register = buttons(markup).find((b) => b.text === MENU.register);
   assert.equal(register.web_app.url, `${MINIAPP}?v=sozlamalar&r=haydovchi`); // ilova darhol sozlamalar bilan ochiladi
-  assert.deepEqual(buttons(markup).map((b) => b.text), [MENU.loads, MENU.register, MENU.pause, MENU.apps, MENU.help]);
+  assert.deepEqual(buttons(markup).map((b) => b.text), [MENU.loads, MENU.register, MENU.pause, MENU.apps, MENU.role, MENU.help]);
+});
+
+test("pastki menyudagi «🔄 Rolni almashtirish» — /rol bilan bir xil: hozirgi rol va ikki tugma", async () => {
+  const { store, calls, message, press } = setup({ config: { miniappUrl: MINIAPP, admins: [42] } });
+  store.saveDriver(42, { role: "haydovchi", profile: PROFILE, active: true, phoneAskedAt: 1 });
+  await message(PRIVATE, MENU.role);
+  const sent = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.match(sent.payload.text, /Hozir siz: <b>🚚 Haydovchi[\s\S]*alohida saqlanadi/);
+  assert.deepEqual(inlineButtons(sent).map((b) => b.callback_data), ["r:haydovchi", "r:yuk_beruvchi"]);
+  await press("r:yuk_beruvchi");
+  assert.equal(store.getDriver(42).role, "yuk_beruvchi");
+  // Menyu qatorlari: rol va yordam bir qatorda, admin tugmasi alohida pastda
+  const rows = lastMarkup(calls).keyboard.map((row) => row.map((b) => b.text));
+  assert.deepEqual(rows, [[MENU.trucks, MENU.register], [MENU.pause, MENU.apps], [MENU.role, MENU.help], [MENU.admin]]);
 });
 
 test("Mini App formasi saqlanadi; menyudagi manzil yangi sozlamalar bilan", async () => {
@@ -177,8 +194,10 @@ test("Mini App formasi saqlanadi; menyudagi manzil yangi sozlamalar bilan", asyn
   assert.deepEqual(driver.profile, PROFILE);
   assert.equal(driver.role, "haydovchi");
   assert.equal(driver.active, true);
-  assert.match(texts(calls).at(-1), /Saqlandi[\s\S]*Isuzu/);
-  const settings = buttons(lastMarkup(calls)).find((b) => b.text === MENU.settings);
+  // Oxirgisi — raqam so'rovi, undan oldingisi — «Saqlandi» (asosiy menyu bilan)
+  const savedMessage = calls.filter((c) => c.method === "sendMessage").at(-2).payload;
+  assert.match(savedMessage.text, /Saqlandi[\s\S]*Isuzu/);
+  const settings = buttons(savedMessage.reply_markup).find((b) => b.text === MENU.settings);
   assert.deepEqual(decodeProfile(new URL(settings.web_app.url).searchParams.get("p")), PROFILE);
 });
 
@@ -322,8 +341,9 @@ test("yuk beruvchi: rol → savol-javob → saqlash; menyuda «🚚 Bo'sh mashin
   assert.equal(user.role, "yuk_beruvchi");
   assert.equal(user.active, true);
   assert.deepEqual(user.profile.truckClasses, ["fura"]);
-  assert.match(texts(calls).at(-1), /Saqlandi\. Endi mos bo'sh mashinalar[\s\S]*Yuk qayerda: Samarqand/);
-  assert.deepEqual(buttons(lastMarkup(calls)).map((b) => b.text), [MENU.trucks, MENU.settings, MENU.pause, MENU.apps, MENU.help]);
+  const savedMessage = calls.filter((c) => c.method === "sendMessage").at(-2).payload; // oxirgisi — raqam so'rovi
+  assert.match(savedMessage.text, /Saqlandi\. Endi mos bo'sh mashinalar[\s\S]*Yuk qayerda: Samarqand/);
+  assert.deepEqual(buttons(savedMessage.reply_markup).map((b) => b.text), [MENU.trucks, MENU.settings, MENU.pause, MENU.apps, MENU.role, MENU.help]);
 
   // 24 soatdagi bo'sh mashinalar: mos keladigani (Samarqand, fura); boshqa viloyat va yuk e'loni — yo'q
   const post = store.addPost({ source: "@yuk_guruh", messageId: 9, link: "https://t.me/yuk_guruh/9", text: "Samarqanddan bo'sh fura bor", postedAt: Date.now() });
@@ -342,27 +362,39 @@ test("yuk beruvchi: rol → savol-javob → saqlash; menyuda «🚚 Bo'sh mashin
   assert.match(texts(calls)[0], /bo'sh mashina/);
 });
 
-test("/rol: boshqa rolga o'tsa eski sozlamalar o'chadi, o'sha rol bosilsa hech narsa o'zgarmaydi", async () => {
+test("/rol: boshqa rolga o'tsa sozlamalari saqlanadi, qaytsa tiklanadi; o'sha rol — hech narsa o'zgarmaydi", async () => {
   const { store, calls, command, press } = setup();
-  store.saveDriver(42, { profile: PROFILE, active: true }); // rollardan oldingi haydovchi (role ustuni bo'sh)
+  store.saveDriver(42, { profile: PROFILE, active: true, phoneAskedAt: 1 }); // rollardan oldingi haydovchi (role ustuni bo'sh)
   await command("/rol");
   assert.match(texts(calls).at(-1), /Hozir siz: <b>🚚 Haydovchi/);
   await press("r:haydovchi");
   assert.match(texts(calls).at(-1), /hech narsa o'zgarmadi/);
   assert.deepEqual(store.getDriver(42).profile, PROFILE);
 
+  // Yuk beruvchi — bu rolda hali sozlama yo'q, savol-javob boshlanadi
   await press("r:yuk_beruvchi");
-  const user = store.getDriver(42);
+  let user = store.getDriver(42);
   assert.equal(user.role, "yuk_beruvchi");
   assert.equal(user.profile, null);
   assert.equal(user.draft.step, "from");
   assert.equal(store.activeUsers("haydovchi").length, 0, "endi unga yuk bormaydi");
+
+  // Haydovchiga qaytdi — mashinasi va yo'nalishi qaytadan so'ralmaydi
+  await press("r:haydovchi");
+  user = store.getDriver(42);
+  assert.equal(user.role, "haydovchi");
+  assert.deepEqual(user.profile, PROFILE);
+  assert.equal(user.draft, null, "yuk beruvchi savol-javobi tashlandi");
+  assert.match(texts(calls).at(-1), /Oldingi sozlamalaringiz tiklandi — mos yuklar yana shu yerga keladi/);
+  assert.deepEqual(buttons(lastMarkup(calls)).map((b) => b.text), [MENU.loads, MENU.settings, MENU.pause, MENU.apps, MENU.role, MENU.help]);
+  assert.deepEqual(store.activeUsers("haydovchi").map((u) => u.chatId), [42], "yuklar yana boradi");
 });
 
 test("bo'sh mashina xabari yuk beruvchiga; Mini App rol bilan; admin menyusida «🛠 Boshqaruv»", async () => {
   const { store, calls, deliver, command } = setup({ config: { miniappUrl: MINIAPP, admins: [42] } });
   const empty = { fromAreas: [], toAreas: [], domestic: true, international: false, truckClasses: [], bodyTypes: [] };
-  store.saveDriver(42, { role: "yuk_beruvchi", profile: empty, active: true });
+  // phoneAskedAt — raqam allaqachon so'ralgan: /start raqam so'ramaydi, oxirgi xabar menyu bilan
+  store.saveDriver(42, { role: "yuk_beruvchi", profile: empty, active: true, phoneAskedAt: 1 });
   const truck = { fromCity: "Andijon", fromRegion: "andijon", toCity: "Toshkent", truckClass: "isuzu", bodyType: "tent", phones: ["+998900000005"] };
   assert.equal(await deliver(42, truck, { link: "https://t.me/yuk_guruh/7" }, "mashina"), true);
   const payload = calls.filter((c) => c.method === "sendMessage").at(-1).payload;
@@ -378,7 +410,7 @@ test("bo'sh mashina xabari yuk beruvchiga; Mini App rol bilan; admin menyusida �
 
   // Admin emas — tugma yo'q, /holat javob bermaydi
   const plain = setup({ config: { miniappUrl: MINIAPP } });
-  plain.store.saveDriver(42, { role: "haydovchi", profile: PROFILE, active: true });
+  plain.store.saveDriver(42, { role: "haydovchi", profile: PROFILE, active: true, phoneAskedAt: 1 });
   await plain.command("/start");
   assert.ok(!buttons(lastMarkup(plain.calls)).some((b) => b.text === MENU.admin));
   const before = plain.calls.length;
@@ -386,4 +418,89 @@ test("bo'sh mashina xabari yuk beruvchiga; Mini App rol bilan; admin menyusida �
   assert.equal(plain.calls.length, before);
   await command("/holat");
   assert.match(texts(calls).at(-1), /Yuk beruvchilar: 1 faol \/ 1/);
+});
+
+// --- Telefon raqami (ixtiyoriy) ---
+const contact = (fields) => ({ contact: { first_name: "Ali", phone_number: "998901234567", ...fields } });
+
+test("raqam: eski foydalanuvchidan /start da bir marta so'raladi; faqat o'z kontakti saqlanadi", async () => {
+  const { store, calls, command, message } = setup();
+  store.saveDriver(42, { role: "haydovchi", profile: PROFILE, active: true }); // raqam so'rashdan oldin ro'yxatdan o'tgan
+  await command("/start");
+  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?[\s\S]*Ixtiyoriy/);
+  const asked = lastMarkup(calls);
+  assert.deepEqual(asked.keyboard.flat(), [{ text: PHONE.share, request_contact: true }, { text: PHONE.later }]);
+  assert.equal(asked.one_time_keyboard, true);
+  assert.ok(store.getDriver(42).phoneAskedAt > 0);
+
+  // Ikkinchi /start — boshqa so'ramaydi
+  await command("/start");
+  assert.doesNotMatch(texts(calls).at(-1), /ulashasizmi/);
+
+  // Birovning kontakti (ilova menyusidan) va Telegram'siz kontakt — saqlanmaydi
+  await message(PRIVATE, undefined, contact({ user_id: 77, first_name: "Vali" }));
+  assert.match(texts(calls).at(-1), /boshqa odamning kontakti/);
+  await message(PRIVATE, undefined, contact({}));
+  assert.equal(store.getDriver(42).phone, null);
+
+  // O'z raqami — saqlanadi, asosiy menyu qaytadi
+  await message(PRIVATE, undefined, contact({ user_id: 42 }));
+  const user = store.getDriver(42);
+  assert.equal(user.phone, "+998901234567");
+  assert.ok(user.phoneAt > 0);
+  assert.match(texts(calls).at(-1), /Raqamingiz saqlandi: \+998 90 123 45 67/);
+  assert.equal(buttons(lastMarkup(calls))[0].text, MENU.loads);
+
+  // /raqam — hozirgi raqam va «O'zgartirmaslik»
+  await command("/raqam");
+  assert.match(texts(calls).at(-1), /Sizning raqamingiz: <b>\+998 90 123 45 67/);
+  assert.equal(buttons(lastMarkup(calls))[1].text, PHONE.keep);
+  await message(PRIVATE, PHONE.keep);
+  assert.match(texts(calls).at(-1), /Raqamingiz o'zgarmadi/);
+  assert.equal(store.getDriver(42).phone, "+998901234567");
+});
+
+test("raqam: «Keyinroq» — menyu qaytadi va bot boshqa so'ramaydi", async () => {
+  const { store, calls, webAppData, message, command } = setup({ config: { miniappUrl: MINIAPP } });
+  await webAppData(JSON.stringify({ type: "profile", role: "haydovchi", profile: PROFILE }));
+  assert.match(texts(calls).at(-1), /ulashasizmi/);
+  await message(PRIVATE, PHONE.later);
+  assert.match(texts(calls).at(-1), /Mayli[\s\S]*\/raqam/);
+  assert.equal(buttons(lastMarkup(calls))[0].text, MENU.loads);
+  // Sozlamalarni yana saqlasa ham, /start bossa ham — so'ramaydi
+  await webAppData(JSON.stringify({ type: "profile", role: "haydovchi", profile: PROFILE }));
+  assert.match(texts(calls).at(-1), /Saqlandi/);
+  await command("/start");
+  assert.doesNotMatch(texts(calls).at(-1), /ulashasizmi/);
+  assert.equal(store.getDriver(42).phone, null);
+});
+
+test("/ochirish: nima saqlanishi; faqat raqam, bekor qilish, hammasi", async () => {
+  const { store, calls, command, press } = setup();
+  store.saveDriver(42, { role: "haydovchi", profile: PROFILE, active: true, phone: "+998901234567", phoneAskedAt: 1 });
+  await command("/ochirish");
+  let sent = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.match(sent.payload.text, /nimani saqlaymiz[\s\S]*\+998 90 123 45 67[\s\S]*yuklar ro'yxati saqlanmaydi/);
+  assert.deepEqual(inlineButtons(sent).map((b) => b.callback_data), ["del:phone", "del:all", "del:no"]);
+
+  await press("del:no");
+  assert.match(texts(calls, "editMessageText").at(-1), /Hech narsa o'chirilmadi/);
+  assert.equal(store.getDriver(42).phone, "+998901234567");
+
+  await press("del:phone");
+  let user = store.getDriver(42);
+  assert.deepEqual([user.phone, user.phoneAt, user.phoneAskedAt], [null, null, 1], "raqam o'chdi, bot o'zi qayta so'ramaydi");
+  assert.deepEqual(user.profile, PROFILE, "sozlamalar qoladi");
+  assert.match(texts(calls).at(-1), /\/raqam/);
+
+  await command("/ochirish");
+  sent = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.match(sent.payload.text, /ulashmagansiz/);
+  assert.deepEqual(inlineButtons(sent).map((b) => b.callback_data), ["del:all", "del:no"]);
+
+  await press("del:all");
+  assert.equal(store.getDriver(42), null);
+  assert.equal(store.activeUsers("haydovchi").length, 0, "endi unga hech narsa yuborilmaydi");
+  assert.match(texts(calls, "editMessageText").at(-1), /Hamma ma'lumotingiz o'chirildi/);
+  assert.deepEqual(lastMarkup(calls), { remove_keyboard: true });
 });

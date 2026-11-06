@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS loads (
 CREATE INDEX IF NOT EXISTS loads_key ON loads (key, created_at);
 
 -- Botning hamma foydalanuvchilari (haydovchi ham, yuk beruvchi ham). Nomi tarixiy: avval faqat haydovchilar edi.
--- role, plan, is_admin ustunlari migrate() da qo'shiladi (eski bazalar uchun)
+-- role, plan, is_admin, phone, phone_at, phone_asked_at, profiles ustunlari migrate() da qo'shiladi (eski bazalar uchun)
 CREATE TABLE IF NOT EXISTS drivers (
   chat_id INTEGER PRIMARY KEY,       -- Telegram foydalanuvchi id (shaxsiy chat)
   name TEXT,
@@ -120,6 +120,14 @@ function migrate(db) {
   }
   if (!users.includes("plan")) db.exec("ALTER TABLE drivers ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'");
   if (!users.includes("is_admin")) db.exec("ALTER TABLE drivers ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+  // Telefon (2026-11-06, ixtiyoriy): foydalanuvchi botga «📱 Raqamni ulashish» bilan o'zi yuborgan raqami.
+  // phone_at — qachon ulashgan; phone_asked_at — bot qachon so'ragan (bir marta so'raydi, «Keyinroq» bossa — boshqa so'ramaydi)
+  if (!users.includes("phone")) db.exec("ALTER TABLE drivers ADD COLUMN phone TEXT");
+  if (!users.includes("phone_at")) db.exec("ALTER TABLE drivers ADD COLUMN phone_at INTEGER");
+  if (!users.includes("phone_asked_at")) db.exec("ALTER TABLE drivers ADD COLUMN phone_asked_at INTEGER");
+  // profiles — har rolning oxirgi sozlamalari (JSON: { haydovchi: {...}, yuk_beruvchi: {...} }). Rol almashganda
+  // eskisi shu yerga yashiriladi, qaytganda tiklanadi (switchRole). profile ustuni — hozirgi rolniki, qidiruvlar shundan
+  if (!users.includes("profiles")) db.exec("ALTER TABLE drivers ADD COLUMN profiles TEXT");
 
   // kind — yuk (yuk bor, mashina kerak) | mashina (mashina bo'sh, yuk kerak — yuk beruvchilarga)
   const loads = db.prepare("PRAGMA table_info(loads)").all().map((c) => c.name);
@@ -142,10 +150,15 @@ function driverRow(row) {
     // Rol ustuni bo'lmagan eski yozuv: profili bo'lsa — haydovchi (migrate shunday to'ldiradi)
     role: row.role ?? (row.profile != null ? "haydovchi" : null),
     profile: parse(row.profile),
+    // Rol almashganda saqlab qo'yilgan sozlamalar (switchRole). Hozirgi rolniki eskirgan bo'lishi mumkin — haqiqiysi profile
+    profiles: parse(row.profiles) ?? {},
     draft: parse(row.draft),
     active: row.active === 1,
     plan: row.plan ?? "free",
     isAdmin: row.is_admin === 1,
+    phone: row.phone ?? null,
+    phoneAt: row.phone_at ?? null,
+    phoneAskedAt: row.phone_asked_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -292,20 +305,46 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       return driverRow(q.getDriver.get(chatId));
     },
 
-    // fields: name, username, role, profile, draft, active, plan, isAdmin — faqat berilganlari o'zgaradi.
-    // Rolni tekshirish (haydovchi | yuk_beruvchi) chaqiruvchining ishi: bu yerga faqat to'g'ri qiymat keladi.
+    // fields: name, username, role, profile, draft, active, plan, isAdmin, phone, phoneAskedAt — faqat berilganlari o'zgaradi.
+    // Rolni tekshirish (haydovchi | yuk_beruvchi) va raqamni tozalash (@yuk/shared normalizeContactPhone) chaqiruvchining ishi.
+    // phone: null — raqamni o'chiradi (phone_at ham).
     saveDriver(chatId, fields) {
       const time = now();
       q.insertDriver.run(chatId, fields.name ?? null, fields.username ?? null, time, time);
       const columns = { name: fields.name, username: fields.username, active: fields.active, role: fields.role, plan: fields.plan };
       if ("profile" in fields) columns.profile = json(fields.profile);
+      if ("profiles" in fields) columns.profiles = json(fields.profiles);
       if ("draft" in fields) columns.draft = json(fields.draft);
       if (typeof columns.active === "boolean") columns.active = columns.active ? 1 : 0;
       if (typeof fields.isAdmin === "boolean") columns.is_admin = fields.isAdmin ? 1 : 0;
+      if ("phone" in fields) {
+        columns.phone = fields.phone ?? null;
+        columns.phone_at = fields.phone ? time : null;
+      }
+      if ("phoneAskedAt" in fields) columns.phone_asked_at = fields.phoneAskedAt ?? null;
       const set = Object.entries(columns).filter(([, value]) => value !== undefined);
       const sql = `UPDATE drivers SET ${[...set.map(([k]) => `${k} = ?`), "updated_at = ?"].join(", ")} WHERE chat_id = ?`;
       db.prepare(sql).run(...set.map(([, value]) => value), time, chatId);
       return this.getDriver(chatId);
+    },
+
+    // Rolni almashtirish — bot (/rol, «🔄 Rolni almashtirish»), Mini App va admin shu bitta funksiya orqali.
+    // Har rolning sozlamalari alohida saqlanadi: hozirgi rolniki `profiles` ga yashiriladi, yangi rolniki
+    // (avval to'ldirgan bo'lsa) qaytariladi — haydovchi bir martalik yuki uchun yuk beruvchi bo'lib, keyin qaytsa,
+    // mashinasini qaytadan kiritmaydi. Yangi rolda sozlama bo'lmasa, profile = null (foydalanuvchi to'ldiradi).
+    // Bir xil rol — hech narsa o'zgarmaydi. → yangilangan foydalanuvchi (profile bor — tiklandi)
+    switchRole(chatId, role) {
+      const user = this.getDriver(chatId) ?? this.saveDriver(chatId, {});
+      if (user.role === role) return user;
+      const profiles = { ...user.profiles };
+      if (user.role && user.profile) profiles[user.role] = user.profile;
+      return this.saveDriver(chatId, { role, profile: profiles[role] ?? null, profiles, draft: null, active: true });
+    },
+
+    // Botdagi /ochirish → «Hammasini o'chirish»: foydalanuvchining yozuvi butunlay o'chadi (ism, rol, sozlamalar, raqam).
+    // Boshqa jadvallarda unga bog'liq narsa yo'q (loads.sent_to — faqat son). → true (o'chirildi) yoki false (yo'q edi)
+    deleteDriver(chatId) {
+      return db.prepare("DELETE FROM drivers WHERE chat_id = ?").run(chatId).changes > 0;
     },
 
     // Profili bor va yoqilgan foydalanuvchilar: role = "haydovchi" (yuk oladi) yoki "yuk_beruvchi" (mashina oladi)

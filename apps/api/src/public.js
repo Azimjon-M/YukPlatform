@@ -5,8 +5,8 @@
 //
 //   GET  /pub/config           bot username (saytdagi «Telegram bilan kirish» uchun), yo'nalish doirasi
 //   POST /pub/auth             { initData } (Mini App) yoki { widget } (sayt) → { token, me }
-//   GET  /pub/me               foydalanuvchi: ism, rol, obuna, admin, profil, faolmi
-//   PUT  /pub/me/role          { role } — haydovchi | yuk_beruvchi (boshqa rolga o'tsa, eski sozlamalar o'chadi)
+//   GET  /pub/me               foydalanuvchi: ism, rol, obuna, admin, profil, faolmi, o'z raqami (ulashgan bo'lsa)
+//   PUT  /pub/me/role          { role } — haydovchi | yuk_beruvchi (har rolning sozlamalari saqlanadi, qaytganda tiklanadi)
 //   PUT  /pub/me/profile       { profile, role? } — sozlamalarni saqlash (bot ham shu qoidalar bilan tekshiradi)
 //   PATCH /pub/me              { active } — pauza / davom
 //   GET  /pub/loads            ?view=mine|all&from&to&hours&limit&offset — yuklar (haydovchiga), eng yangisi birinchi
@@ -74,8 +74,10 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
   const limitAuth = createRateLimiter({ limit: 20, now });
   const adminIds = parseAdminIds(env.ADMIN_IDS);
 
-  // Web'ga ketadigan foydalanuvchi ma'lumoti. role — rollardan oldingi yozuvda ham (profil bor → haydovchi)
-  const meOf = (driver) => ({
+  // Web'ga ketadigan foydalanuvchi ma'lumoti. role — rollardan oldingi yozuvda ham (profil bor → haydovchi).
+  // phone — o'zining raqami (Sozlamalarda «📱 Raqamingiz»). withPhone: false — admin boshqa odamni o'zgartirganda:
+  // birovning raqami tunnel orqali chiqmaydi (raqamlar faqat boshqaruv markazida, localhost)
+  const meOf = (driver, { withPhone = true } = {}) => ({
     chatId: driver.chatId,
     name: driver.name,
     username: driver.username,
@@ -84,6 +86,7 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     isAdmin: isAdmin(driver, adminIds),
     profile: driver.profile,
     active: driver.active,
+    ...(withPhone ? { phone: driver.phone ?? null } : {}),
   });
 
   const pub = express.Router();
@@ -137,21 +140,23 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
 
   pub.get("/me", (req, res) => res.json(meOf(req.driver)));
 
-  // Rol: botdagi /rol bilan bir xil — boshqa rolga o'tsa, eski sozlamalar o'chadi (haydovchi profili yuk beruvchiga to'g'ri kelmaydi)
+  // Rol: botdagi /rol bilan bir xil. Har rolning sozlamalari alohida saqlanadi (store.switchRole): bu rolda avval
+  // to'ldirgan bo'lsa — tiklanadi (javobda profile bor), bo'lmasa profile = null (haydovchi profili yuk beruvchiga to'g'ri kelmaydi)
   pub.put("/me/role", (req, res) => {
     const role = validRole(req.body?.role);
     if (!role) throw httpError(400, "role: haydovchi yoki yuk_beruvchi bo'lishi kerak");
     if (roleOf(req.driver) === role) return res.json(meOf(req.driver));
-    res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile: null, draft: null, active: true })));
+    res.json(meOf(store.switchRole(req.driver.chatId, role)));
   });
 
   // Botdagi «Saqlash» bilan bir xil: profil rolga qarab tekshiriladi, saqlanadi va yuborish yoqiladi.
-  // role kelmasa — bazadagi rol
+  // role kelmasa — bazadagi rol; boshqa rol kelsa — avval eski rolning sozlamalari saqlab qo'yiladi
   pub.put("/me/profile", (req, res) => {
     const role = validRole(req.body?.role) ?? roleOf(req.driver);
     if (!role) throw httpError(409, NEED_ROLE, "no_role");
     const result = sanitizeProfileFor(role, req.body?.profile, { scope });
     if (result.error) throw httpError(400, result.error);
+    if (roleOf(req.driver) !== role) store.switchRole(req.driver.chatId, role);
     res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile: result.profile, draft: null, active: true })));
   });
 
@@ -241,7 +246,7 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     });
   });
 
-  // Ro'yxatda telefon yo'q (bazada ham yo'q): ism, username, rol, holat
+  // Ro'yxatda telefon yo'q (foydalanuvchi ulashgan raqam faqat boshqaruv markazida): ism, username, rol, holat
   admin.get("/users", (req, res) => {
     const q = text(req.query.q)?.toLowerCase().replace(/^@/, "") ?? null;
     const role = req.query.role === "none" ? "none" : validRole(req.query.role);
@@ -269,20 +274,18 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     const user = Number.isSafeInteger(chatId) ? store.getDriver(chatId) : null;
     if (!user) throw httpError(404, "Foydalanuvchi topilmadi");
     const body = req.body ?? {};
-    const fields = {};
-    if ("role" in body) {
-      const role = validRole(body.role);
-      if (!role) throw httpError(400, "role: haydovchi yoki yuk_beruvchi bo'lishi kerak");
-      // Bot va web'dagidek: boshqa rolga o'tsa, eski sozlamalar o'chadi (u yangi rolda qaytadan to'ldiradi)
-      if (role !== roleOf(user)) Object.assign(fields, { role, profile: null, draft: null, active: true });
-    }
+    // Avval hammasini tekshiramiz, keyin o'zgartiramiz (xato so'rov yarim-yorti saqlanib qolmasin)
+    const role = "role" in body ? validRole(body.role) : null;
+    if ("role" in body && !role) throw httpError(400, "role: haydovchi yoki yuk_beruvchi bo'lishi kerak");
+    if ("active" in body && typeof body.active !== "boolean") throw httpError(400, "active: true yoki false bo'lishi kerak");
+    // Bot va web'dagidek: har rolning sozlamalari saqlanadi, yangi rolda avval to'ldirgani bo'lsa — tiklanadi.
+    // Rol almashsa, active e'tiborga olinmaydi (switchRole yoqib qo'yadi)
+    if (role && role !== roleOf(user)) return res.json(meOf(store.switchRole(chatId, role), { withPhone: false }));
     if ("active" in body) {
-      if (typeof body.active !== "boolean") throw httpError(400, "active: true yoki false bo'lishi kerak");
-      if (body.active && !user.profile && !fields.role) throw httpError(409, "Bu foydalanuvchi hali sozlamalarni to'ldirmagan");
-      if (!fields.role) fields.active = body.active;
+      if (body.active && !user.profile) throw httpError(409, "Bu foydalanuvchi hali sozlamalarni to'ldirmagan");
+      return res.json(meOf(store.saveDriver(chatId, { active: body.active }), { withPhone: false }));
     }
-    if (!Object.keys(fields).length) return res.json(meOf(user));
-    res.json(meOf(store.saveDriver(chatId, fields)));
+    res.json(meOf(user, { withPhone: false }));
   });
 
   pub.use("/admin", admin);

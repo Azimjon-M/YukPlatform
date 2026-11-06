@@ -1,4 +1,5 @@
-// «Siz kimsiz?» — haydovchi yoki yuk beruvchi. Botdagi /rol bilan bir xil: boshqa rolga o'tilsa, eski sozlamalar o'chadi.
+// «Siz kimsiz?» — haydovchi yoki yuk beruvchi. Botdagi /rol bilan bir xil: har rolning sozlamalari alohida saqlanadi,
+// avval to'ldirilgan rolga qaytilsa — sozlamalari tiklanadi (server: store.switchRole).
 import { ROLES, ROLE_IDS } from "@yuk/shared";
 
 // current — hozirgi rol (almashtirishda) yoki null (birinchi marta); onPick(role); onCancel — faqat almashtirishda
@@ -8,7 +9,7 @@ export function RolePage({ current, busy, onPick, onCancel }) {
       <h2>{current ? "Rolni almashtirish" : "Siz kimsiz?"}</h2>
       <p className="lead">
         {current
-          ? "Boshqa rolni tanlasangiz, sozlamalarni qaytadan kiritasiz."
+          ? "Har rolning sozlamalari alohida saqlanadi — qaytib kelsangiz, qaytadan kiritish shart emas."
           : "Shunga qarab katta yuk guruhlaridagi e'lonlardan sizga keraklisini saralab yuboramiz."}
       </p>
       {ROLE_IDS.map((id) => (

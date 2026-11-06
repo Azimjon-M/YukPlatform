@@ -98,7 +98,8 @@ function UserRow({ user, now, onChanged }) {
 
   async function switchRole() {
     const ok = await confirmAction(
-      `${user.name || "Foydalanuvchi"} — ${ROLES[otherRole].name.toLowerCase()} bo'lsinmi? Uning hozirgi sozlamalari o'chadi, botda qaytadan to'ldiradi.`,
+      `${user.name || "Foydalanuvchi"} — ${ROLES[otherRole].name.toLowerCase()} bo'lsinmi? Hozirgi sozlamalari saqlanib qoladi (qaytsa, tiklanadi). ` +
+        `Yangi rolda avval to'ldirmagan bo'lsa, botda to'ldiradi.`,
     );
     if (ok) change({ role: otherRole });
   }

@@ -143,7 +143,7 @@ test("config: bot username va doira; CORS va OPTIONS", async () => {
 test("kirish: Mini App initData → token; haydovchi bazaga yoziladi; xato imzo — 401", async () => {
   const { token, me } = await login();
   assert.ok(token);
-  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false });
+  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false, phone: null });
   assert.equal(store.getDriver(555).name, "Ali Valiyev");
 
   const bad = await call("POST", "/pub/auth", { body: { initData: "user=%7B%22id%22%3A1%7D&auth_date=1&hash=00" } });
@@ -230,7 +230,7 @@ test("pauza / davom", async () => {
   assert.equal((await call("PATCH", "/pub/me", { token: fresh, body: { active: true } })).status, 409);
 });
 
-test("yuk beruvchi: rol almashsa eski sozlamalar o'chadi; bo'sh mashinalar — mosi va hammasi", async () => {
+test("yuk beruvchi: rol almashsa sozlamalar saqlanib, qaytganda tiklanadi; bo'sh mashinalar — mosi va hammasi", async () => {
   const token = sessions.issue(557);
   store.saveDriver(557, { name: "Karim", profile: { vehicle: { truckClass: "fura" }, fromAreas: [], toAreas: [] }, active: true }); // eski haydovchi
   assert.equal((await call("GET", "/pub/me", { token })).body.role, "haydovchi");
@@ -265,7 +265,17 @@ test("yuk beruvchi: rol almashsa eski sozlamalar o'chadi; bo'sh mashinalar — m
   });
   assert.equal(back.status, 200);
   assert.equal(back.body.role, "haydovchi");
+  assert.equal(back.body.profile.vehicle.truckClass, "isuzu");
   assert.equal(store.getDriver(557).role, "haydovchi");
+
+  // Yuk beruvchiga qaytsa — o'sha sozlamalari tiklanadi, qaytadan to'ldirmaydi; keyin haydovchiga — isuzu
+  const restored = await call("PUT", "/pub/me/role", { token, body: { role: "yuk_beruvchi" } });
+  assert.deepEqual(restored.body.profile, saved.body.profile);
+  assert.equal(restored.body.active, true);
+  assert.equal((await call("GET", "/pub/trucks", { token })).status, 200, "darhol mos mashinalar");
+  const driverAgain = await call("PUT", "/pub/me/role", { token, body: { role: "haydovchi" } });
+  assert.equal(driverAgain.body.profile.vehicle.truckClass, "isuzu");
+  assert.equal(driverAgain.body.profiles, undefined, "yashirilgan sozlamalar javobda yo'q");
 });
 
 test("web fayllari: / va boshqa sahifalar index.html; noma'lum /pub — JSON 404", async () => {
@@ -326,8 +336,16 @@ test("admin: oddiy foydalanuvchiga 403; ADMIN_IDS va boshqaruv markazidagi belgi
   assert.equal(found.body.items[0].phone, undefined);
   assert.ok((await call("GET", "/pub/admin/users?role=none", { token: helper })).body.items.every((u) => u.role === null));
 
-  // Pauza, rolni almashtirish (sozlamalari o'chadi); admin qilish bu yerdan bo'lmaydi
-  assert.equal((await call("PATCH", "/pub/admin/users/560", { token: helper, body: { active: false } })).body.active, false);
+  // Raqam: o'zi /pub/me da ko'radi; admin boshqa odamni o'zgartirganda javobda raqam yo'q
+  store.saveDriver(560, { phone: "+998905550000" });
+  assert.equal((await call("GET", "/pub/me", { token: sessions.issue(560) })).body.phone, "+998905550000");
+  assert.equal((await call("GET", "/pub/me", { token: helper })).body.phone, null);
+  const paused = await call("PATCH", "/pub/admin/users/560", { token: helper, body: { active: false } });
+  assert.equal(paused.body.phone, undefined);
+  assert.ok(!JSON.stringify(paused.body).includes("5550000"));
+
+  // Pauza, rolni almashtirish (sozlamalari saqlanadi, yangi rolda yo'q); admin qilish bu yerdan bo'lmaydi
+  assert.equal(paused.body.active, false);
   const switched = await call("PATCH", "/pub/admin/users/560", { token: helper, body: { role: "yuk_beruvchi", isAdmin: true, plan: "pro" } });
   assert.equal(switched.status, 200);
   assert.equal(switched.body.role, "yuk_beruvchi");
@@ -336,6 +354,10 @@ test("admin: oddiy foydalanuvchiga 403; ADMIN_IDS va boshqaruv markazidagi belgi
   assert.equal(after.isAdmin, false, "Mini App'dan admin qilib bo'lmaydi");
   assert.equal(after.plan, "free", "Mini App'dan obunani o'zgartirib bo'lmaydi");
   assert.equal((await call("PATCH", "/pub/admin/users/560", { token: helper, body: { active: true } })).status, 409, "sozlamasiz yoqib bo'lmaydi");
+  const back = await call("PATCH", "/pub/admin/users/560", { token: helper, body: { role: "haydovchi" } });
+  assert.equal(back.body.role, "haydovchi");
+  assert.ok(back.body.profile, "haydovchi sozlamalari tiklandi");
+  assert.equal(back.body.phone, undefined);
   assert.equal((await call("PATCH", "/pub/admin/users/999999", { token: helper, body: { active: false } })).status, 404);
   assert.equal((await call("PATCH", "/pub/admin/users/560", { token: helper, body: { role: "kosmonavt" } })).status, 400);
 });

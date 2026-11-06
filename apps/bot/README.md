@@ -10,7 +10,7 @@
   | 📦 Yuk beruvchi (yuk egasi, dispetcher) | «mashina bo'sh» e'lonlari — yo'nalishi va kerakli mashinaga mos | qayerdan, qayerga, mashina turlari, kuzovlar |
 
   «Mashina bo'sh» e'lonlarini AI baribir ajratardi (ilgari tashlab yuborilardi) — yuk beruvchilar **AI limitiga qo'shimcha so'rov qo'shmaydi**.
-  Rolni almashtirish — `/rol` (eski sozlamalar o'chadi). Admin — rol emas: `ADMIN_IDS` yoki boshqaruv markazidagi belgi; adminning menyusida «🛠 Boshqaruv» (Mini App ichida).
+  Rolni almashtirish — pastki menyudagi «🔄 Rolni almashtirish» yoki `/rol`. Har rolning sozlamalari alohida saqlanadi (`store.switchRole`): yuk beruvchi bo'lib, keyin haydovchiga qaytsa, mashinasi va yo'nalishi tiklanadi («Oldingi sozlamalaringiz tiklandi»), qaytadan so'ralmaydi. Admin — rol emas: `ADMIN_IDS` yoki boshqaruv markazidagi belgi; adminning menyusida «🛠 Boshqaruv» (Mini App ichida).
   Pullik obuna hali yo'q: bazada `plan` ustuni (hammasi `free`) va `planAllows()` (`packages/shared/src/roles.js`) — keyin shu yerda cheklanadi.
 
 - **Pastki menyu** — yozuv qatori ostida doim turadigan tugmalar (javob xabariga tugma yopishtirilmaydi):
@@ -21,6 +21,7 @@
   | 🚚 Ro'yxatdan o'tish / ⚙️ Sozlamalar | Mini App formasini ochadi (`MINIAPP_URL` bo'lsa). Bo'lmasa — chatda savol-javob |
   | ⏸ Pauza / ▶️ Davom ettirish | Yuk yuborishni to'xtatadi yoki yoqadi. Tugma yozuvi holatga qarab almashadi |
   | 📱 Ilovalar | Android/iPhone havolalari yoki APK fayl (bo'lmasa "tez orada"); kanal — faqat `CHANNEL_LOADS=1` bo'lsa |
+  | 🔄 Rolni almashtirish | `/rol` bilan bir xil: hozirgi rol va «Haydovchiman» / «Yuk beruvchiman» tugmalari. Faqat rol tanlangach ko'rinadi |
   | ❓ Yordam | Yordam |
   | 🛠 Boshqaruv | Faqat adminlarga: Mini App'ning boshqaruv bo'limi (`?v=admin`) |
 
@@ -83,6 +84,8 @@ Alohida bazada sinash: buyruq oldidan `YUK_DB=data/sinov.db` (bash). Haqiqiy baz
 | `/sozlamalar` | Sozlamalarni o'zgartirish (eski javoblar belgilangan holda) |
 | `/rol` | Haydovchi ↔ yuk beruvchi |
 | `/pauza`, `/davom` | Yuborishni to'xtatish / yoqish |
+| `/raqam` | Telefon raqamni ulashish yoki almashtirish (ixtiyoriy). Bot o'zi faqat bir marta so'raydi — birinchi saqlashdan keyin (yoki eski foydalanuvchida `/start` da); «⏭ Keyinroq» bosilsa, boshqa so'ramaydi. Faqat o'z kontakti saqlanadi |
+| `/ochirish` | Nima saqlanishini ko'rsatadi: «Faqat raqamni o'chirish» yoki «Hammasini o'chirish» (yozuv butunlay o'chadi, hech narsa yuborilmaydi) |
 | `/yordam` | Yordam |
 | `/id` | Telegram id raqami (ADMIN_IDS uchun) |
 | `/holat` | Faqat adminlar: haydovchilar, yuk beruvchilar, navbat, oxirgi 24 soatdagi yuklar va bo'sh mashinalar |

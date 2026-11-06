@@ -11,6 +11,7 @@ import { getConfig, logout, resume, setActive, setRole } from "./api.js";
 import { LoadsPage } from "./LoadsPage.jsx";
 import { LoginPage } from "./LoginPage.jsx";
 import { MapPage } from "./MapPage.jsx";
+import { PhoneCard } from "./PhoneCard.jsx";
 import { RolePage } from "./RolePage.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { ShipperSettings } from "./ShipperSettings.jsx";
@@ -123,9 +124,16 @@ export function App() {
       haptic.success();
       setSession((s) => ({ ...s, me: updated }));
       setChangingRole(false);
-      setView("all");
-      setTab("sozlamalar");
-      setToast(`${ROLES[id].icon} Siz: ${ROLES[id].name}. Endi sozlamalarni to'ldiring.`);
+      if (updated.profile) {
+        // Bu rolda avval to'ldirgan — sozlamalari tiklandi, darhol ro'yxatga
+        setView("mine");
+        setTab(ROLE_TABS[id][0].id);
+        setToast(`${ROLES[id].icon} Siz: ${ROLES[id].name}. Oldingi sozlamalaringiz tiklandi.`);
+      } else {
+        setView("all");
+        setTab("sozlamalar");
+        setToast(`${ROLES[id].icon} Siz: ${ROLES[id].name}. Endi sozlamalarni to'ldiring.`);
+      }
       window.scrollTo(0, 0);
     } catch (error) {
       if (error.code === "auth") onAuthLost();
@@ -207,6 +215,15 @@ export function App() {
           <ShipperSettings key={`${me?.chatId ?? "offline"}-${role}`} me={me} initialProfile={initialProfile} scope={scope} onSaved={onSaved} />
         ) : (
           <SettingsPage key={`${me?.chatId ?? "offline"}-${role}`} me={me} initialProfile={initialProfile} scope={scope} onSaved={onSaved} />
+        )}
+        {online && (
+          <PhoneCard
+            me={me}
+            onChange={(updated) => {
+              setSession((s) => ({ ...s, me: updated }));
+              setToast("✅ Raqamingiz saqlandi");
+            }}
+          />
         )}
         <div className="role-switch">
           <span>

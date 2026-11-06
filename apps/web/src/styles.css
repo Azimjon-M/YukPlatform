@@ -118,6 +118,17 @@ main {
   margin: -6px 0 10px;
 }
 
+/* Sozlamalardagi «📱 Telefon raqam» (PhoneCard.jsx) */
+.phone-line {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.phone-line + .hint,
+.section .primary + .hint {
+  margin-top: 10px;
+}
+
 .error {
   margin: 10px 0 0;
   color: var(--error);
