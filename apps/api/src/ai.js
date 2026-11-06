@@ -1,11 +1,9 @@
 // Boshqaruv markazining «AI» bo'limi uchun: kalit bilan modellar ro'yxati va bitta sinov so'rovi.
-// Kalitlar bu yerda saqlanmaydi va hech qayerga yozilmaydi — faqat Google / Anthropic'ga so'rovda ishlatiladi.
+// Kalitlar bu yerda saqlanmaydi va hech qayerga yozilmaydi — faqat o'sha AI xizmatiga (Google, 1pro.uz, Anthropic) so'rovda ishlatiladi.
 import { createParser, PROVIDERS } from "@yuk/parser";
 
 // Sinov e'loni (telefon raqamsiz): AI ishlayotganini va javob vaqtini ko'rsatadi. 1 ta so'rov sarflanadi.
 export const SAMPLE_POST = "Toshkentdan Samarqandga 20 tonna un bor. Tent fura kerak, ertaga yuklanadi. Narxi kelishiladi.";
-
-const TITLES = { gemini: "Google Gemini", claude: "Anthropic Claude" };
 
 // Gemini ro'yxatida rasm, ovoz, embedding modellari ham bor — e'lon tahlili uchun faqat matn modellari
 const TEXT_MODELS = {
@@ -18,12 +16,17 @@ const byUsefulness = (a, b) => rank(a) - rank(b) || b.localeCompare(a, "en", { n
 
 export function createAiTools({ providers = PROVIDERS, makeParser = createParser } = {}) {
   return {
+    // Ekran uchun provayder ma'lumoti (nomi, bepulmi, kalit qanday ko'rinadi) — har bir provayder faylida yozilgan.
+    // free: true — bepul, false — pullik, null — kunlik limitli (limitNote)
     providers: Object.values(providers).map((p) => ({
       id: p.id,
-      title: TITLES[p.id] ?? p.id,
-      free: p.id === "gemini",
+      title: p.title ?? p.id,
+      free: p.free ?? null,
+      limitNote: p.limitNote ?? null,
       defaultModel: p.defaultModel,
       keyUrl: p.keyUrl ?? null,
+      keyPlaceholder: p.keyPlaceholder ?? null,
+      keyHelp: p.keyHelp ?? null,
     })),
 
     has: (id) => Object.hasOwn(providers, id),

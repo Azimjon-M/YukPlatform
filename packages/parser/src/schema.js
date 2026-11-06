@@ -69,6 +69,62 @@ export const POST_SCHEMA = {
   additionalProperties: false,
 };
 
+// --- Javobni sxemaga moslash ---
+// Gemini sxemani o'zi majburlaydi, lekin hamma API shunday emas (1pro.uz bo'sh maydonlarni tashlab yuboradi,
+// "Toshkent" kabi ro'yxatda yo'q qiymat yozishi mumkin). Shuning uchun har bir javob shu yerdan o'tadi:
+//   yo'q maydon → null ([] yoki false), noto'g'ri tur yoki ro'yxatda yo'q qiymat → null, ortiqcha maydon → tashlanadi.
+// Gemini javobi bunda o'zgarmaydi (faqat bo'sh matn "" → null).
+
+// value sxemaga mos kelsa — (tozalangan) qiymat, aks holda undefined
+function fit(value, schema) {
+  if (schema.anyOf) return fit(value, schema.anyOf.find((s) => s.type !== "null"));
+  switch (schema.type) {
+    case "string": {
+      if (typeof value === "number" && !schema.enum) value = String(value);
+      if (typeof value !== "string" || !value.trim()) return undefined;
+      const text = value.trim();
+      if (!schema.enum) return text;
+      // "Tent" → "tent": katta-kichik harf farqi kechiriladi
+      return schema.enum.find((id) => id.toLowerCase() === text.toLowerCase());
+    }
+    case "number":
+    case "integer": {
+      // "20" yoki "20,5" — son matn ko'rinishida kelsa ham olamiz
+      const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value.trim().replace(",", ".")) : NaN;
+      if (!Number.isFinite(n)) return undefined;
+      return schema.type === "integer" ? Math.round(n) : n;
+    }
+    case "boolean":
+      if (typeof value === "boolean") return value;
+      return value === "true" ? true : value === "false" ? false : undefined;
+    case "array":
+      if (!Array.isArray(value)) return undefined;
+      return [...new Set(value.map((item) => fit(item, schema.items)).filter((item) => item !== undefined))];
+    default:
+      return undefined;
+  }
+}
+
+// Maydon bo'lmasa yoki yaroqsiz bo'lsa qo'yiladigan qiymat
+const fallback = (schema) => (schema.type === "array" ? [] : schema.type === "boolean" ? false : null);
+
+export function conformLoad(load) {
+  const source = load && typeof load === "object" ? load : {};
+  return Object.fromEntries(
+    Object.entries(LOAD_PROPERTIES).map(([key, schema]) => {
+      const value = fit(source[key], schema);
+      return [key, value === undefined ? fallback(schema) : value];
+    }),
+  );
+}
+
+// { postType, loads } — postType ro'yxatda bo'lmasa "boshqa" (bot bunday e'lonni yuk deb yubormaydi)
+export function conformPost(data) {
+  const postType = fit(data?.postType, POST_PROPERTIES.postType) ?? "boshqa";
+  const loads = Array.isArray(data?.loads) ? data.loads.filter((load) => load && typeof load === "object").map(conformLoad) : [];
+  return { postType, loads };
+}
+
 // Bir so'rovda bir nechta e'lon (batch): har bir e'lonning javobi o'z raqami (id) bilan qaytadi.
 // id birinchi turadi — model avval raqamni yozadi, keyin o'sha e'lonni tahlil qiladi.
 export const BATCH_SCHEMA = {

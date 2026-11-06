@@ -13,7 +13,7 @@ Ma'lumotlarni `apps/api` serveridan oladi; API ro'yxati: [apps/api/README.md](..
 | Haydovchilar | rol (haydovchi / yuk beruvchi) va obuna, profil qisqacha, faol / pauza, «Admin» (Mini App'dagi «🛠 Boshqaruv» huquqi) |
 | Manbalar | collector kuzatadigan guruhlar: qo'shish, o'chirib-yoqish, 24 soatlik statistika |
 | Jarayonlar | bot va collector loglari jonli |
-| AI | kalitlar va modellar (ulanishlar): bugungi so'rovlar, dam olayotganlari, «Sinash», model qo'shish, yangi kalit qo'shish |
+| AI | kalitlar va modellar (ulanishlar): bugungi so'rovlar, dam olayotganlari (sababi bilan), «📌 Muammoli» belgisi va «Belgini olib tashlash», «Sinash» (ishlasa — dam olish bekor), model qo'shish, yangi kalit qo'shish (Gemini, 1pro, Claude) |
 
 ## Dasturlash
 

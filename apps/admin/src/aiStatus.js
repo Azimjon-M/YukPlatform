@@ -11,8 +11,28 @@ export const REASON_TEXT = {
   busy: "model band",
   key: "kalit xato",
   model: "model topilmadi",
+  network: "internet uzildi",
+  error: "xato — e'lonlar boshqa modelga berildi",
 };
 const BROKEN = new Set(["key", "model"]); // odam tuzatmaguncha ishlamaydi — "Xato"
+
+// «Muammoli» belgisi (bot qo'yadi: 24 soatda 4 ta yoki oxirgi 10 so'rovdan 3 tasi xato) shuncha vaqt xatosiz o'tsa o'zi yo'qoladi
+export const PROBLEM_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// → null yoki { label, detail, since, error }. Bot ishlamay turganda ham eskirgan belgi ko'rsatilmaydi
+export function healthBadge(state, now = Date.now()) {
+  const problem = state?.problem;
+  if (!problem) return null;
+  const last = problem.lastFaultAt ?? problem.since ?? 0;
+  if (now - last >= PROBLEM_WINDOW_MS) return null;
+  const faults = (state.faults ?? []).filter((t) => now - t < PROBLEM_WINDOW_MS).length || problem.faults || 0;
+  return {
+    label: "Muammoli",
+    detail: `24 soatda ${formatNumber(faults)} ta xato · oxirgi navbatda ishlatiladi`,
+    since: problem.since ?? null,
+    error: problem.error ?? null,
+  };
+}
 
 // Google bepul limitni Tinch okeani vaqti bilan yarim tunda yangilaydi (Toshkentda 12:00 yoki 13:00).
 // Bot "bugungi" so'rovlarni shu kun bo'yicha sanaydi: "2026-11-05"
@@ -49,6 +69,10 @@ export function slotStatus(key, state, { now = Date.now(), botRunning = false, t
     if (BROKEN.has(state.reason)) {
       return { kind: "error", label: "Xato", tone: "critical", icon: "✖", detail: `${reason} · ${until} da qayta uriniladi` };
     }
+    // Kunlik limit: aniq yangilanish vaqti noma'lum bo'lsa, bot har 30 daqiqada bitta so'rov bilan tekshiradi
+    if (state.reason === "daily") {
+      return { kind: "resting", label: "Dam olyapti", tone: "warning", icon: "◷", detail: `${until} da qayta tekshiriladi · ${reason}` };
+    }
     return { kind: "resting", label: "Dam olyapti", tone: "warning", icon: "◷", detail: `${until} gacha · ${reason}` };
   }
   if (botRunning && state?.busy) return { kind: "working", label: "Ishlayapti", tone: "info", icon: "●", detail: null };
@@ -58,7 +82,7 @@ export function slotStatus(key, state, { now = Date.now(), botRunning = false, t
 // Sahifa tepasidagi yig'indi. Bugungi so'rovlar o'chirilgan kalitlarnikini ham qo'shadi (ular bugun ishlagan).
 export function aiTotals(keys = [], options = {}) {
   const now = options.now ?? Date.now();
-  const out = { connections: 0, active: 0, working: 0, resting: 0, failing: 0, soonest: null, requests: 0, posts: 0, errors: 0 };
+  const out = { connections: 0, active: 0, working: 0, resting: 0, failing: 0, problems: 0, soonest: null, requests: 0, posts: 0, errors: 0 };
   for (const key of keys) {
     for (const { state } of key.models ?? []) {
       const today = todayStats(state, now);
@@ -75,10 +99,18 @@ export function aiTotals(keys = [], options = {}) {
         out.soonest = Math.min(out.soonest ?? Infinity, state.cooldownUntil);
       }
       if (kind === "error" || kind === "problem") out.failing++;
+      if (healthBadge(state, now)) out.problems++;
     }
   }
   return out;
 }
+
+// Muammoli modellar ro'yxatda birinchi turadi — ko'zga tashlansin
+export const sortSlots = (models = [], now = Date.now()) =>
+  models
+    .map((slot, i) => ({ slot, i, bad: healthBadge(slot.state, now) ? 0 : 1 }))
+    .sort((a, b) => a.bad - b.bad || a.i - b.i)
+    .map(({ slot }) => slot);
 
 // Bosh sahifadagi qisqa yozuv: "3 ta faol · 1 tasi dam olyapti"
 export function aiSummaryText(totals) {
@@ -86,10 +118,12 @@ export function aiSummaryText(totals) {
   const parts = [`${formatNumber(totals.active)} / ${formatNumber(totals.connections)} faol`];
   if (totals.resting) parts.push(`${formatNumber(totals.resting)} tasi dam olyapti`);
   if (totals.failing) parts.push(`${formatNumber(totals.failing)} tasi xato`);
+  if (totals.problems) parts.push(`${formatNumber(totals.problems)} tasi muammoli`);
   return parts.join(" · ");
 }
 
-export const providerOptionLabel = (p) => `${p.title} — ${p.free ? "bepul" : "pullik"}`;
+// free: true — bepul, false — pullik, null — kunlik limitli (limitNote, masalan "kuniga 1 mln token")
+export const providerOptionLabel = (p) => `${p.title} — ${p.free === true ? "bepul" : p.free === false ? "pullik" : (p.limitNote ?? "limitli")}`;
 
 // Kalitga hali qo'shilmagan modellar (ro'yxat tartibi saqlanadi — eng foydalisi birinchi)
 export const newModels = (available = [], existing = []) => available.filter((m) => !existing.includes(m));

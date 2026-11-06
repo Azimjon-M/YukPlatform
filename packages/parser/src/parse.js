@@ -1,11 +1,12 @@
 // E'lonni AI orqali JSON'ga aylantiradi: bittasini (parse) yoki bir nechtasini bitta so'rovda (parseBatch).
-// Qaysi AI ishlashi .env dagi PARSER_PROVIDER ga bog'liq: gemini (standart, bepul) yoki claude.
+// Qaysi AI ishlashi .env dagi PARSER_PROVIDER ga bog'liq: gemini (standart, bepul), onepro (1pro.uz) yoki claude.
+// Bot esa boshqaruv markazining «AI» ro'yxatidagi hamma ulanishni birga ishlatadi (pool.js).
 import { extractPhones, maskPhones } from "./phones.js";
 import { cargoCategory, normalizePlaces } from "@yuk/shared";
 import { formatBatch, readBatchAnswer } from "./batch.js";
 import { BATCH_SYSTEM_PROMPT } from "./prompt.js";
 import { DEFAULT_PROVIDER, getProvider } from "./providers/index.js";
-import { BATCH_SCHEMA } from "./schema.js";
+import { BATCH_SCHEMA, conformPost } from "./schema.js";
 
 export const DEFAULT_EFFORT = "low"; // qanchalik chuqur o'ylashi — hozircha faqat Claude'da ishlatiladi
 // Bitta so'rovdagi e'lonlar soni (bot ishchisi navbatdan shuncha oladi). 1 — har e'lon alohida so'rov (eski usul).
@@ -37,7 +38,9 @@ export function resolveSettings(options = {}) {
 // Telefonlar AI'dan emas, regex'dan olinadi va e'londagi har bir yukka biriktiriladi.
 // Shahar ro'yxatda bo'lsa, viloyat/davlat ro'yxatdan olinadi (AI adashsa ham to'g'ri chiqadi).
 // Toifa (fura / yengil) ham AI'dan emas, mashina sinfi va og'irlikdan hisoblanadi.
-function readPost(data, phones) {
+// Avval javob sxemaga moslanadi (conformPost): sxemani majburlamaydigan API'larda maydon tushib qolishi mumkin.
+function readPost(answer, phones) {
+  const data = conformPost(answer);
   return {
     ok: true,
     postType: data.postType,
@@ -51,8 +54,11 @@ function readPost(data, phones) {
 // options.client — testlarda soxta client berish uchun; odatda kerak emas.
 // options.apiKey — boshqaruv markazida qo'shilgan kalit (berilmasa .env dan); options.attempts — SDK urinishlari.
 // options.onRequest — har bir AI so'rovidan oldin chaqiriladi (bugun nechta so'rov ketganini sanash uchun).
+// options.splitOnError — pastda, mustStop yonida.
 export function createParser(options = {}) {
-  const { provider, model, effort, batchSize, batchWaitMs } = resolveSettings(options);
+  const { provider, model, effort, batchSize: wanted, batchWaitMs } = resolveSettings(options);
+  // Provayderning chegarasi (1pro: 6 ta — javob 100 s dan oshmasin). Aniq berilgan batchSize (CLI --batch) — o'zgarmaydi
+  const batchSize = options.batchSize == null && provider.maxBatch ? Math.min(wanted, provider.maxBatch) : wanted;
   const client = options.client ?? provider.createClient({ apiKey: options.apiKey, attempts: options.attempts });
   const generate = (request) => {
     options.onRequest?.();
@@ -61,7 +67,10 @@ export function createParser(options = {}) {
 
   // Bu xatolarda e'lonni bittadan qayta yuborishdan foyda yo'q: limit tugagan (429), model band (503),
   // kalit noto'g'ri. Ularni chaqiruvchi hal qiladi (kutadi yoki to'xtaydi), e'lonlar keyin qayta yuboriladi.
-  const mustStop = (error) => provider.retryAfterMs?.(error) != null || Boolean(provider.isFatal?.(error));
+  // splitOnError: false (bot pool'i) — HAR QANDAY so'rov xatosi chaqiruvchiga qaytadi: e'lonlar darhol boshqa
+  // AI ulanishiga beriladi. true (npm run parse) — noma'lum xatoda guruh shu yerda bo'linib qayta yuboriladi.
+  const splitOnError = options.splitOnError ?? true;
+  const mustStop = (error) => !splitOnError || provider.retryAfterMs?.(error) != null || Boolean(provider.isFatal?.(error));
 
   async function parse(text) {
     const phones = extractPhones(text);

@@ -8,6 +8,7 @@
 //   npm run parse -- --batch 1        — har e'lon alohida so'rov (standart: PARSER_BATCH yoki 10 ta e'lon bitta so'rovda)
 //   npm run parse -- --dry-run        — AI'siz: e'lonlarni sanaydi va telefonlarni ajratadi (bepul)
 //   npm run parse -- --models         — kalitingiz bilan mavjud modellar ro'yxati
+//   npm run parse -- --provider onepro [--model qwen3.8-flash] — .env dagi PARSER_PROVIDER o'rniga boshqa AI (gemini | onepro | claude)
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -16,6 +17,7 @@ import { parseArgs } from "node:util";
 import { splitPosts } from "./posts.js";
 import { extractPhones } from "./phones.js";
 import { createParser, resolveSettings } from "./parse.js";
+import { DEFAULT_PROVIDER, getProvider } from "./providers/index.js";
 
 // ES modullarda __dirname yo'q, papkani import.meta.url dan topamiz
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -31,6 +33,8 @@ const { values: args } = parseArgs({
     batch: { type: "string" },
     "dry-run": { type: "boolean", default: false },
     models: { type: "boolean", default: false },
+    provider: { type: "string" },
+    model: { type: "string" },
   },
 });
 // npm -w buyruqni paket papkasida ishga tushiradi; nisbiy yo'llar foydalanuvchi turgan papkaga nisbatan (INIT_CWD)
@@ -53,12 +57,20 @@ function requireKey(provider) {
   return false;
 }
 
+// --provider berilsa — .env dagi PARSER_PROVIDER o'rniga; PARSER_MODEL boshqa provayderniki bo'lgani uchun
+// u holda --model yoki o'sha provayderning standart modeli olinadi
+function chosen() {
+  const envProvider = process.env.PARSER_PROVIDER || DEFAULT_PROVIDER;
+  const other = args.provider && args.provider !== envProvider;
+  return { provider: args.provider, model: args.model || (other ? getProvider(args.provider).defaultModel : undefined) };
+}
+
 async function main() {
-  const { provider } = resolveSettings();
+  const { provider } = resolveSettings(chosen());
 
   if (args.models) {
     if (!requireKey(provider)) return;
-    const parser = createParser();
+    const parser = createParser(chosen());
     const names = await parser.provider.listModels(parser.client);
     console.log(`${provider.id} modellari (${names.length} ta):`);
     for (const name of names) console.log(`  ${name}`);
@@ -89,7 +101,7 @@ async function main() {
   }
 
   if (!requireKey(provider)) return;
-  const parser = createParser({ batchSize: args.batch });
+  const parser = createParser({ ...chosen(), batchSize: args.batch });
   const concurrency = Number(args.concurrency ?? provider.defaultConcurrency);
   const batchSize = parser.batchSize;
   const effortNote = provider.id === "claude" ? ` | effort: ${parser.effort}` : "";

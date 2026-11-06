@@ -2,7 +2,7 @@
 // Ma'lumot: GET /api/ai (har 10 s). Bot ro'yxatni har 15 s da qayta o'qiydi — qayta ishga tushirish shart emas.
 // Kalitning o'zi brauzerga hech qachon kelmaydi (faqat "…a1B2"); yangi kalit faqat forma ichida turadi va saqlangach o'chiriladi.
 import { useEffect, useState } from "react";
-import { aiTotals, newModels, providerOptionLabel, slotStatus, testResultText, todayStats, todayText } from "../aiStatus.js";
+import { aiTotals, healthBadge, newModels, providerOptionLabel, slotStatus, sortSlots, testResultText, todayStats, todayText } from "../aiStatus.js";
 import { del, get, patch, post } from "../api.js";
 import { formatNumber, formatTime } from "../format.js";
 import { useApi, useNow } from "../hooks.js";
@@ -15,19 +15,24 @@ const TEST_HINT = "Bitta haqiqiy so'rov yuboriladi: kunlik bepul limitdan 1 tasi
 const OLD_SERVER = "Server eski versiyada ishlayapti — unda AI kalitlari bo'limi yo'q. Terminalda npm start ni to'xtatib (Ctrl+C), qayta ishga tushiring.";
 
 // --- Bitta model (ulanish) qatori ---
-function ModelRow({ apiKey, slot, now, botRunning, onRemove, removing, canRemove }) {
+function ModelRow({ apiKey, slot, now, botRunning, onRemove, removing, canRemove, reload }) {
   const notify = useToast();
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState(null);
+  const [clearing, setClearing] = useState(false);
   const { state } = slot;
   const status = slotStatus(apiKey, state, { now, botRunning });
+  const health = healthBadge(state, now);
   const stats = todayStats(state, now);
 
   async function test() {
     setTesting(true);
     setResult(null);
     try {
-      setResult(testResultText(await post(`/api/ai/keys/${apiKey.id}/test`, { model: slot.model })));
+      const answer = await post(`/api/ai/keys/${apiKey.id}/test`, { model: slot.model });
+      setResult(testResultText(answer));
+      // Ishladi — server «dam olyapti»ni bekor qildi; holat darhol yangilansin
+      if (answer.woke) reload();
     } catch (e) {
       setResult(testResultText({ ok: false, error: e.message }));
       if (e.offline) notify(e.message, "critical");
@@ -36,15 +41,39 @@ function ModelRow({ apiKey, slot, now, botRunning, onRemove, removing, canRemove
     }
   }
 
+  async function clearProblem() {
+    setClearing(true);
+    try {
+      await post(`/api/ai/keys/${apiKey.id}/reset`, { model: slot.model });
+      notify("Belgi olib tashlandi — bot modelni 15 soniya ichida yana oddiy navbatda ishlatadi");
+      reload();
+    } catch (e) {
+      notify(e.message, "critical");
+    } finally {
+      setClearing(false);
+    }
+  }
+
   return (
-    <li className="model-row">
+    <li className={`model-row ${health ? "is-problem" : ""}`}>
       <div className="model-line">
         <code className="model-name">{slot.model}</code>
         <Badge tone={status.tone} icon={status.icon}>
           {status.label}
         </Badge>
+        {health && (
+          <Badge tone="critical" icon="📌" title={health.error ? `Belgilangan paytdagi xato: ${health.error}` : undefined}>
+            {health.label}
+          </Badge>
+        )}
         {status.detail && status.kind !== "problem" && <span className="model-detail">{status.detail}</span>}
       </div>
+      {health && (
+        <p className="model-problem small">
+          {health.detail}
+          {health.since ? ` · belgilangan: ${formatTime(health.since)}` : ""}. 24 soat xatosiz ishlasa, belgi o'zi yo'qoladi.
+        </p>
+      )}
       <div className="model-stats">
         <span>{todayText(stats)}</span>
         {state?.lastUsedAt && (
@@ -64,6 +93,11 @@ function ModelRow({ apiKey, slot, now, botRunning, onRemove, removing, canRemove
         <Button onClick={test} busy={testing} title={TEST_HINT}>
           {testing ? "Sinalmoqda…" : "Sinash"}
         </Button>
+        {health && (
+          <Button onClick={clearProblem} busy={clearing} title="Xatolar hisobi noldan boshlanadi, model yana oddiy navbatda ishlatiladi">
+            Belgini olib tashlash
+          </Button>
+        )}
         <Button
           variant="ghost"
           className="danger-text"
@@ -254,11 +288,12 @@ function KeyCard({ apiKey, provider, now, botRunning, reload }) {
           <div className="key-meta">
             <code title="Kalitning faqat oxirgi 4 belgisi">{apiKey.keyHint}</code>
             {apiKey.fromEnv && (
-              <Badge tone="info" icon="⚙" title="Kalit .env faylidan olinadi (GEMINI_API_KEY / ANTHROPIC_API_KEY)">
+              <Badge tone="info" icon="⚙" title="Kalit .env faylidan olinadi (GEMINI_API_KEY / ONEPRO_API_KEY / ANTHROPIC_API_KEY)">
                 .env dan
               </Badge>
             )}
-            {provider && !provider.free && <Badge tone="warning">pullik</Badge>}
+            {provider?.free === false && <Badge tone="warning">pullik</Badge>}
+            {provider?.limitNote && <Badge tone="info">{provider.limitNote}</Badge>}
           </div>
         </div>
         <Toggle
@@ -277,7 +312,7 @@ function KeyCard({ apiKey, provider, now, botRunning, reload }) {
       )}
 
       <ul className="model-list" aria-label="Modellar">
-        {apiKey.models.map((slot) => (
+        {sortSlots(apiKey.models, now).map((slot) => (
           <ModelRow
             key={slot.model}
             apiKey={view}
@@ -287,6 +322,7 @@ function KeyCard({ apiKey, provider, now, botRunning, reload }) {
             canRemove={models.length > 1}
             removing={removing === slot.model}
             onRemove={() => removeModel(slot.model)}
+            reload={reload}
           />
         ))}
       </ul>
@@ -423,7 +459,7 @@ function AddKeyForm({ providers, onAdded }) {
             autoComplete="off"
             spellCheck="false"
             autoCapitalize="off"
-            placeholder={provider === "gemini" ? "AIza…" : "sk-ant-…"}
+            placeholder={info?.keyPlaceholder ?? "API kalit"}
             aria-invalid={error ? true : undefined}
             aria-describedby="add-key-help"
           />
@@ -435,9 +471,7 @@ function AddKeyForm({ providers, onAdded }) {
         )}
       </div>
       <p className="muted small" id="add-key-help">
-        {info?.free
-          ? "Google AI Studio'da bepul kalit oling va shu yerga to'liq nusxalab qo'ying. «Tekshirish» limitdan so'rov sarflamaydi."
-          : "Claude pullik: har bir so'rov uchun Anthropic hisobingizdan pul yechiladi."}
+        {info?.keyHelp ?? "Kalitni to'liq nusxalab qo'ying. «Tekshirish» limitdan so'rov sarflamaydi."}
       </p>
 
       {models?.length > 0 && (
@@ -496,6 +530,7 @@ function Summary({ totals, bot, parallel }) {
         <div className="tile-sub">
           {totals.soonest ? `eng yaqini ${formatTime(totals.soonest)} gacha` : "hech biri limitda emas"}
           {totals.failing ? ` · ${formatNumber(totals.failing)} tasi xato` : ""}
+          {totals.problems ? ` · 📌 ${formatNumber(totals.problems)} tasi muammoli` : ""}
         </div>
       </div>
       <div className="tile">
@@ -568,8 +603,18 @@ export function AiPage() {
                       qo'shsangiz, kuniga 2–3 barobar ko'p e'lon tahlil qilinadi.
                     </li>
                     <li>
-                      Bot yoqilgan hamma ulanishni <strong>parallel</strong> ishlatadi. Biri limitga tushsa (429), faqat o'sha dam oladi — limit yangilanguncha;
-                      qolganlari ishlashda davom etadi. Gemini'ning kunlik limiti Toshkent vaqti bilan 13:00 da (yozda 12:00 da) yangilanadi.
+                      Bot yoqilgan hamma ulanishni <strong>parallel</strong> ishlatadi: har biri o'z e'lonlar guruhini oladi. Biri limitga tushsa (429), faqat
+                      o'sha dam oladi; qolganlari ishlashda davom etadi. Kunlik limitda bot har 30 daqiqada bitta so'rov bilan tekshiradi — limit qaytishi
+                      bilan yana ishlata boshlaydi (1pro'da limit 00:00 da yangilanadi).
+                    </li>
+                    <li>
+                      Model <strong>xato qaytarsa</strong>, unga berilgan e'lonlar darhol navbatga qaytadi va ishlayotgan boshqa model ularni oladi. Bitta e'lon
+                      3 ta ulanishda xato bersa, «xato» deb yopiladi (Navbat sahifasidan qayta yuborish mumkin).
+                    </li>
+                    <li>
+                      Tez-tez xato beradigan model (24 soatda 4 ta yoki oxirgi 10 so'rovdan 3 tasi) avtomatik <strong>📌 Muammoli</strong> deb belgilanadi:
+                      oxirgi navbatda ishlatiladi va har xatodan keyin kamida 15 daqiqa dam oladi. «Sinash» muvaffaqiyatli bo'lsa, dam olish darhol bekor
+                      bo'ladi.
                     </li>
                     <li>Bot ro'yxatni har 15 soniyada qayta o'qiydi — o'zgarishdan keyin qayta ishga tushirish shart emas. Telegram'ga yuborish esa ketma-ket qoladi.</li>
                     <li>Har xil model har xil aniqlikda ishlaydi — yangi modelni qo'shgach «Sinash» bilan tekshiring.</li>

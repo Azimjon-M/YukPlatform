@@ -97,11 +97,23 @@ test("o'zgartirish, saqlangan kalit bilan modellar va sinov, o'chirish", async (
   assert.equal((await ctx.call("GET", `/api/ai/keys/${id}/models`)).body.models.length, 2);
   assert.deepEqual(calls.at(-1), ["models", GOOD], "saqlangan kalit ochilib ishlatildi");
 
+  // Model "dam olyapti" va «muammoli» — muvaffaqiyatli sinov dam olishni bekor qiladi (bot 15 s ichida qayta ishlatadi)
+  store.saveAiSlot({ id: `${id}:gemini-3.1-flash-lite`, cooldownUntil: Date.now() + 3_600_000, reason: "daily", problem: { since: 1, lastFaultAt: Date.now() } });
   const ok = await ctx.call("POST", `/api/ai/keys/${id}/test`, { model: "gemini-3.1-flash-lite" });
-  assert.deepEqual([ok.body.ok, ok.body.ms, ok.body.loads[0].to], [true, 1200, "Samarqand"]);
+  assert.deepEqual([ok.body.ok, ok.body.ms, ok.body.loads[0].to, ok.body.woke], [true, 1200, "Samarqand", true]);
+  let slot = (await ctx.call("GET", "/api/ai")).body.keys.at(-1).models.find((m) => m.model === "gemini-3.1-flash-lite").state;
+  assert.deepEqual([slot.cooldownUntil, slot.reason], [null, null]);
+  assert.ok(slot.problem, "belgi sinov bilan olinmaydi — faqat qo'lda yoki 24 soatdan keyin");
   const busy = await ctx.call("POST", `/api/ai/keys/${id}/test`, { model: "band" });
-  assert.deepEqual([busy.status, busy.body.ok, busy.body.error], [200, false, "tushuntirish: 503"]);
+  assert.deepEqual([busy.status, busy.body.ok, busy.body.error, busy.body.woke], [200, false, "tushuntirish: 503", false]);
   assert.equal((await ctx.call("POST", `/api/ai/keys/${id}/test`, { model: "qo'shilmagan" })).status, 400);
+
+  // «Belgini olib tashlash»
+  assert.equal((await ctx.call("POST", `/api/ai/keys/${id}/reset`, { model: "gemini-3.1-flash-lite" })).status, 200);
+  slot = (await ctx.call("GET", "/api/ai")).body.keys.at(-1).models.find((m) => m.model === "gemini-3.1-flash-lite").state;
+  assert.equal(slot.problem, null);
+  assert.equal((await ctx.call("POST", `/api/ai/keys/${id}/reset`, { model: "qo'shilmagan" })).status, 400);
+  assert.equal((await ctx.call("POST", "/api/ai/keys/999/reset", { model: "m" })).status, 404);
 
   assert.equal((await ctx.call("DELETE", `/api/ai/keys/${id}`)).status, 200);
   assert.equal((await ctx.call("DELETE", `/api/ai/keys/${id}`)).status, 404);
@@ -120,8 +132,11 @@ test(".env dagi kalit o'chirilgan bo'lsa — sababi ko'rinadi, sinov 400", async
 test("haqiqiy yordamchilar: matn modellari saralanadi, sinov e'loni bitta so'rov", async () => {
   const fakeProvider = {
     id: "gemini",
+    title: "Google Gemini",
+    free: true,
     defaultModel: "gemini-flash-lite-latest",
     keyUrl: "https://aistudio.google.com/apikey",
+    keyPlaceholder: "AIza…",
     createClient: (opts) => ({ opts }),
     async listModels(client) {
       assert.equal(client.opts.attempts, 1);
@@ -141,5 +156,13 @@ test("haqiqiy yordamchilar: matn modellari saralanadi, sinov e'loni bitta so'rov
   assert.deepEqual(await tools.listModels("gemini", "k"), ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash", "gemma-4-27b-it"]);
   const result = await tools.test("gemini", "gemini-3.5-flash-lite", "k");
   assert.deepEqual([result.ok, result.loads[0].from, result.loads[0].weightT], [true, "Toshkent", 20]);
-  assert.deepEqual(tools.providers, [{ id: "gemini", title: "Google Gemini", free: true, defaultModel: "gemini-flash-lite-latest", keyUrl: "https://aistudio.google.com/apikey" }]);
+  assert.deepEqual(tools.providers, [
+    { id: "gemini", title: "Google Gemini", free: true, limitNote: null, defaultModel: "gemini-flash-lite-latest", keyUrl: "https://aistudio.google.com/apikey", keyPlaceholder: "AIza…", keyHelp: null },
+  ]);
+  // Haqiqiy ro'yxat: Gemini bepul, 1pro kunlik limitli, Claude pullik
+  const real = Object.fromEntries(createAiTools().providers.map((p) => [p.id, p]));
+  assert.deepEqual(Object.keys(real), ["gemini", "onepro", "claude"]);
+  assert.deepEqual([real.gemini.free, real.onepro.free, real.claude.free], [true, null, false]);
+  assert.equal(real.onepro.limitNote, "kuniga 1 mln token");
+  assert.equal(real.onepro.defaultModel, "qwen3.8-flash");
 });

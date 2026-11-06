@@ -415,22 +415,26 @@ function fakePool(slots, { batchSize = 2 } = {}) {
       return {
         id: slot.id,
         label: slot.id,
+        batchSize: slot.batchSize ?? null,
         describe: (e) => e.message,
         parser: {
           async parseBatch(texts) {
             state[slot.id].calls.push(texts.length);
             await new Promise((resolve) => setTimeout(resolve, slot.delay ?? 5));
             if (slot.limitOnce && state[slot.id].calls.length === 1) throw Object.assign(new Error("429 limit"), { limit: true });
+            if (slot.broken) throw new Error("500 server xatosi");
             return texts.map((t) => yuk(loadFor(t)));
           },
           async parse(text) {
             return yuk(loadFor(text));
           },
         },
+        // Haqiqiy pool kabi: limit — "minute"; noma'lum xato va boshqa ulanish bor — "error" (e'lonlar boshqasiga)
         fail(error) {
-          if (!error.limit) return null;
+          const reason = error.limit ? "minute" : slots.length > 1 ? "error" : null;
+          if (!reason) return null;
           state[slot.id].restUntil = Date.now() + 60_000;
-          return { ms: 60_000, reason: "minute" };
+          return { ms: 60_000, reason, flagged: slot.flag || undefined };
         },
         release() {
           state[slot.id].busy = false;
@@ -474,7 +478,17 @@ test("parallel: bitta ulanish limitga tushsa, o'sha e'lonlarni ikkinchisi oladi"
   assert.equal(store.stats().posts.done, 6);
   assert.equal(published.length, 6);
   assert.equal(state.a.calls.length, 1, "a dam olyapti — boshqa so'ralmadi");
-  assert.ok(logs.some((m) => /\[a\].*dam oladi, qolganlari ishlayveradi/.test(m)));
+  assert.ok(logs.some((m) => /\[a\].*2 ta e'lon boshqa AI'ga o'tdi, o'zi .* dam oladi/.test(m)));
+});
+
+test("parallel: ulanishning o'z chegarasi (1pro — kichik guruh) umumiy o'lchamdan ustun", async () => {
+  const { store, deps, add } = setup([]);
+  const { pool, state } = fakePool([{ id: "kichik", batchSize: 2, delay: 1 }], { batchSize: 5 });
+  deps.pool = pool;
+  for (let i = 1; i <= 6; i++) add(i);
+  await runUntil(createWorker(deps, { log: () => {}, idleMs: 10 }), () => store.stats().posts.done === 6);
+  assert.equal(store.stats().posts.done, 6);
+  assert.deepEqual(state.kichik.calls, [2, 2, 2]);
 });
 
 test("parallel: yuborish ketma-ket — kanalga bir vaqtda faqat bitta xabar", async () => {
@@ -503,4 +517,32 @@ test("parallel: ulanish yo'q bo'lsa bir marta ogohlantiradi va kutadi", async ()
   const worker = createWorker(deps, { log: (m) => logs.push(m), idleMs: 5 });
   await runUntil(worker, () => false, 60);
   assert.equal(logs.filter((m) => /kalit qo'shing/.test(m)).length, 1);
+});
+
+test("xato: ulanish xato qaytarishi bilan uning e'lonlari darhol ishlayotgan boshqa ulanishga o'tadi", async () => {
+  const { store, deps, published, add } = setup([]);
+  const { pool, state } = fakePool([{ id: "a", broken: true, flag: true }, { id: "b", delay: 5 }]);
+  deps.pool = pool;
+  for (let i = 1; i <= 6; i++) add(i);
+  const logs = [];
+  await runUntil(createWorker(deps, { log: (m) => logs.push(m), idleMs: 10 }), () => store.stats().posts.done === 6);
+  assert.equal(store.stats().posts.done, 6, "hech bir e'lon yo'qolmadi");
+  assert.equal(published.length, 6);
+  assert.equal(state.a.calls.length, 1, "xato bergan ulanish dam olyapti");
+  assert.equal(state.b.calls.reduce((s, n) => s + n, 0), 6, "hammasini b tahlil qildi");
+  assert.ok(logs.some((m) => /\[a\]: 500 server xatosi — 2 ta e'lon boshqa AI'ga o'tdi/.test(m)));
+  assert.ok(logs.some((m) => /\[a\] «muammoli» deb belgilandi/.test(m)));
+});
+
+test("xato: bitta e'lon 3 ta ulanishda xato bersa — 'failed' (cheksiz aylanmaydi)", async () => {
+  const { store, deps, add } = setup([]);
+  const { pool, state } = fakePool([{ id: "a", broken: true }, { id: "b", broken: true }, { id: "c", broken: true }]);
+  deps.pool = pool;
+  add(1);
+  add(2);
+  await runUntil(createWorker(deps, { log: () => {}, idleMs: 10 }), () => store.stats().posts.failed === 2);
+  assert.equal(store.stats().posts.failed, 2);
+  assert.deepEqual([state.a.calls.length, state.b.calls.length, state.c.calls.length], [1, 1, 1]);
+  const [post] = store.listPosts({ status: "failed" }).items;
+  assert.match(post.error, /3 ta AI ulanishida xato: 500 server xatosi/);
 });

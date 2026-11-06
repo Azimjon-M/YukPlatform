@@ -35,7 +35,7 @@ export function configInfo(env, { publicUrl = null, tunnel = null } = {}) {
     parser: {
       provider: env.PARSER_PROVIDER || "gemini",
       model: env.PARSER_MODEL || null,
-      keys: { gemini: Boolean(env.GEMINI_API_KEY), claude: Boolean(env.ANTHROPIC_API_KEY) },
+      keys: { gemini: Boolean(env.GEMINI_API_KEY), onepro: Boolean(env.ONEPRO_API_KEY), claude: Boolean(env.ANTHROPIC_API_KEY) },
     },
   };
 }
@@ -47,7 +47,7 @@ const bool = (value, field) => {
   return value;
 };
 
-// AI kaliti: bo'sh joysiz, 10–300 belgi (Gemini "AIza…" ~39, Anthropic "sk-ant-…" ~100)
+// AI kaliti: bo'sh joysiz, 10–300 belgi (Gemini "AIza…" ~39, 1pro "sk-…" ~46, Anthropic "sk-ant-…" ~100)
 function validKey(value) {
   const key = typeof value === "string" ? value.trim() : "";
   if (key.length < 10 || key.length > 300 || /\s/.test(key)) throw httpError(400, "Kalit noto'g'ri ko'rinishda: uni to'liq nusxalab qo'ying");
@@ -209,16 +209,32 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
     res.json({ models: await modelsOr400(key.provider, key.apiKey) });
   });
 
-  // Bitta haqiqiy so'rov bilan sinov (bepul limitdan 1 ta so'rov sarflanadi)
-  api.post("/ai/keys/:id/test", async (req, res) => {
+  function keyModel(req) {
     const key = storedKey(req.params.id);
     const model = String(req.body?.model ?? "");
     if (!key.models.some((m) => m.model === model)) throw httpError(400, "Bu model shu kalitga qo'shilmagan");
+    return { key, model };
+  }
+
+  // Bitta haqiqiy so'rov bilan sinov (bepul limitdan 1 ta so'rov sarflanadi).
+  // Muvaffaqiyatli bo'lsa — model ishlayapti: «dam olyapti» bekor qilinadi, bot uni darhol qayta ishlatadi
+  api.post("/ai/keys/:id/test", async (req, res) => {
+    const { key, model } = keyModel(req);
+    let result;
     try {
-      res.json(await ai.test(key.provider, model, key.apiKey));
+      result = await ai.test(key.provider, model, key.apiKey);
     } catch (error) {
-      res.json({ ok: false, model, error: ai.describe(key.provider, error), loads: [] });
+      result = { ok: false, model, error: ai.describe(key.provider, error), loads: [] };
     }
+    if (result.ok) store.wakeAiSlot(`${key.id}:${model}`);
+    res.json({ ...result, woke: Boolean(result.ok) });
+  });
+
+  // «Muammoli» belgisini qo'lda olib tashlash (xatolar hisobi noldan boshlanadi)
+  api.post("/ai/keys/:id/reset", (req, res) => {
+    const { key, model } = keyModel(req);
+    store.resetAiSlotHealth(`${key.id}:${model}`);
+    res.json({ ok: true });
   });
 
   // --- Jarayonlar: bot va collector ---

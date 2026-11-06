@@ -92,8 +92,9 @@ CREATE TABLE IF NOT EXISTS ai_keys (
 
 CREATE TABLE IF NOT EXISTS ai_slots (
   id TEXT PRIMARY KEY,               -- "<ai_keys.id>:<model>"
-  data TEXT NOT NULL,                -- bot yozadi (JSON): bugungi so'rovlar, dam olish vaqti, oxirgi xato
+  data TEXT NOT NULL,                -- bot yozadi (JSON): bugungi so'rovlar, dam olish vaqti, oxirgi xato, «muammoli» belgisi
   updated_at INTEGER NOT NULL
+  -- control TEXT (migrate) — boshqaruv markazi yozadi: { wakeAt, healthResetAt }
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -123,6 +124,10 @@ function migrate(db) {
   // kind — yuk (yuk bor, mashina kerak) | mashina (mashina bo'sh, yuk kerak — yuk beruvchilarga)
   const loads = db.prepare("PRAGMA table_info(loads)").all().map((c) => c.name);
   if (!loads.includes("kind")) db.exec("ALTER TABLE loads ADD COLUMN kind TEXT NOT NULL DEFAULT 'yuk'");
+
+  // control — boshqaruv markazining buyruqlari (JSON): { wakeAt, healthResetAt }. Bot faqat o'qiydi, data ni esa bot yozadi
+  const slots = db.prepare("PRAGMA table_info(ai_slots)").all().map((c) => c.name);
+  if (!slots.includes("control")) db.exec("ALTER TABLE ai_slots ADD COLUMN control TEXT");
 }
 
 const json = (value) => (value == null ? null : JSON.stringify(value));

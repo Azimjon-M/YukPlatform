@@ -162,7 +162,8 @@ async function cmdLive() {
       signal: controller.signal,
     });
   } finally {
-    await client.disconnect();
+    // Aloqa uzilgan bo'lsa disconnect ham osilib qolishi mumkin — ko'pi bilan 5 s kutamiz
+    await Promise.race([client.disconnect().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 5000).unref())]);
     store.close();
   }
 }

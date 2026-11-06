@@ -224,6 +224,7 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
           errors: fresh ? state.errors : 0,
           restingUntil: state?.cooldownUntil > now() ? state.cooldownUntil : null,
           reason: state?.cooldownUntil > now() ? (state.reason ?? null) : null,
+          problem: Boolean(state?.problem), // tez-tez xato beryapti — bot uni oxirgi navbatda ishlatadi
         };
       }),
     );

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "@yuk/store";
-import { pollSource, runLive, sourceLabel } from "../src/live.js";
+import { pollSource, runLive, sourceLabel, StalledError } from "../src/live.js";
 
 const SOURCE = { kind: "username", value: "yuk_guruh" };
 const long = (s) => `${s} — Toshkentdan Samarqandga 20 t tent kerak`;
@@ -86,4 +86,51 @@ test("manbalar ro'yxati har aylanishda qayta o'qiladi; bo'sh bo'lsa ogohlantirad
   });
   assert.match(logs[0], /guruh yo'q/);
   assert.deepEqual(seen, ["yangi"]);
+});
+
+test("qo'riqchi: Telegram javob bermay qolsa, osilgan so'rov xato bo'ladi va jarayon to'xtaydi", async () => {
+  const store = openStore({ file: ":memory:" });
+  store.setCursor("@yuk_guruh", 5);
+  let time = 0;
+  const reader = {
+    async latestId() {
+      return 5;
+    },
+    // Aloqa uzilgan: so'rov hech qachon tugamaydi
+    since() {
+      time += 60_000; // har urinishda "1 daqiqa o'tdi"
+      return new Promise(() => {});
+    },
+  };
+  const logs = [];
+  await assert.rejects(
+    runLive({ sources: [SOURCE], reader, store, intervalMs: 0, gapMs: 0, pollTimeoutMs: 5, deadAfterMs: 3 * 60_000, now: () => time, log: (m) => logs.push(m) }),
+    (error) => error instanceof StalledError && /aloqa uzildi/.test(error.message),
+  );
+  assert.equal(logs.length, 3);
+  assert.match(logs[0], /javob kelmadi/);
+});
+
+test("qo'riqchi: o'qish ishlab tursa yoki guruh bo'lmasa, to'xtamaydi", async () => {
+  const store = openStore({ file: ":memory:" });
+  let time = 0;
+  let rounds = 0;
+  const controller = new AbortController();
+  const reader = fakeReader([{ id: 1, text: long("a"), date: 1 }]);
+  await runLive({
+    sources: () => {
+      time += 10 * 60_000;
+      if (++rounds > 4) controller.abort();
+      return rounds % 2 ? [SOURCE] : [];
+    },
+    reader,
+    store,
+    intervalMs: 0,
+    gapMs: 0,
+    deadAfterMs: 60_000,
+    now: () => time,
+    log: () => {},
+    signal: controller.signal,
+  });
+  assert.ok(rounds > 4);
 });

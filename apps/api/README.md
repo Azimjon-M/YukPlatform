@@ -78,7 +78,8 @@ Kalit va tokenlar javoblarda hech qachon bo'lmaydi — faqat «yozilganmi» (`tr
 | `POST /api/ai/keys {provider, key, label?, models}` | kalit qo'shish (avval tekshiriladi; takror kalit — 409) |
 | `PATCH /api/ai/keys/:id {label?, enabled?, models?}` · `DELETE /api/ai/keys/:id` | o'zgartirish, o'chirish |
 | `GET /api/ai/keys/:id/models` | saqlangan kalit bilan modellar ro'yxati (model qo'shish uchun) |
-| `POST /api/ai/keys/:id/test {model}` | sinov e'loni bilan bitta haqiqiy so'rov (limitdan 1 ta) → `{ ok, ms, loads, error }` |
+| `POST /api/ai/keys/:id/test {model}` | sinov e'loni bilan bitta haqiqiy so'rov (limitdan 1 ta) → `{ ok, ms, loads, error, woke }`; muvaffaqiyatli bo'lsa modelning «dam olish»i bekor qilinadi (`ai_slots.control.wakeAt`, bot 15 s ichida bajaradi) |
+| `POST /api/ai/keys/:id/reset {model}` | «📌 Muammoli» belgisini olib tashlash: xatolar hisobi noldan (`control.healthResetAt`) |
 
 Manbalar birinchi marta `.env` dagi `TG_SOURCES` dan olinadi, keyin bazada saqlanadi va web'dan boshqariladi.
 O'zgarish collector'ning keyingi aylanishida (1–2 daqiqa) kuchga kiradi.

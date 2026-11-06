@@ -3,7 +3,7 @@
 //   npm run bot:check    — faqat tekshirish: token ishlayaptimi, bot kanalda adminmi
 //   npm run bot -- --dry-run — navbatdagi e'lonlarni tahlil qilib, Telegram'ga yubormasdan ekranga chiqarish
 import { existsSync, statSync } from "node:fs";
-import { createParser, createParserPool, resolveSettings } from "@yuk/parser";
+import { createParser, createParserPool, envSeedEntries, resolveSettings } from "@yuk/parser";
 import { ROUTE_SCOPES, routeScopeFrom } from "@yuk/shared";
 import { acquireRunLock, loadSecret, openStore, tunnelUrl } from "@yuk/store";
 import { createBot } from "./bot.js";
@@ -39,11 +39,10 @@ async function checkLinkedGroup(bot, channel, links) {
   }
 }
 
-// AI ulanishlari: boshqaruv markazining «AI» bo'limida qo'shilgan kalitlar (bazada shifrlangan) va .env dagi kalit
-// (birinchi marta ro'yxatga o'zi qo'shiladi). Ro'yxat har 15 s da qayta o'qiladi — botni qayta ishga tushirish shart emas.
+// AI ulanishlari: boshqaruv markazining «AI» bo'limida qo'shilgan kalitlar (bazada shifrlangan) va .env dagi kalitlar
+// (GEMINI_API_KEY, ONEPRO_API_KEY — har biri birinchi marta ro'yxatga o'zi qo'shiladi). Ro'yxat har 15 s da qayta o'qiladi — botni qayta ishga tushirish shart emas.
 function createAiPool(store) {
-  const { provider, model } = resolveSettings();
-  store.seedAiKeys([{ provider: provider.id, models: [model] }], process.env);
+  store.seedAiKeys(envSeedEntries(resolveSettings()), process.env);
   const access = { secret: loadSecret(), env: process.env };
   return createParserPool({
     connections: () => store.aiConnections(access),

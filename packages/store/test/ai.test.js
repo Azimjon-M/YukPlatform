@@ -27,6 +27,39 @@ test("secret.key: bir marta yaratiladi, keyin o'sha o'qiladi", () => {
   assert.equal(Buffer.from(readFileSync(file, "utf8").trim(), "base64").length, 32);
 });
 
+test(".env kalitlari har provayder uchun alohida bir marta qo'shiladi (eski umumiy belgi — gemini/claude)", () => {
+  const store = openStore({ file: ":memory:" });
+  const env2 = { GEMINI_API_KEY: "env-gemini-kalit-1234", ONEPRO_API_KEY: "sk-onepro-kalit-9999" };
+  const entries = [
+    { provider: "gemini", models: ["flash-lite"] },
+    { provider: "onepro", models: ["qwen3.8-flash"] },
+  ];
+  // Eski bazada gemini allaqachon qo'shilgan va umumiy belgi qo'yilgan edi
+  store.db.prepare("INSERT INTO settings (key, value) VALUES ('ai_keys_seeded', '1')").run();
+  assert.equal(store.seedAiKeys(entries, env2), 1, "faqat yangi provayder (onepro)");
+  const keys = store.listAiKeys(access);
+  assert.deepEqual(keys.map((k) => [k.provider, k.fromEnv, k.models.map((m) => m.model)]), [["onepro", true, ["qwen3.8-flash"]]]);
+  assert.equal(store.seedAiKeys(entries, env2), 0, "ikkinchi marta qo'shilmaydi");
+  // O'chirilsa — qayta qo'shilmaydi
+  store.removeAiKey(keys[0].id);
+  assert.equal(store.seedAiKeys(entries, env2), 0);
+  // .env kaliti o'qiladi: ulanishda kalit .env dan
+  const fresh = openStore({ file: ":memory:" });
+  fresh.seedAiKeys(entries, env2);
+  assert.deepEqual(
+    fresh.aiConnections({ secret, env: env2 }).map((c) => [c.provider, c.model, c.apiKey]),
+    [
+      ["gemini", "flash-lite", "env-gemini-kalit-1234"],
+      ["onepro", "qwen3.8-flash", "sk-onepro-kalit-9999"],
+    ],
+  );
+  // Shu provayderning kaliti boshqaruv markazida qo'shilgan bo'lsa — .env dagisi qo'shilmaydi
+  const ui = openStore({ file: ":memory:" });
+  ui.addAiKey({ provider: "onepro", apiKey: "sk-boshqa-1111", models: ["qwen3.8-flash"] }, secret);
+  assert.equal(ui.seedAiKeys(entries, env2), 1, "faqat gemini");
+  assert.deepEqual(ui.listAiKeys().map((k) => k.provider), ["onepro", "gemini"]);
+});
+
 test("kalitlar: .env dan bir marta, qo'shish, takror, modellar = ulanishlar", () => {
   const store = openStore({ file: ":memory:" });
   assert.equal(store.seedAiKeys([{ provider: "gemini", models: ["flash-lite"] }], {}), 0, ".env da kalit yo'q");
@@ -68,6 +101,33 @@ test("kalitlar: o'zgartirish, o'chirish; ulanish holati saqlanadi va kalit bilan
   assert.equal(store.removeAiKey(id), true);
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM ai_slots").get().n, 0);
   assert.equal(store.removeAiKey(id), false);
+});
+
+test("boshqaruv buyruqlari: uyg'otish va «muammoli» belgisini olib tashlash — control ga yoziladi, data darhol tuzatiladi", () => {
+  let time = 1000;
+  const store = openStore({ file: ":memory:", now: () => time });
+  const id = store.addAiKey({ provider: "gemini", apiKey: "k-2222", models: ["a"] }, secret);
+  const slot = `${id}:a`;
+  assert.equal(store.aiConnections(access)[0].control, null);
+  store.saveAiSlot({ id: slot, requests: 5, cooldownUntil: 9e12, reason: "daily", resetAt: 9e12, problem: { since: 1 }, faults: [1, 2], recent: "xx" });
+  time = 2000;
+  store.wakeAiSlot(slot);
+  let [c] = store.aiConnections(access);
+  assert.deepEqual(c.control, { wakeAt: 2000 });
+  assert.deepEqual([c.state.cooldownUntil, c.state.reason, c.state.resetAt, c.state.requests], [null, null, null, 5]);
+  assert.ok(c.state.problem, "uyg'otish belgini olmaydi");
+  time = 3000;
+  store.resetAiSlotHealth(slot);
+  [c] = store.aiConnections(access);
+  assert.deepEqual(c.control, { wakeAt: 3000, healthResetAt: 3000 });
+  assert.deepEqual([c.state.problem, c.state.faults, c.state.recent], [null, [], ""]);
+  // Bot keyin o'z holatini yozadi — control o'chmaydi (bot uni "ko'rdim" deb state'da belgilaydi)
+  store.saveAiSlot({ ...c.state, wakeSeen: 3000, healthSeen: 3000 });
+  assert.deepEqual(store.aiConnections(access)[0].control, { wakeAt: 3000, healthResetAt: 3000 });
+  // Holati hali yo'q ulanish ham uyg'otiladi
+  store.updateAiKey(id, { models: ["a", "b"] });
+  store.wakeAiSlot(`${id}:b`);
+  assert.equal(store.aiConnections(access)[1].control.wakeAt, 3000);
 });
 
 test("navbat: exclude — boshqa AI olgan e'lonlar ikkinchi marta olinmaydi", () => {

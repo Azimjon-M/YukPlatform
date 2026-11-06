@@ -43,6 +43,12 @@ export function throughput(lastHour = {}, queue = {}) {
   };
 }
 
+const KEY_ROWS = [
+  { id: "gemini", label: "Gemini kaliti" },
+  { id: "onepro", label: "1pro kaliti" },
+  { id: "claude", label: "Claude kaliti" },
+];
+
 // .env holati — API faqat true/false va maxfiy bo'lmagan qiymatlarni yuboradi
 // → [{ id, label, ok, value, href? }] ; ok: true | false | null (null — majburiy emas, ma'lumot uchun)
 // aiTotals (aiStatus.js) berilsa — .env dagi AI kalitlari o'rniga bitta "AI ulanishlari" qatori (kalitlar endi AI sahifasida)
@@ -50,13 +56,18 @@ export function configChecklist(config, aiTotals = null) {
   if (!config) return [];
   const parser = config.parser ?? {};
   const provider = parser.provider ?? "gemini";
-  const keyOk = provider === "claude" ? parser.keys?.claude : parser.keys?.gemini;
+  const keyOk = parser.keys?.[provider];
   const aiRows = aiTotals
     ? [{ id: "ai", label: "AI ulanishlari", ok: aiTotals.active > 0, value: aiSummaryText(aiTotals), href: "/ai" }]
     : [
         { id: "ai", label: "AI provayder", ok: Boolean(keyOk), value: `${provider}${parser.model ? ` · ${parser.model}` : " · standart model"}` },
-        { id: "gemini", label: "Gemini kaliti", ok: provider === "gemini" ? Boolean(parser.keys?.gemini) : parser.keys?.gemini ? true : null, value: parser.keys?.gemini ? "yozilgan" : "yo'q" },
-        { id: "claude", label: "Claude kaliti", ok: provider === "claude" ? Boolean(parser.keys?.claude) : parser.keys?.claude ? true : null, value: parser.keys?.claude ? "yozilgan" : "yo'q" },
+        ...KEY_ROWS.filter((row) => row.id in (parser.keys ?? {})).map(({ id, label }) => ({
+          id,
+          label,
+          // Asosiy provayderning kaliti majburiy, qolganlari — ixtiyoriy (null)
+          ok: provider === id ? Boolean(parser.keys[id]) : parser.keys[id] ? true : null,
+          value: parser.keys[id] ? "yozilgan" : "yo'q",
+        })),
       ];
   return [
     { id: "bot", label: "Bot token", ok: Boolean(config.botToken), value: config.botToken ? "yozilgan" : "BOT_TOKEN yo'q" },

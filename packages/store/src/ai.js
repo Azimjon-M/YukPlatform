@@ -5,11 +5,33 @@
 import { decryptText, encryptText, keyHint } from "./secrets.js";
 
 // .env dagi kalit nomlari: kalit bazada emas, .env da turgan qatorlar uchun (key_enc = NULL)
-export const ENV_KEYS = { gemini: "GEMINI_API_KEY", claude: "ANTHROPIC_API_KEY" };
+export const ENV_KEYS = { gemini: "GEMINI_API_KEY", onepro: "ONEPRO_API_KEY", claude: "ANTHROPIC_API_KEY" };
+
+// Eski qoida (2026-11-06 gacha): bitta umumiy "ai_keys_seeded" belgisi — u bo'lsa, gemini va claude allaqachon hal qilingan
+const LEGACY_SEEDED = new Set(["gemini", "claude"]);
 
 export function createAiQueries(db, now) {
   const rows = () => db.prepare("SELECT * FROM ai_keys ORDER BY id").all();
   const slotStates = () => Object.fromEntries(db.prepare("SELECT id, data FROM ai_slots").all().map((r) => [r.id, JSON.parse(r.data)]));
+  const slotControls = () =>
+    Object.fromEntries(
+      db
+        .prepare("SELECT id, control FROM ai_slots WHERE control IS NOT NULL")
+        .all()
+        .map((r) => [r.id, JSON.parse(r.control)]),
+    );
+
+  // Boshqaruv markazining buyrug'i: control ga yoziladi (bot 15 s ichida o'qib bajaradi), data esa darhol
+  // tuzatiladi — sahifa botni kutmasdan yangi holatni ko'rsatsin. patchData(data) → yangi data
+  function command(id, controlPatch, patchData) {
+    const row = db.prepare("SELECT data, control FROM ai_slots WHERE id = ?").get(id);
+    const control = { ...(row?.control ? JSON.parse(row.control) : {}), ...controlPatch };
+    const data = patchData(row ? JSON.parse(row.data) : { id });
+    db.prepare(
+      `INSERT INTO ai_slots (id, data, updated_at, control) VALUES (?, ?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET data = excluded.data, control = excluded.control`,
+    ).run(id, JSON.stringify(data), now(), JSON.stringify(control));
+  }
 
   // Kalitning o'zi: shifrdan yoki .env dan. access = { secret, env } → { apiKey } yoki { problem: "sabab" }
   function readKey(row, { secret, env } = {}) {
@@ -93,31 +115,46 @@ export function createAiQueries(db, now) {
       return removed;
     },
 
-    // .env dagi kalitni ro'yxatga BIR MARTA qo'shadi: keyin o'chirib tashlansa, qayta qo'shilmaydi.
-    // entries: [{ provider, models }] — qaysi provayder va model (bot .env dagi PARSER_PROVIDER/PARSER_MODEL dan beradi)
+    // .env dagi kalitni ro'yxatga HAR PROVAYDER uchun BIR MARTA qo'shadi: keyin o'chirib tashlansa, qayta qo'shilmaydi.
+    // Shu provayderning kaliti ro'yxatda allaqachon bo'lsa (boshqaruv markazida qo'shilgan) — .env dagisi qo'shilmaydi.
+    // entries: [{ provider, models }] — envSeedEntries() (@yuk/parser) beradi. → nechta qo'shildi
     seedAiKeys(entries, env) {
-      if (db.prepare("SELECT 1 FROM settings WHERE key = 'ai_keys_seeded'").get()) return 0;
-      const markSeeded = () => db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_keys_seeded', ?)").run(String(now()));
-      if (rows().length) {
-        markSeeded();
-        return 0;
-      }
+      const has = (key) => Boolean(db.prepare("SELECT 1 FROM settings WHERE key = ?").get(key));
+      const mark = (key) => db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, String(now()));
+      const legacy = has("ai_keys_seeded");
       let added = 0;
       for (const { provider, models } of entries) {
+        const flag = `ai_keys_seeded:${provider}`;
+        if (has(flag) || (legacy && LEGACY_SEEDED.has(provider))) continue;
+        // .env da kalit hali yo'q bo'lsa — belgilamaymiz: yozilgach keyingi ishga tushishda qo'shiladi
         const value = env?.[ENV_KEYS[provider]];
         if (!value) continue;
-        db.prepare("INSERT INTO ai_keys (provider, label, key_enc, key_hint, models, enabled, created_at) VALUES (?, ?, NULL, ?, ?, 1, ?)")
-          .run(provider, ".env kaliti", keyHint(value), JSON.stringify(models), now());
-        added++;
+        if (!rows().some((row) => row.provider === provider)) {
+          db.prepare("INSERT INTO ai_keys (provider, label, key_enc, key_hint, models, enabled, created_at) VALUES (?, ?, NULL, ?, ?, 1, ?)")
+            .run(provider, ".env kaliti", keyHint(value), JSON.stringify(models), now());
+          added++;
+        }
+        mark(flag);
       }
-      // .env da kalit hali yo'q bo'lsa — belgilamaymiz: yozilgach keyingi ishga tushishda qo'shiladi
-      if (added) markSeeded();
       return added;
     },
 
+    // «Sinash» muvaffaqiyatli bo'ldi — model ishlayapti: dam olish bekor (bot 15 s ichida qayta ishlata boshlaydi)
+    wakeAiSlot(id) {
+      command(id, { wakeAt: now() }, (data) => ({ ...data, cooldownUntil: null, reason: null, resetAt: null }));
+    },
+
+    // «Muammoli» belgisini olib tashlash: xatolar hisobi noldan, dam olish ham bekor
+    resetAiSlotHealth(id) {
+      const time = now();
+      command(id, { healthResetAt: time, wakeAt: time }, (data) => ({ ...data, problem: null, faults: [], recent: "", cooldownUntil: null, reason: null, resetAt: null }));
+    },
+
     // Bot uchun: yoqilgan kalitlar × modellar = ulanishlar (kalit bilan). Kaliti o'qilmaganlari tashlanadi.
+    // control — boshqaruv markazining buyruqlari (wakeAiSlot, resetAiSlotHealth)
     aiConnections(access) {
       const states = slotStates();
+      const controls = slotControls();
       const out = [];
       for (const row of rows()) {
         if (row.enabled !== 1) continue;
@@ -126,7 +163,7 @@ export function createAiQueries(db, now) {
         const name = row.label || row.provider;
         for (const model of JSON.parse(row.models)) {
           const id = `${row.id}:${model}`;
-          out.push({ id, keyId: row.id, label: `${name} · ${model}`, provider: row.provider, model, apiKey, state: states[id] ?? null });
+          out.push({ id, keyId: row.id, label: `${name} · ${model}`, provider: row.provider, model, apiKey, state: states[id] ?? null, control: controls[id] ?? null });
         }
       }
       return out;

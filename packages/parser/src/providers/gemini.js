@@ -26,6 +26,12 @@ function quotaInfo(error) {
 
 export const gemini = {
   id: "gemini",
+  title: "Google Gemini",
+  free: true,
+  keyPlaceholder: "AIza…",
+  keyHelp: "Google AI Studio'da bepul kalit oling va shu yerga to'liq nusxalab qo'ying. «Tekshirish» limitdan so'rov sarflamaydi.",
+  // .env dagi kalit boshqaruv markazining «AI» ro'yxatiga o'zi qo'shiladi
+  seedFromEnv: true,
   // "-latest" taxallusi Google'ning eng yangi Flash-Lite modeliga ishora qiladi (2026-11: gemini-3.5-flash-lite).
   // Flash-Lite tez (~1.5 s) va bepul tarifda barqaror; oddiy "gemini-flash-latest" tez-tez band (503) bo'ladi.
   // Kalitingiz bilan qaysi modellar mavjudligini ko'rish: npm run parse -- --models

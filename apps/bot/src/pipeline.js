@@ -123,6 +123,8 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
   const sleep = (ms) => wait(ms, undefined, { signal: controller.signal }).catch(() => {});
 
   const claimed = new Set(); // AI'da yoki yuborish navbatida turgan e'lonlar — ikkinchi marta olinmaydi
+  const bounces = new Map(); // e'lon id → necha marta noma'lum AI xatosi bilan navbatga qaytgan (settle)
+  const MAX_BOUNCES = 3;
   let delivery = Promise.resolve(); // yuborish zanjiri (ketma-ket)
   let waiting = 0; // AI'dan o'tib, yuborilishini kutayotgan e'lonlar
   const tag = (lease) => (pool.size() > 1 ? ` [${lease.label}]` : "");
@@ -156,11 +158,13 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
   }
 
   // Navbatdan bir guruh (eng yangilari, boshqa AI olganlaridan tashqari). Guruh to'lmagan va yangi bo'lsa — [] (kutamiz)
-  function take(fill) {
-    const posts = store.takeNewPosts(size, { newest: true, exclude: [...claimed] });
+  // lease.batchSize — ulanishning o'z chegarasi (1pro: 6 ta), umumiy o'lchamdan katta bo'lmaydi
+  function take(fill, lease) {
+    const n = Math.min(size, lease?.batchSize || size);
+    const posts = store.takeNewPosts(n, { newest: true, exclude: [...claimed] });
     if (posts.length === 0) return [];
     const oldest = Math.min(...posts.map((p) => p.queuedAt ?? p.postedAt));
-    if (posts.length < size && fill > 0 && now() - oldest < fill) return [];
+    if (posts.length < n && fill > 0 && now() - oldest < fill) return [];
     for (const post of posts) claimed.add(post.id);
     return posts;
   }
@@ -197,17 +201,35 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
     return { results };
   }
 
+  // AI xato qaytarsa, natijasi yo'q e'lonlar navbatga qaytadi va boshqa ulanish ularni darhol oladi.
+  // Lekin noma'lum xato (500, 400...) e'lonning o'zidan bo'lishi ham mumkin: bitta e'lon 3 marta shunday qaytsa —
+  // cheksiz aylanmasin, "failed" bo'ladi (boshqaruv markazining «Navbat» bo'limida qayta yuborish mumkin).
+  // Limit, band, internet — ulanishning muammosi, ular sanalmaydi.
+  function settle(lease, posts, outcome) {
+    const results = [...outcome.results];
+    if (outcome.pause?.reason !== "error") return results;
+    posts.forEach((post, i) => {
+      if (i < outcome.results.length) return;
+      const count = (bounces.get(post.id) ?? 0) + 1;
+      bounces.set(post.id, count);
+      if (count >= MAX_BOUNCES) results[i] = { ok: false, error: `${count} ta AI ulanishida xato: ${lease.describe(outcome.error)}` };
+    });
+    return results;
+  }
+
   // Yuborish: takror → baza → kanal → haydovchilar, bittalab. Natijasi yo'q e'lonlar darhol navbatga qaytadi.
+  // results[i] — posts[i] ning natijasi; bo'sh joy — e'lon navbatga qaytadi
   function deliver(posts, results) {
-    const ready = posts.slice(0, results.length);
-    for (const post of posts.slice(results.length)) claimed.delete(post.id);
+    const ready = [];
+    posts.forEach((post, i) => (results[i] ? ready.push([post, results[i]]) : claimed.delete(post.id)));
     waiting += ready.length;
     delivery = delivery.then(async () => {
-      for (const [i, post] of ready.entries()) {
+      for (const [post, result] of ready) {
+        bounces.delete(post.id);
         try {
           // To'xtatilsa — qolganlari "new" bo'lib qoladi va keyingi safar qayta tahlil qilinadi
           if (controller.signal.aborted) continue;
-          const outcome = await handleParsed(post, results[i], deps);
+          const outcome = await handleParsed(post, result, deps);
           if (outcome.status === "done") {
             const other = outcome.outOfScope ? ` (+${outcome.outOfScope} tasi boshqa yo'nalish)` : "";
             const [what, whom] = outcome.kind === "mashina" ? ["bo'sh mashina", "yuk beruvchiga"] : ["yuk", "haydovchiga"];
@@ -233,7 +255,7 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
     expire();
     const lease = pool.acquire();
     if (!lease) return 0;
-    const posts = take(fill);
+    const posts = take(fill, lease);
     if (posts.length === 0) {
       lease.release();
       return 0;
@@ -244,7 +266,7 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
     } finally {
       lease.release({ posts: outcome.results.length });
     }
-    await deliver(posts, outcome.results);
+    await deliver(posts, settle(lease, posts, outcome));
     if (outcome.pause) {
       log(`AI vaqtincha ishlamayapti${tag(lease)}: ${lease.describe(outcome.error)} — ${Math.round(outcome.pause.ms / 1000)} s kutamiz`);
       await sleep(outcome.pause.ms);
@@ -252,18 +274,21 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
     return posts.length;
   }
 
-  // Bitta AI ulanishining ishi (parallel): tahlil → natijani yuborish navbatiga
+  // Bitta AI ulanishining ishi (parallel): tahlil → natijani yuborish navbatiga.
+  // Xato bo'lsa — ulanish dam oladi, e'lonlari darhol navbatga qaytadi va rejalovchi ularni boshqa ulanishga beradi
   async function lane(lease, posts) {
     let outcome = { results: [] };
     try {
       outcome = await analyse(lease, posts);
     } finally {
       lease.release({ posts: outcome.results.length });
-      deliver(posts, outcome.results);
+      deliver(posts, settle(lease, posts, outcome));
     }
     if (outcome.pause) {
-      const others = pool.size() > 1 ? ", qolganlari ishlayveradi" : "";
-      log(`AI${tag(lease)}: ${lease.describe(outcome.error)} — ${pauseText(outcome.pause.ms, now())} dam oladi${others}`);
+      const back = posts.length - outcome.results.length;
+      const moved = back && pool.size() > 1 ? `${back} ta e'lon boshqa AI'ga o'tdi, ` : "";
+      log(`AI${tag(lease)}: ${lease.describe(outcome.error)} — ${moved}o'zi ${pauseText(outcome.pause.ms, now())} dam oladi`);
+      if (outcome.pause.flagged) log(`⚠ AI${tag(lease)} «muammoli» deb belgilandi (tez-tez xato) — endi oxirgi navbatda ishlatiladi`);
     }
   }
 
@@ -295,7 +320,7 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
           await nap(ready == null ? idleMs : Math.min(Math.max(ready, 1000), 15_000));
           continue;
         }
-        const posts = take(fillWait);
+        const posts = take(fillWait, lease);
         if (posts.length === 0) {
           lease.release();
           await nap(idleMs);

@@ -24,6 +24,10 @@ function normalizeUsage(u = {}) {
 
 export const claude = {
   id: "claude",
+  title: "Anthropic Claude",
+  free: false,
+  keyPlaceholder: "sk-ant-…",
+  keyHelp: "Claude pullik: har bir so'rov uchun Anthropic hisobingizdan pul yechiladi.",
   defaultModel: "claude-opus-5-5",
   defaultConcurrency: 4,
   keyEnv: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],

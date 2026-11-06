@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import {
   aiSummaryText,
   aiTotals,
+  healthBadge,
   newModels,
   pacificDay,
   providerOptionLabel,
   secondsText,
   slotStatus,
+  sortSlots,
   testLoadText,
   testResultText,
   todayStats,
@@ -40,8 +42,10 @@ test("bugungi hisoblar: kechagi holat nolga tushadi", () => {
 test("ulanish holati: dam olish, xato, ishlayapti, tayyor, o'chirilgan", () => {
   const opts = { now: NOW, ...TZ };
   const daily = slotStatus(KEY, state({ cooldownUntil: at(13), reason: "daily" }), opts);
-  assert.deepEqual([daily.kind, daily.label, daily.detail], ["resting", "Dam olyapti", "13:00 gacha · kunlik limit"]);
+  assert.deepEqual([daily.kind, daily.label, daily.detail], ["resting", "Dam olyapti", "13:00 da qayta tekshiriladi · kunlik limit"]);
   assert.equal(slotStatus(KEY, state({ cooldownUntil: at(10, 1), reason: "minute" }), opts).detail, "10:01 gacha · daqiqalik limit");
+  assert.equal(slotStatus(KEY, state({ cooldownUntil: at(10, 1), reason: "network" }), opts).detail, "10:01 gacha · internet uzildi");
+  assert.equal(slotStatus(KEY, state({ cooldownUntil: at(10, 1), reason: "error" }), opts).detail, "10:01 gacha · xato — e'lonlar boshqa modelga berildi");
   const broken = slotStatus(KEY, state({ cooldownUntil: at(16), reason: "key" }), opts);
   assert.deepEqual([broken.kind, broken.label, broken.tone], ["error", "Xato", "critical"]);
   assert.match(broken.detail, /kalit xato · 16:00 da qayta uriniladi/);
@@ -82,10 +86,27 @@ test("yig'indi: faol, dam olayotgan, eng yaqin muddat, bugungi so'rovlar", () =>
   assert.equal(aiSummaryText(aiTotals([])), "ulanish yo'q — AI sahifasida kalit qo'shing");
 });
 
+test("«muammoli» belgisi: 24 soatdagi xatolar, eskirgani ko'rsatilmaydi, ro'yxatda birinchi", () => {
+  const HOUR = 3_600_000;
+  const bad = state({ problem: { since: NOW - 2 * HOUR, lastFaultAt: NOW - HOUR, faults: 4, error: "503 band" }, faults: [NOW - 30 * HOUR, NOW - 3 * HOUR, NOW - 2 * HOUR, NOW - HOUR] });
+  const badge = healthBadge(bad, NOW);
+  assert.deepEqual([badge.label, badge.detail, badge.error], ["Muammoli", "24 soatda 3 ta xato · oxirgi navbatda ishlatiladi", "503 band"]);
+  assert.equal(healthBadge(state({ problem: { since: 1, lastFaultAt: NOW - 25 * HOUR } }), NOW), null, "bot ishlamasa ham eskirgan belgi yo'q");
+  assert.equal(healthBadge(state(), NOW), null);
+  assert.equal(healthBadge(null, NOW), null);
+
+  const models = [{ model: "a", state: state() }, { model: "b", state: bad }, { model: "c", state: null }, { model: "d", state: bad }];
+  assert.deepEqual(sortSlots(models, NOW).map((m) => m.model), ["b", "d", "a", "c"]);
+  const t = aiTotals([{ ...KEY, models }], { now: NOW });
+  assert.equal(t.problems, 2);
+  assert.equal(aiSummaryText(t), "4 / 4 faol · 2 tasi muammoli");
+});
+
 test("modellar, provayder nomi, sinov natijasi", () => {
   assert.deepEqual(newModels(["x", "y", "z"], ["y"]), ["x", "z"]);
   assert.equal(providerOptionLabel({ title: "Google Gemini", free: true }), "Google Gemini — bepul");
   assert.equal(providerOptionLabel({ title: "Anthropic Claude", free: false }), "Anthropic Claude — pullik");
+  assert.equal(providerOptionLabel({ title: "1pro.uz (Qwen)", free: null, limitNote: "kuniga 1 mln token" }), "1pro.uz (Qwen) — kuniga 1 mln token");
   assert.equal(secondsText(1234), "1,2 s");
   assert.equal(testLoadText({ from: "Toshkent", to: "samarqand", weightT: 20, cargo: "un", truckClass: "fura", bodyType: "tent" }), "Toshkent → Samarqand vil., 20 t un · fura, tent");
   assert.equal(testLoadText({ from: "Toshkent", to: null }), "Toshkent → ?");
