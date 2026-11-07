@@ -7,8 +7,8 @@ import path from "node:path";
 import { openStore, TUNNEL_URL_KEY, tunnelUrl } from "@yuk/store";
 import { configInfo } from "../src/app.js";
 import { nginxConfig, nginxPath } from "../src/edge/nginxConfig.js";
-import { findCloudflared, findNginx, onPath, ports } from "../src/edge/tools.js";
-import { parseTunnelUrl, tunnelLineKind } from "../src/edge/tunnelLog.js";
+import { findCloudflared, findNginx, findTailscale, onPath, ports } from "../src/edge/tools.js";
+import { chooseTunnel, funnelLine, parseTunnelUrl, tailscaleStatus, tunnelLineKind } from "../src/edge/tunnelLog.js";
 
 const conf = nginxConfig({ webDist: "D:\\Yuk\\apps\\web\\dist", mimeTypes: "D:\\Yuk\\tools\\nginx-1.30.6\\conf\\mime.types" });
 
@@ -74,6 +74,62 @@ test("cloudflared loglari: manzil, ulanish, ogohlantirish", () => {
   assert.equal(tunnelLineKind("2026-11-05T12:00:02Z WRN failed to serve quic connection error=timeout"), "problem");
   assert.equal(tunnelLineKind("2026-11-05T12:00:02Z ERR Unable to reach the origin service"), "problem");
   assert.equal(tunnelLineKind("2026-11-05T12:00:00Z INF Starting metrics server on 127.0.0.1:20241/metrics"), null);
+});
+
+test("tailscale: PATH yoki odatiy o'rnatish joyi, .env dagi TAILSCALE_EXE", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "yuk-ts-"));
+  const exe = process.platform === "win32" ? "tailscale.exe" : "tailscale";
+  writeFileSync(path.join(dir, exe), "");
+  assert.equal(findTailscale({ env: { PATH: dir }, places: [] }), path.join(dir, exe));
+  assert.equal(findTailscale({ env: { PATH: "" }, places: [path.join(dir, exe)] }), path.join(dir, exe));
+  assert.equal(findTailscale({ env: { PATH: "", TAILSCALE_EXE: path.join(dir, exe) }, places: [] }), path.join(dir, exe));
+  assert.equal(findTailscale({ env: { PATH: "", TAILSCALE_EXE: path.join(dir, "yoq.exe") }, places: [path.join(dir, exe)] }), null);
+  assert.equal(findTailscale({ env: { PATH: "" }, places: [] }), null);
+});
+
+test("tailscale status: holat va doimiy manzil MagicDNS nomidan", () => {
+  const running = JSON.stringify({ BackendState: "Running", Self: { DNSName: "Yuk.tail1a2b3c.ts.net.", HostName: "yuk" } });
+  assert.deepEqual(tailscaleStatus(running), { state: "Running", url: "https://yuk.tail1a2b3c.ts.net" });
+  assert.deepEqual(tailscaleStatus({ BackendState: "NeedsLogin", Self: { DNSName: "" } }), { state: "NeedsLogin", url: null });
+  assert.deepEqual(tailscaleStatus({ BackendState: "Running", Self: { DNSName: "yuk." } }), { state: "Running", url: null }, "MagicDNS o'chiq");
+  assert.deepEqual(tailscaleStatus("bu JSON emas"), { state: null, url: null });
+});
+
+test("tailscale funnel qatorlari: tayyor, yoqish havolasi, xato", () => {
+  assert.equal(funnelLine("Available on the internet:").kind, "ready");
+  assert.equal(funnelLine("https://yuk.tail1a2b3c.ts.net/").kind, "ready");
+  assert.equal(funnelLine("|-- proxy http://127.0.0.1:80").kind, null);
+  assert.equal(funnelLine("Press Ctrl+C to exit.").kind, null);
+  assert.deepEqual(funnelLine("         https://login.tailscale.com/f/funnel?node=nAbC123"), {
+    kind: "enable",
+    link: "https://login.tailscale.com/f/funnel?node=nAbC123",
+  });
+  assert.equal(funnelLine("Funnel is not enabled on your tailnet.").kind, "problem");
+  assert.equal(funnelLine("error: listener already exists for port 443").kind, "problem");
+});
+
+test("qaysi tunnel: auto — Tailscale tayyor bo'lsa u, bo'lmasa Cloudflare; aniq tanlov — faqat o'sha", () => {
+  const ok = { state: "Running", url: "https://yuk.tail1a2b3c.ts.net" };
+  const ts = "C:\Program Files\Tailscale\tailscale.exe";
+  const cf = "C:\Program Files (x86)\cloudflared\cloudflared.exe";
+  assert.deepEqual(chooseTunnel({ tailscale: ts, cloudflared: cf, status: ok }), { use: "tailscale" });
+  assert.deepEqual(chooseTunnel({ mode: "auto", tailscale: null, cloudflared: cf }), { use: "cloudflare", note: null }, "Tailscale yo'q — hozirgidek");
+  const loggedOut = chooseTunnel({ tailscale: ts, cloudflared: cf, status: { state: "NeedsLogin", url: null } });
+  assert.equal(loggedOut.use, "cloudflare");
+  assert.match(loggedOut.note, /kirilmagan/);
+  assert.match(chooseTunnel({ tailscale: ts, cloudflared: cf, status: { state: "Running", url: null } }).note, /MagicDNS/);
+  assert.match(chooseTunnel({ tailscale: ts, cloudflared: cf, status: { state: null, url: null } }).note, /javob bermadi/);
+  // TUNNEL=cloudflare — Tailscale tayyor bo'lsa ham
+  assert.deepEqual(chooseTunnel({ mode: "Cloudflare", tailscale: ts, cloudflared: cf, status: ok }), { use: "cloudflare" });
+  // TUNNEL=tailscale — Cloudflare'ga o'tmaydi, sababini aytadi
+  assert.deepEqual(chooseTunnel({ mode: "tailscale", tailscale: ts, cloudflared: cf, status: ok }), { use: "tailscale" });
+  const strict = chooseTunnel({ mode: "tailscale", tailscale: ts, cloudflared: cf, status: { state: "Stopped", url: null } });
+  assert.equal(strict.use, null);
+  assert.match(strict.error, /Connect/);
+  assert.match(chooseTunnel({ mode: "tailscale", tailscale: null, cloudflared: cf }).error, /o'rnatilmagan/);
+  // Hech biri yo'q
+  assert.match(chooseTunnel({ tailscale: null, cloudflared: null }).error, /winget install/);
+  assert.equal(chooseTunnel({ mode: "cloudflare", tailscale: ts, cloudflared: null, status: ok }).use, null);
 });
 
 test("tunnel manzili: faqat tunnel tirik bo'lsa; boshqaruv markazi ko'rsatadi", () => {

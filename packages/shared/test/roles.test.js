@@ -71,7 +71,7 @@ test("yuk beruvchi profili: ro'yxatdan tashqarisi tashlanadi, doira hisobga olin
 
 test("sanitizeProfileFor: rolga qarab, rolsiz — xato", () => {
   assert.ok(sanitizeProfileFor("yuk_beruvchi", {}).profile);
-  assert.match(sanitizeProfileFor("haydovchi", {}).error, /Mashina turini/);
+  assert.match(sanitizeProfileFor("haydovchi", {}).error, /Transport turini/);
   assert.match(sanitizeProfileFor(null, {}).error, /haydovchi yoki yuk beruvchi/);
 });
 
@@ -86,8 +86,10 @@ test("matchTruck: yo'nalish, mashina turi va kuzov; yozilmagan narsa cheklov ema
   assert.deepEqual(matchTruck(truck(), shipper), { ok: true, reasons: [] }, "Toshkent shahri = Toshkent viloyati");
   assert.deepEqual(matchTruck(truck({ fromRegion: "buxoro", fromCity: "Buxoro" }), shipper).reasons, ["boshqa joyda"]);
   assert.deepEqual(matchTruck(truck({ toRegion: "xorazm", toCity: "Urganch" }), shipper).reasons, ["boshqa tomonga boradi"]);
-  assert.deepEqual(matchTruck(truck({ truckClass: "isuzu" }), shipper).reasons, ["isuzu kerak emas"]);
-  assert.deepEqual(matchTruck(truck({ bodyType: "ref" }), shipper).reasons, ["ref kuzov kerak emas"]);
+  assert.deepEqual(matchTruck(truck({ truckClass: "isuzu" }), shipper).reasons, ["Isuzu kerak emas"]);
+  assert.deepEqual(matchTruck(truck({ bodyType: "ref" }), shipper).reasons, ["Refrijerator / Ref kuzov kerak emas"]);
+  // «Katta fura» tanlagan yuk beruvchiga AI "fura" degan bo'sh mashinalar ham keladi
+  assert.equal(matchTruck(truck(), { ...shipper, truckClasses: ["katta_fura"] }).ok, true);
 
   // "Samarqanddan yuk olaman" — qayerga yozilmagan: istalgan joyga boradi
   assert.equal(matchTruck(truck({ toCity: null, toRegion: null, toCountry: null }), shipper).ok, true);
@@ -110,6 +112,7 @@ test("bo'sh mashina matni: qayerga yozilmasa — istalgan joyga; tonna — ko'ta
   assert.equal(truckPlaceText(truck, "to"), "istalgan joyga");
   assert.equal(truckPlaceText({}, "from"), "?");
   assert.equal(truckPlaceText({ toRegion: "xorij", toCountry: "Qozog'iston" }, "to"), "Qozog'iston");
-  assert.equal(truckVehicleText(truck), "Fura · tent · 22 t ko'taradi");
+  assert.equal(truckVehicleText(truck), "Fura · tent · 22 tonna ko'taradi");
+  assert.equal(truckVehicleText({ truckClass: "labo", weightT: 0.7 }), "Labo / Damas · 700 kg ko'taradi");
   assert.equal(truckVehicleText({}), "");
 });

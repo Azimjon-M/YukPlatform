@@ -2,17 +2,31 @@
 // o'zi ulashgan telefon raqami (ixtiyoriy; faqat shu sahifada).
 // Faol — unga yuk (yuk beruvchiga — bo'sh mashina) yuboriladi. «Admin» — Mini App'dagi «🛠 Boshqaruv» huquqi:
 // faqat shu yerdan (localhost) beriladi, internetdagi ilova orqali emas.
+// Hisobdan chiqqan (web «🚪 Chiqish»): bot yubormaydi, lekin oxirgi roli, mashinasi va yo'nalishi ko'rinib turadi.
 import { useState } from "react";
 import { PLANS, ROLES, formatContactPhone } from "@yuk/shared";
 import { get, patch, post } from "../api.js";
-import { formatNumber, profileSummary } from "../format.js";
+import { driverShown, formatNumber, profileSummary } from "../format.js";
 import { useApi, useNow } from "../hooks.js";
 import { Async, Badge, Button, Empty, PageHeader, TimeAgo, Toggle, useTitle, useToast } from "../ui.jsx";
 
-function ActiveToggle({ driver, onChanged }) {
+function ActiveToggle({ driver, onChanged, now }) {
   const notify = useToast();
   const [busy, setBusy] = useState(false);
   const [checked, setChecked] = useState(driver.active);
+  if (driverShown(driver).signedOut) {
+    // Qayta kirib rolni tanlasa (botda /start yoki web) — sozlamalari tiklanadi va yana yuk oladi
+    return (
+      <>
+        <Badge tone="warning" icon="🚪" title="Yuk yuborilmaydi. Qayta kirib rolni tanlasa — sozlamalari va yo'nalishi tiklanadi">
+          Hisobdan chiqqan
+        </Badge>
+        <div className="muted small">
+          <TimeAgo ts={driver.signedOutAt} now={now} />
+        </div>
+      </>
+    );
+  }
   if (!driver.profile) {
     return driver.registering ? (
       <Badge tone="warning" icon="◷">
@@ -62,7 +76,7 @@ function AdminToggle({ driver, onChanged }) {
 }
 
 function RoleBadge({ driver }) {
-  const role = ROLES[driver.role];
+  const role = ROLES[driverShown(driver).role];
   return (
     <>
       {role ? <Badge icon={role.icon}>{role.name}</Badge> : <Badge icon="–">Rol tanlanmagan</Badge>}
@@ -107,6 +121,7 @@ export function DriversPage() {
   const registered = items.filter((d) => d.profile);
   const active = registered.filter((d) => d.active);
   const shippers = registered.filter((d) => d.role === "yuk_beruvchi");
+  const signedOut = items.filter((d) => driverShown(d).signedOut);
 
   return (
     <>
@@ -114,7 +129,7 @@ export function DriversPage() {
         title="Haydovchilar"
         subtitle={
           state.data
-            ? `${formatNumber(registered.length)} ta ro'yxatdan o'tgan (${formatNumber(registered.length - shippers.length)} haydovchi, ${formatNumber(shippers.length)} yuk beruvchi), ${formatNumber(active.length)} tasi faol`
+            ? `${formatNumber(registered.length)} ta ro'yxatdan o'tgan (${formatNumber(registered.length - shippers.length)} haydovchi, ${formatNumber(shippers.length)} yuk beruvchi), ${formatNumber(active.length)} tasi faol${signedOut.length ? `, ${formatNumber(signedOut.length)} tasi hisobdan chiqqan` : ""}`
             : "Botda ro'yxatdan o'tgan haydovchilar va yuk beruvchilar"
         }
         actions={
@@ -145,7 +160,7 @@ export function DriversPage() {
                 </thead>
                 <tbody>
                   {data.items.map((d) => {
-                    const p = profileSummary(d.profile);
+                    const p = profileSummary(driverShown(d).profile);
                     return (
                       <tr key={d.chatId}>
                         <td data-label="Foydalanuvchi">
@@ -200,7 +215,7 @@ export function DriversPage() {
                           )}
                         </td>
                         <td data-label="Holat">
-                          <ActiveToggle key={`${d.chatId}:${d.active}`} driver={d} onChanged={state.reload} />
+                          <ActiveToggle key={`${d.chatId}:${d.active}`} driver={d} onChanged={state.reload} now={now} />
                           <AdminToggle key={`${d.chatId}:admin:${d.isAdmin}`} driver={d} onChanged={state.reload} />
                         </td>
                         <td data-label="Yangilangan" className="nowrap">

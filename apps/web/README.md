@@ -23,26 +23,46 @@ Adminlarga qo'shimcha 🛠 Boshqaruv (botdagi «🛠 Boshqaruv» tugmasi `?v=adm
 
 | Bo'lim | Nima |
 |---|---|
-| 📋 Yuklar | «Menga mos» — bot shaxsiy xabarda yuboradigan yuklar; «Hammasi» — doiradagi barcha yuklar. Qayerdan bo'yicha filtr, 6 / 24 / 72 soat. Telefonni bosib qo'ng'iroq, «Asl e'lon» — guruhdagi xabar. Har daqiqada yangilanadi |
+| 📋 Yuklar | «Menga mos» — bot shaxsiy xabarda yuboradigan yuklar: tanlangan yo'nalish bo'yicha (tepada «🧭 Andijon vil. → istalgan joy», «O'zgartirish»). Yo'nalish hali tanlanmagan bo'lsa, ro'yxat o'rniga avval «📍 Qayerdan?» → «🏁 Qayerga?» tugmalari (`src/RoutePicker.jsx`, botdagi «📋 Mos yuklar» bilan bir xil: joylar «Qayerda ishlaysiz?» ga qarab, har tugmada tanlangan muddatdagi mos yuklar soni; saqlansa bot ham shu bo'yicha yuboradi). «Hammasi» — doiradagi barcha yuklar, qayerdan bo'yicha filtr. 6 / 24 / 72 soat. Telefonni bosib qo'ng'iroq, «Asl e'lon» — guruhdagi xabar. Har daqiqada yangilanadi |
 | 🗺 Xarita | Oxirgi 24 soat: har doira — bitta shahar, kattaligi — yuk soni. «Yuklash joyi» / «Tushirish joyi». Doira bosilsa — o'sha joydagi yuklar pastda va ular qayerga borishi chiziq bilan. Uzuq chiziqli doira — e'londa faqat viloyat yoki davlat yozilgan |
 | 🚚 Mashinalar | Yuk beruvchiga: «Menga mos» — bot yuboradigan bo'sh mashinalar (yuk qayerda yuklanadi, qanday mashina kerak); «Hammasi» — doiradagi barcha bo'sh mashinalar. Lenta yuklarnikidek |
 | 🛠 Boshqaruv | Faqat adminlar: navbat va kechikish, 24 soatdagi yuklar va bo'sh mashinalar, faol foydalanuvchilar, AI ulanishlari (bugungi so'rovlar, dam olayotgani), foydalanuvchilar ro'yxati — qidirish, to'xtatish / yoqish, rolni almashtirish. Server har so'rovda tekshiradi (boshqalarga 403). Admin qilish — faqat kompyuterdagi boshqaruv markazida |
-| ⚙️ Sozlamalar | Haydovchi — mashina va yo'nalish; yuk beruvchi — yuk qayerdan qayerga, mashina turlari, kuzovlar (hech biri tanlanmasa — istalgani). Bot ham shu sozlamalar bo'yicha yuboradi. Saqlansa — botda yuborish yoqiladi |
+| ⚙️ Sozlamalar | Haydovchi — transport turi, kuzov, qancha yuk ko'taradi (Labo va yengil mashinada kg), kuzov o'lchami («Standart» / «O'zim yozaman» / «Bilmayman» — odatdagi o'lcham), yuklash tomoni, qayerda ishlaydi. Yo'nalish bu yerda yo'q — u botdagi «📋 Mos yuklar» da tanlanadi, saqlaganda server eskisini qoldiradi. Yuk beruvchi — yuk qayerdan qayerga, transport turlari, kuzovlar (hech biri tanlanmasa — istalgani). Bot ham shu sozlamalar bo'yicha yuboradi. Saqlansa — botda yuborish yoqiladi |
 
-Yuqorida: ⏸ Pauza / ▶️ Yoqish (botdagi shaxsiy xabarlar) va saytda «Chiqish».
+Yuqorida: ⏸ Pauza / ▶️ Yoqish (botdagi shaxsiy xabarlar). Sozlamalar ostida «👤 Hisob» (`src/AccountCard.jsx`):
+«🚪 Chiqish» — «Ha / Yo'q» so'ralgach `POST /pub/me/logout`: serverda hisobdan chiqiladi (bot yuk yubormaydi, menyusi
+olib tashlanadi, qayta kirganda «Siz kimsiz?» dan boshlanadi, rolni tanlasa sozlamalari tiklanadi), keyin «🚪 Hisobdan
+chiqdingiz» ekrani; saytda token ham o'chadi. Faqat tokenni o'chirish yetmaydi — Telegram'da kirish o'zi bo'ladi. Va
+«🗑 Hisobni o'chirish» — «Ha / Yo'q» so'ralgach `DELETE /pub/me`, keyin «✅ Hisobingiz o'chirildi» ekrani (qayta kirmaydi —
+kirish yangi, bo'sh hisob ochardi). Saytda rol tanlash va ro'yxatdan o'tish paytida (Hisob bo'limi ko'rinmaydi) «Chiqish»
+tepada ham bor.
 Profili yo'q haydovchi «Hammasi» ni ko'radi va ilova uni sozlamalarga olib boradi.
 
 ## Kirish
 
-- **Telegram ichida** — o'zi: Telegram bergan `initData` serverga yuboriladi, server uni bot tokeni bilan tekshiradi.
-- **Saytda** — «Telegram bilan kirish» vidjeti. U faqat @BotFather → `/setdomain` da ko'rsatilgan domenda ishlaydi;
-  `localhost` da «Bot domain invalid» chiqadi — bu normal.
+- **Botning pastki menyu tugmasidan** («🚚 Ro'yxatdan o'tish», «⚙️ Sozlamalar», «🛠 Boshqaruv») — Telegram bu yerda
+  `initData` ni **bo'sh** beradi (core.telegram.org/bots/webapps: keyboard button). Shuning uchun bot tugma manziliga
+  shu odamning kirish tokenini qo'yadi (`?t=`, `@yuk/store` `sessions.link`: bir hafta bir xil, 4–5 hafta amal qiladi);
+  ilova uni oladi, manzildan o'chiradi va server bilan ishlaydi. Saqlaganda sozlamalar serverga ham, `sendData` bilan
+  botga ham ketadi: bot chatda «✅ Saqlandi» deb javob beradi, menyuni yangilaydi, Mini App yopiladi.
+- **Inline / chap pastdagi menyu tugmasidan, t.me havolasidan** — o'zi: Telegram bergan `initData` serverga yuboriladi,
+  server uni bot tokeni bilan tekshiradi.
+- **Saytda** — avval «📲 Telegram'da ochish» (botga), keyin «Telegram bilan kirish» vidjeti. Vidjet faqat
+  @BotFather → `/setdomain` da ko'rsatilgan domenda ishlaydi; boshqa joyda «Bot domain invalid» chiqadi.
+  **Telegram ichida kirish sahifasi va vidjet hech qachon chiqmaydi.**
 - **Sinash uchun** — boshqaruv markazi → Haydovchilar → «Web'da ochish» (havola `#token=...` bilan, 12 soat).
 
 Server bergan token brauzerda saqlanadi (`localStorage`, 30 kun). Telefon raqamlari faqat kirgan haydovchiga ko'rinadi.
 
-**Server bilan aloqa bo'lmasa:** saytda «Server bilan aloqa yo'q» va «Qayta urinish». Telegram ichida esa sozlamalar
-baribir ishlaydi — eski usulda botga qaytariladi (`Telegram.WebApp.sendData`, faqat pastki menyu tugmasidan ochilganda).
+**Ro'yxatdan o'tish** (profil hali yo'q) — qadamma-qadam (`src/Steps.jsx`): haydovchi Transport → O'lcham → Tasdiqlash
+(o'lcham qadami yengil mashina, tyagach va sisternada yo'q), yuk beruvchi Yo'nalish → Transport → Tasdiqlash. Telegram'da
+pastdagi katta tugma «Keyingi» / «✅ Saqlash» va tepadagi «← Orqaga», saytda sahifa pastidagi tugmalar. Oxirgi qadamda
+tanlanganlar ro'yxati (`@yuk/shared profileRows`, bot «✅ Saqlandi» xabarida ham shular) — qatorni bosib o'sha qadamga
+o'tiladi va tugma «✅ Tayyor» bo'ladi: bosilsa yana «Tasdiqlash» ga qaytadi (`useSteps` `edit` / `returnTo`). Profil
+saqlangach, sozlamalar bitta sahifa.
+
+**Server bilan aloqa bo'lmasa (yoki menyu tugmasi eski, tokensiz):** saytda «Server bilan aloqa yo'q» va «Qayta urinish».
+Telegram ichida esa faqat sozlamalar ochiladi va botga qaytariladi (`Telegram.WebApp.sendData`, pastki menyu tugmasidan).
 
 ## Buyruqlar (YukPlatform papkasida)
 

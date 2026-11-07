@@ -9,27 +9,39 @@ Bu fayl parser, mashina profili va moslash (matching) qoidalarining asosi. Kod s
 
 | Sinf | Yuk ko'tarishi | Izoh |
 |---|---|---|
+| Katta fura | 20–40 t | Azimjon, 2026-11-07. Kuzovi fura bilan bir xil deb olindi |
+| Kamaz | 20–40 t | Azimjon, 2026-11-07: samosval va sochiluvchi yuklar (shag'al, sheben). AI'da alohida sinf `kamaz` |
 | Fura | yakka most 24 t, qo'sh most 25–26 t; eng ko'pi 40 t | 92 m³, uzunligi 14 m, eni 2.5 m, balandligi 3 m. 8 tonnadan kam yuk uchun fura chaqirilmaydi |
 | Mini fura | 9–15 t | Shacman ("chakman") 15 t |
-| Isuzu | 5–9 t | Isuzu 5 t kuzovi: 4.85 × 2.15 × 1.95 m |
+| Katta Isuzu | 6–10 t | Azimjon, 2026-11-07: «Katta isuzu: 10 t» |
+| Isuzu | 3–5 t | Azimjon: «oddiy isuzu: 5 t». Kuzovi 4.85 × 2.15 × 1.95 m. Do'st avval «5–9 t» degan edi — endi ikkiga bo'lingan |
 | Kichik | ~2.5 t | Kia (Bongo), Porter, Gazel |
 | Labo | ~0.7 t | Chevrolet Labo 700 kg, Damas |
+| Yengil mashina | 0.2–0.5 t | Azimjon, 2026-11-07: Cobalt kabi. Kuzovi yo'q, o'lchami va yuklash tomoni so'ralmaydi |
 
-- Isuzu haydovchisi **faqat o'ziga mos** yuklarni ko'rishni xohlaydi. "Hammasini ko'rish" rejimini tanlagan foydalanuvchiga hammasi ko'rsatiladi.
-- Isuzu uchun **yuklash tomoni** (ustidan, orqadan, yonidan) muhim.
+- **Odatdagi kuzov o'lchami** (ro'yxatdan o'tishdagi «Standart» va «Bilmayman», `TRUCK_CLASSES[].body`) faqat fura (13.6 × 2.45 × 2.7) va Isuzu 5 t uchun haydovchidan olingan. Katta Isuzu (7.2 × 2.4 × 2.3), Mini fura (9.6 × 2.45 × 2.6), Kamaz (5.6 × 2.4 × 1.5), Kichik (3 × 1.8 × 1.8) va Labo (2.2 × 1.4 × 1.2) — **taxmin**, haydovchidan tekshirish kerak.
+- AI faqat «oila» sinfini biladi: «katta fura» → `fura`, «katta isuzu» → `isuzu`. Katta fura haydovchisiga fura yuklari, Katta Isuzu haydovchisiga Isuzu yuklari boradi, qaysi biri sig'ishini og'irlik hal qiladi (`truckFamily` in `vehicles.js`).
+- Isuzu haydovchisi **faqat o'ziga mos** yuklarni ko'rishni xohlaydi. 2026-11-07 dan «Hammasini ko'rish» rejimi yo'q (Azimjon: «faqat transportiga mos yukni jo'natish kerak»).
+- Isuzu uchun **yuklash tomoni** muhim. Ro'yxatdan o'tishda: ustidan, orqasidan, o'ngdan, chapdan (Azimjon, 2026-11-07: «Yonidan» kerak emas). E'londagi «yonidan» = o'ng yoki chap.
 
 ### Kuzov turi bo'yicha — `BODY_TYPES`
 
-| Kuzov | Ma'nosi |
+Ro'yxat va tartib — Azimjonniki (2026-11-07). Uning ro'yxatida «Tent» ikki marta bor edi, bittaga birlashtirildi.
+
+| Kuzov (kod) | Ma'nosi |
 |---|---|
-| Tent | Hamma tomoni qalin brezentga o'xshash mato bilan yopilgan |
-| Ref / izoterm | Xolodilnikli. E'lonlarda odatda "ref kerak" deb yoziladi: hamma tomoni temir bilan yopilgan, havo o'tkazmaydi |
-| Ploshatka | Kontenerovoz = shalanda = ploshatka: bortsiz tekis platforma, konteyner ham shunga yuklanadi |
-| Tral (triler) | Pritsepi uzunroq, og'ir va negabarit yuklar uchun (40 t va undan og'ir) |
-| Samosval (tonar) | Kuzovini domkrat bilan ko'tarib, yukni to'kadi |
-| Sementavoz | Faqat sement tashiydigan dumaloq bochka-pritsep |
+| Plashatka / shalanda (`ploshatka`) | Bortsiz tekis platforma (do'st: kontenerovoz = shalanda = ploshatka). Eski `bort` va `tral` shunga qo'shildi (Azimjonning tanlovi «Yaqiniga qo'shish») |
+| Tent / furgon (`tent`) | Hamma tomoni qalin brezentga o'xshash mato bilan yopilgan |
+| Skotovoz / TIR (`skotovoz`) | Hayvonlar uchun. «TIR» AI so'zlariga qo'shilmadi — e'lonlarda u TIR karnet (xalqaro hujjat) ma'nosida keladi |
+| Refrijerator / Ref (`ref`) | Sovutgichli kuzov. E'lonlarda odatda "ref kerak" deb yoziladi |
+| Izotermik (`izoterm`) | Izolyatsiyalangan qalin kuzov, sovutgichsiz |
+| Samosval / tonar (`samosval`) | Ag'darma kuzov: domkrat bilan ko'tarib, yukni to'kadi |
+| Sisternali (`sisterna`) | Suyuq va gazsimon yuk. Eski `sementavoz` (sement bochkasi) shunga qo'shildi |
+| Konteynerovoz (`konteyner`) | Konteyner tashiydi |
 | Manipulyator | Og'ir yukni o'z krani bilan ko'tarib, o'zi yuklaydi |
-| Tyagach | Fura boshi, pritsepsiz (pritsepni tortib ketish uchun) |
+| Tyagach | Fura boshi, pritsepsiz: tayyor yuklangan pritsepni tortib ketadi. O'lcham va yuklash tomoni so'ralmaydi |
+
+- **Kuzov almashinuvi** (`BODY_ACCEPTS` in `vehicles.js`, taxmin): ref mashina izotermik yukni ham oladi (teskarisi yo'q); plashatka konteyner yukini ham oladi. Boshqasi aniq mos kelishi kerak.
 
 - **Polupritsep**: "fura" so'zidan keyin kelsa, furaning pritsepi degani.
 - **Ro'yxatdan o'tishda** haydovchidan so'raladi: mashina rusumi; kuzovning eni, bo'yi, uzunligi (shundan kub hisoblanadi); necha kg ko'tarishi; yuklash eshiklari (ust / orqa / o'ng / chap).
@@ -84,5 +96,6 @@ Bu fayl parser, mashina profili va moslash (matching) qoidalarining asosi. Kod s
 - **Sana tartibi**: "10.11" — 10-noyabrmi yoki 11-oktyabrmi? Odatda kun.oy yoziladi.
 - **Takror muddati**: bir xil yuk (o'sha telefon, o'sha yo'nalish) necha kundan keyin yangi yuk hisoblanadi? Hozir 3 kun deb olindi (`packages/shared/src/dedupe.js`). Har kuni bir xil yo'nalishda yuk beradigan zavodlar bor-yo'qligini so'rash kerak.
 - **Yuklash tomoni**: e'londa "orqadan yoki yonidan" kabi bir nechta tomon yozilsa, birortasi yetadi deb olindi. "Ustidan va orqadan" (ikkalasi ham shart) degan e'lonlar uchraydimi?
-- **Kuzov almashinuvi**: "tent kerak" yukini ref (izoterm) mashina olib keta oladimi? Hozir kuzov aniq mos kelishi kerak.
+- **Kuzov almashinuvi**: "tent kerak" yukini ref mashina olib keta oladimi? Hozir faqat ref ← izotermik va plashatka ← konteyner ruxsat etilgan.
+- **Odatdagi o'lchamlar**: Katta Isuzu, Mini fura, Kamaz, Kichik, Labo kuzovi (1-bo'limdagi taxminlar) to'g'rimi?
 - **Yo'lakay**: yuklash joyi xaritada ko'rsatiladi (lokatsiya). Buning uchun manzilni koordinataga aylantirish kerak — keyingi bosqich.

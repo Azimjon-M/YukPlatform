@@ -11,6 +11,7 @@ import { createAiQueries } from "./ai.js";
 
 export { acquireRunLock, isAlive, readRunLock, RUN_DIR } from "./lock.js";
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
+export { createSessions, LINK_PERIOD_S, SESSION_TTL_S } from "./sessions.js";
 export { TUNNEL_URL_KEY, tunnelUrl } from "./tunnel.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -120,7 +121,7 @@ function migrate(db) {
   }
   if (!users.includes("plan")) db.exec("ALTER TABLE drivers ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'");
   if (!users.includes("is_admin")) db.exec("ALTER TABLE drivers ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
-  // Telefon (2026-11-06, ixtiyoriy): foydalanuvchi botga «📱 Raqamni ulashish» bilan o'zi yuborgan raqami.
+  // Telefon (2026-11-06, ixtiyoriy): foydalanuvchi botga «📱 Raqam ulashish» bilan o'zi yuborgan raqami.
   // phone_at — qachon ulashgan; phone_asked_at — bot qachon so'ragan (bir marta so'raydi, «Keyinroq» bossa — boshqa so'ramaydi)
   if (!users.includes("phone")) db.exec("ALTER TABLE drivers ADD COLUMN phone TEXT");
   if (!users.includes("phone_at")) db.exec("ALTER TABLE drivers ADD COLUMN phone_at INTEGER");
@@ -128,6 +129,12 @@ function migrate(db) {
   // profiles — har rolning oxirgi sozlamalari (JSON: { haydovchi: {...}, yuk_beruvchi: {...} }). Rol almashganda
   // eskisi shu yerga yashiriladi, qaytganda tiklanadi (switchRole). profile ustuni — hozirgi rolniki, qidiruvlar shundan
   if (!users.includes("profiles")) db.exec("ALTER TABLE drivers ADD COLUMN profiles TEXT");
+  // Hisobdan chiqish (2026-11-07, signOut): qachon va qaysi roldan. Rol/profil ustunlari bo'shaydi (bot uni yangi odamdek
+  // ko'radi), boshqaruv markazi esa shu ikkisi va `profiles` dan oxirgi rol va sozlamalarni ko'rsatadi. Qayta kirsa — tozalanadi
+  const addSignedOut = !users.includes("signed_out_at");
+  if (addSignedOut) db.exec("ALTER TABLE drivers ADD COLUMN signed_out_at INTEGER");
+  if (!users.includes("signed_out_role")) db.exec("ALTER TABLE drivers ADD COLUMN signed_out_role TEXT");
+  if (addSignedOut) markEarlySignOuts(db);
 
   // kind — yuk (yuk bor, mashina kerak) | mashina (mashina bo'sh, yuk kerak — yuk beruvchilarga)
   const loads = db.prepare("PRAGMA table_info(loads)").all().map((c) => c.name);
@@ -140,6 +147,24 @@ function migrate(db) {
 
 const json = (value) => (value == null ? null : JSON.stringify(value));
 const parse = (text) => (text == null ? null : JSON.parse(text));
+
+// Ustunlar qo'shilishidan oldin (2026-11-07 kunduzi) hisobdan chiqqanlar: rol va profil bo'sh, `profiles` da esa
+// sozlamalari bor — bunga faqat signOut olib keladi (rol almashtirish rolni doim qo'yadi). Vaqti — yozuvning oxirgi
+// o'zgarishi, roli — saqlangan yagona rol (ikkalasi saqlangan bo'lsa, qaysi biridan chiqqani noma'lum → null)
+function markEarlySignOuts(db) {
+  const rows = db.prepare("SELECT chat_id, profiles, updated_at FROM drivers WHERE role IS NULL AND profile IS NULL AND profiles IS NOT NULL").all();
+  const mark = db.prepare("UPDATE drivers SET signed_out_at = ?, signed_out_role = ? WHERE chat_id = ?");
+  for (const row of rows) {
+    let saved = null;
+    try {
+      saved = JSON.parse(row.profiles);
+    } catch {
+      continue;
+    }
+    const roles = Object.keys(saved ?? {}).filter((role) => saved[role]);
+    if (roles.length > 0) mark.run(row.updated_at, roles.length === 1 ? roles[0] : null, row.chat_id);
+  }
+}
 
 function driverRow(row) {
   if (!row) return null;
@@ -159,6 +184,9 @@ function driverRow(row) {
     phone: row.phone ?? null,
     phoneAt: row.phone_at ?? null,
     phoneAskedAt: row.phone_asked_at ?? null,
+    // Hisobdan chiqqan bo'lsa: qachon va qaysi roldan (o'sha rolning sozlamalari — profiles[signedOutRole])
+    signedOutAt: row.signed_out_at ?? null,
+    signedOutRole: row.signed_out_role ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -306,6 +334,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     },
 
     // fields: name, username, role, profile, draft, active, plan, isAdmin, phone, phoneAskedAt — faqat berilganlari o'zgaradi.
+    // Rol berilsa (qayta kirdi) — «hisobdan chiqqan» belgisi tozalanadi.
     // Rolni tekshirish (haydovchi | yuk_beruvchi) va raqamni tozalash (@yuk/shared normalizeContactPhone) chaqiruvchining ishi.
     // phone: null — raqamni o'chiradi (phone_at ham).
     saveDriver(chatId, fields) {
@@ -322,6 +351,10 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
         columns.phone_at = fields.phone ? time : null;
       }
       if ("phoneAskedAt" in fields) columns.phone_asked_at = fields.phoneAskedAt ?? null;
+      if (fields.role) {
+        columns.signed_out_at = null;
+        columns.signed_out_role = null;
+      }
       const set = Object.entries(columns).filter(([, value]) => value !== undefined);
       const sql = `UPDATE drivers SET ${[...set.map(([k]) => `${k} = ?`), "updated_at = ?"].join(", ")} WHERE chat_id = ?`;
       db.prepare(sql).run(...set.map(([, value]) => value), time, chatId);
@@ -339,6 +372,23 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       const profiles = { ...user.profiles };
       if (user.role && user.profile) profiles[user.role] = user.profile;
       return this.saveDriver(chatId, { role, profile: profiles[role] ?? null, profiles, draft: null, active: true });
+    },
+
+    // Hisobdan chiqish (web Sozlamalar → «🚪 Chiqish», Azimjon 2026-11-07: «chiqganida Ro'yxatdan o'tish bo'lib, Mos yuklar
+    // ishlamay qolishi kerak»). Telegram'da odamni bot baribir taniydi, shuning uchun chiqish serverda: rol va sozlamalar
+    // yashiriladi (`profiles` ga, switchRole dagidek), yuborish to'xtaydi — bot uni yangi foydalanuvchidek ko'radi
+    // («Siz kimsiz?», «🚚 Ro'yxatdan o'tish»). Qayta kirib rolni tanlasa — switchRole o'sha rolning sozlamalarini tiklaydi.
+    // Raqam, ism, admin belgisi qoladi (o'chirish — deleteDriver). Qachon va qaysi roldan chiqqani yoziladi — boshqaruv
+    // markazi uni «🚪 Hisobdan chiqqan» deb, oxirgi rol va sozlamalari bilan ko'rsatadi. → yangilangan foydalanuvchi yoki null
+    signOut(chatId) {
+      const user = this.getDriver(chatId);
+      if (!user) return null;
+      if (user.signedOutAt != null && !user.role) return user; // allaqachon chiqqan — vaqti va roli o'zgarmasin
+      const profiles = { ...user.profiles };
+      if (user.role && user.profile) profiles[user.role] = user.profile;
+      this.saveDriver(chatId, { role: null, profile: null, profiles, draft: null, active: false });
+      db.prepare("UPDATE drivers SET signed_out_at = ?, signed_out_role = ? WHERE chat_id = ?").run(now(), user.role ?? null, chatId);
+      return this.getDriver(chatId);
     },
 
     // Botdagi /ochirish → «Hammasini o'chirish»: foydalanuvchining yozuvi butunlay o'chadi (ism, rol, sozlamalar, raqam).

@@ -151,14 +151,14 @@ export function MapPage({ view, onView, onNeedProfile, onAuthLost }) {
 
       {error?.code === "no_profile" ? (
         <Notice
-          title="Mashinangizni kiriting"
+          title="Transportingizni kiriting"
           action={
             <button type="button" className="primary" onClick={onNeedProfile}>
               ⚙️ Sozlamalarni to'ldirish
             </button>
           }
         >
-          «Menga mos» yuklar uchun mashina va yo'nalish kerak. Hozircha «Hammasi» ni ko'ring.
+          «Menga mos» yuklar uchun transportingiz kerak. Hozircha «Hammasi» ni ko'ring.
         </Notice>
       ) : error ? (
         <Notice title="Yuklar ochilmadi">{error.message}</Notice>

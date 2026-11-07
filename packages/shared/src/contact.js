@@ -1,5 +1,5 @@
 // Foydalanuvchining O'Z telefon raqami (ixtiyoriy). Bot profil saqlangach bir marta so'raydi:
-// «📱 Raqamni ulashish» (Telegram kontakt tugmasi) yoki «⏭ Keyinroq». Keyin — /raqam yoki ilovadagi Sozlamalar.
+// «📱 Raqam ulashish» (Telegram kontakt tugmasi) yoki «⏭ Keyinroq». Keyin — /raqam yoki ilovadagi Sozlamalar.
 // Nima uchun: botni o'chirib qo'ysa ham u bilan bog'lanish, keyin ilovaga kirish, obuna va yordam.
 // Raqam faqat boshqaruv markazida (localhost) ko'rinadi; yuk e'lonlariga va Mini App'dagi admin ro'yxatiga qo'shilmaydi.
 // E'lonlardagi (begona) raqamlar — boshqa narsa: ular @yuk/parser phones.js da.

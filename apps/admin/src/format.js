@@ -6,13 +6,14 @@ import {
   CATEGORIES,
   INTL_OPTIONS,
   LOADING_SIDES,
-  MODE_OPTIONS,
   PAYMENT_TYPES,
   REGIONS,
   TRUCK_CLASSES,
+  bodyId,
   intlOption,
   placeKey,
   regionLabel,
+  routeChosen,
 } from "@yuk/shared";
 
 const MINUTE = 60 * 1000;
@@ -60,10 +61,10 @@ export function placeText(load, side) {
   return place && !sameName(place, city ?? "") ? `${text} (${place})` : text;
 }
 
-// 0.7 → "700 kg", 22 → "22 t", 1.5 → "1,5 t"
+// 0.7 → "700 kg", 22 → "22 tonna", 1.5 → "1,5 tonna" (Azimjon: «t» emas, «tonna» — hamma joyda)
 export function weightText(weightT) {
   if (weightT == null) return null;
-  return weightT < 1 ? `${formatNumber(weightT * 1000)} kg` : `${String(weightT).replace(".", ",")} t`;
+  return weightT < 1 ? `${formatNumber(weightT * 1000)} kg` : `${String(weightT).replace(".", ",")} tonna`;
 }
 
 const UNIT_TEXT = { reys: "reys", tonna: "tonnasi", kg: "kilosi", kub: "kubi" };
@@ -90,8 +91,8 @@ export function priceText(load) {
 }
 
 export const truckClassName = (id) => TRUCK_CLASSES.find((t) => t.id === id)?.name ?? null;
-// "Ploshatka / shalanda / kontenerovoz" → "Ploshatka": ro'yxatda birinchi nomi yetadi
-export const bodyTypeName = (id) => BODY_TYPES.find((b) => b.id === id)?.name.split(" / ")[0] ?? null;
+// "Refrijerator / Ref" → "Refrijerator": ro'yxatda birinchi nomi yetadi. Eski kodlar (bort, tral, sementavoz) — yangisi nomi bilan
+export const bodyTypeName = (id) => BODY_TYPES.find((b) => b.id === bodyId(id))?.name.split(" / ")[0] ?? null;
 export const categoryName = (id) => CATEGORIES.find((c) => c.id === id)?.name ?? null;
 
 // "2 ta · Fura · tent · orqadan · dogruz"
@@ -158,6 +159,18 @@ export function capacityText(capacityKg) {
   return weightText(Math.round(capacityKg / 100) / 10);
 }
 
+// Boshqaruv markazidagi foydalanuvchi qatori. Hisobdan chiqqanda (store.signOut) rol va profil ustunlari bo'shaydi —
+// bot uni yangi odamdek ko'radi va yuk yubormaydi, lekin ma'lumot o'chmagan: oxirgi roli (signedOutRole) va o'sha
+// rolning sozlamalari (savedProfile) ko'rsatiladi, Holat'da «🚪 Hisobdan chiqqan» turadi
+export function driverShown(driver) {
+  const signedOut = !driver.role && driver.signedOutAt != null;
+  return {
+    signedOut,
+    role: driver.role ?? (signedOut ? (driver.signedOutRole ?? null) : null),
+    profile: driver.profile ?? (signedOut ? (driver.savedProfile ?? null) : null),
+  };
+}
+
 export function profileSummary(profile) {
   if (!profile) return null;
   // Yuk beruvchi: o'z mashinasi yo'q — qanday mashina va kuzov kerak (bo'sh ro'yxat — istalgani)
@@ -176,13 +189,15 @@ export function profileSummary(profile) {
   const body = bodyTypeName(v.bodyType);
   const vehicle = [truckClassName(v.truckClass), body ? body.toLowerCase() : null, capacityText(v.capacityKg)].filter(Boolean).join(" · ");
   const size = v.body ? `${formatNumber(v.body.lengthM, 2)} × ${formatNumber(v.body.widthM, 2)} × ${formatNumber(v.body.heightM, 2)} m` : null;
+  // Yo'nalishni haydovchi botdagi «📋 Mos yuklar» da tanlaydi; tanlamaguncha unga yuk yuborilmaydi
+  const chosen = routeChosen(profile);
   return {
     vehicle: vehicle || "—",
-    size,
-    from: areasText(profile.fromAreas),
-    to: areasText(profile.toAreas),
+    size: size && v.bodyGuess ? `${size} (odatdagi)` : size,
+    from: chosen ? areasText(profile.fromAreas) : "tanlanmagan — yuk bormaydi",
+    to: chosen ? areasText(profile.toAreas) : "—",
     intl: INTL_OPTIONS[intlOption(profile)]?.label ?? null,
-    mode: MODE_OPTIONS[profile.mode] ?? null,
+    mode: null,
   };
 }
 

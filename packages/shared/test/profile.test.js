@@ -1,13 +1,33 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeProfile, emptyProfile, encodeProfile, intlChoices, intlLabel, intlOption, matchLoad, regionLabel, sanitizeProfile } from "../src/index.js";
+import {
+  decodeProfile,
+  emptyProfile,
+  encodeProfile,
+  intlChoices,
+  intlLabel,
+  intlOption,
+  matchLoad,
+  regionLabel,
+  routeChosen,
+  sanitizeProfile,
+  withRoute,
+} from "../src/index.js";
 
 const PROFILE = {
-  vehicle: { truckClass: "isuzu", bodyType: "tent", capacityKg: 5000, body: { lengthM: 4.85, widthM: 2.15, heightM: 1.95 }, loadingSides: ["orqa", "yon"] },
+  vehicle: {
+    truckClass: "isuzu",
+    bodyType: "tent",
+    capacityKg: 5000,
+    body: { lengthM: 4.85, widthM: 2.15, heightM: 1.95 },
+    bodyGuess: false,
+    loadingSides: ["orqa", "yon"],
+  },
   fromAreas: ["toshkent", "andijon"],
   toAreas: ["Rossiya"],
   domestic: true,
   international: true,
+  routeAt: null,
   mode: "own",
 };
 
@@ -36,8 +56,8 @@ test("Mini App'dan kelgan begona maydonlar va noto'g'ri qiymatlar tashlanadi", (
 
 test("majburiy maydonlar va chegaralar", () => {
   assert.match(sanitizeProfile(null).error, /kelmadi/);
-  assert.match(sanitizeProfile(emptyProfile()).error, /Mashina turini/);
-  assert.match(sanitizeProfile({ vehicle: { truckClass: "fura", capacityKg: 99_000 } }).error, /tonna/);
+  assert.match(sanitizeProfile(emptyProfile()).error, /Transport turini/);
+  assert.match(sanitizeProfile({ vehicle: { truckClass: "fura", capacityKg: 99_000 } }).error, /Qancha yuk/);
   assert.match(sanitizeProfile({ vehicle: { truckClass: "fura", bodyType: "raketa", capacityKg: 20_000 } }).error, /Kuzov turi/);
   assert.match(sanitizeProfile({ vehicle: { ...PROFILE.vehicle, body: { lengthM: 40, widthM: 2, heightM: 2 } } }).error, /o'lchami/);
   assert.match(sanitizeProfile({ ...PROFILE, domestic: false, international: false }).error, /bittasini/);
@@ -71,4 +91,29 @@ test("yo'nalish doirasi: Mini App'dan kelgan uzoq davlat tashlanadi, ichki doira
   assert.equal(intlChoices().options.faqat.label, "Faqat qo'shni davlatlar");
   assert.equal(intlLabel({ domestic: true, international: true }), "O'zbekiston va qo'shni davlatlar");
   assert.equal(intlLabel({ domestic: true, international: true }, "hammasi"), "O'zbekiston va xalqaro");
+});
+
+test("yengil mashinada kuzov yo'q; «Bilmayman» belgisi; eski kuzov kodi yangisiga o'tadi", () => {
+  const car = sanitizeProfile({ vehicle: { truckClass: "yengil_avto", bodyType: "tent", capacityKg: 400, body: PROFILE.vehicle.body, loadingSides: ["orqa"] } }).profile;
+  assert.deepEqual([car.vehicle.bodyType, car.vehicle.body, car.vehicle.loadingSides], [null, null, []]);
+  const guess = sanitizeProfile({ vehicle: { ...PROFILE.vehicle, bodyGuess: true } }).profile;
+  assert.equal(guess.vehicle.bodyGuess, true);
+  assert.equal(sanitizeProfile({ vehicle: { ...PROFILE.vehicle, body: null, bodyGuess: true } }).profile.vehicle.bodyGuess, false, "o'lchamsiz — belgi ham yo'q");
+  assert.equal(sanitizeProfile({ vehicle: { ...PROFILE.vehicle, bodyType: "bort" } }).profile.vehicle.bodyType, "ploshatka");
+  assert.equal(sanitizeProfile({ vehicle: { truckClass: "katta_fura", bodyType: "konteyner", capacityKg: 40_000 } }).error, undefined);
+});
+
+test("yo'nalish: formadan saqlaganda eskisi qoladi; tanlanmaguncha — routeChosen false", () => {
+  const fresh = sanitizeProfile({ ...PROFILE, fromAreas: [], toAreas: [] }).profile;
+  assert.equal(routeChosen(fresh), false, "yangi haydovchi: yo'nalish tanlanmagan");
+  assert.equal(routeChosen(PROFILE), true, "2026-11-07 gacha yo'nalish formada edi — joylari bor");
+  assert.equal(routeChosen({ ...fresh, routeAt: 1 }), true, "«Hamma joy» tanlangan");
+
+  const before = { ...PROFILE, fromAreas: ["samarqand"], toAreas: ["Qozog'iston"], routeAt: 123 };
+  const saved = withRoute(fresh, before);
+  assert.deepEqual([saved.fromAreas, saved.toAreas, saved.routeAt], [["samarqand"], ["Qozog'iston"], 123]);
+  const domestic = withRoute({ ...fresh, international: false }, before);
+  assert.deepEqual(domestic.toAreas, [], "xalqaro o'chirildi — xorijiy joy tashlanadi");
+  assert.equal(withRoute(fresh, null).routeAt, null);
+  assert.equal(sanitizeProfile({ ...PROFILE, routeAt: 55 }).profile.routeAt, 55);
 });

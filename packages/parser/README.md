@@ -177,7 +177,7 @@ Keyin modellar boshqaruv markazida o'zgartiriladi. `npm run parse` esa avvalgide
 
 - `postType`: `yuk_bor` (yuk bor, mashina kerak) / `mashina_bor` (bo'sh mashina yuk qidiryapti) / `boshqa`
 - Bitta e'londa bir nechta yuk bo'lishi mumkin, shuning uchun `loads` — massiv
-- Mashina ikki belgi bilan yoziladi: `truckClass` — o'lchami (fura, mini_fura, isuzu, kichik, labo), `bodyType` — kuzov turi (tent, ref, ploshatka...). E'londa yozilmagan bo'lsa `null`
+- Mashina ikki belgi bilan yoziladi: `truckClass` — o'lchami (kamaz, fura, mini_fura, isuzu, kichik, labo, yengil_avto; «katta fura» → fura, «katta isuzu» → isuzu), `bodyType` — kuzov turi (tent, ref, ploshatka, skotovoz, izoterm, konteyner...). E'londa yozilmagan bo'lsa `null`
 - `weightT` — oraliq yozilsa ("20 22 ton"), kattasi olinadi: haydovchi "ko'p yozsa yozsin, kam yozmasin" degan
 - `price` — `priceUnit` bo'yicha: butun reysga, kilosiga, tonnasiga yoki kubiga. "3800" so'm reys narxi = 3 800 000
 - Viloyat, mashina, narx birligi va to'lov kodlari `packages/shared` dan olinadi; qoidalar manbai — [docs/haydovchi-suhbati.md](../../docs/haydovchi-suhbati.md)

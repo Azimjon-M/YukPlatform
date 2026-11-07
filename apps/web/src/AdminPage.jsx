@@ -78,9 +78,18 @@ function Overview({ data }) {
 
 function UserRow({ user, now, onChanged }) {
   const [busy, setBusy] = useState(false);
-  const role = ROLES[user.role];
+  // Hisobdan chiqqan: rol bo'sh (bot yubormaydi), sozlamalari saqlangan — qaysi roldan chiqqanini ko'rsatamiz
+  const role = ROLES[user.role ?? (user.signedOut ? user.signedOutRole : null)];
   const otherRole = user.role === "haydovchi" ? "yuk_beruvchi" : user.role === "yuk_beruvchi" ? "haydovchi" : null;
-  const status = user.hasProfile ? (user.active ? "faol" : "pauzada") : user.registering ? "ro'yxatdan o'tyapti" : "sozlamalar yo'q";
+  const status = user.signedOut
+    ? "🚪 hisobdan chiqqan"
+    : user.hasProfile
+      ? user.active
+        ? "faol"
+        : "pauzada"
+      : user.registering
+        ? "ro'yxatdan o'tyapti"
+        : "sozlamalar yo'q";
 
   async function change(body, done) {
     setBusy(true);
@@ -182,7 +191,9 @@ export function AdminPage({ onAuthLost }) {
     setUsers((s) => ({
       ...s,
       items: s.items.map((u) =>
-        u.chatId === updated.chatId ? { ...u, role: updated.role, active: updated.active, hasProfile: Boolean(updated.profile), registering: false } : u,
+        u.chatId === updated.chatId
+          ? { ...u, role: updated.role, active: updated.active, hasProfile: Boolean(updated.profile), registering: false, signedOut: false }
+          : u,
       ),
     }));
   }, []);

@@ -200,6 +200,23 @@ main {
   opacity: 0.85;
 }
 
+/* Nom va ostida izoh («Kamaz» / «samosval, shag'al-sheben...») */
+.chip-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chip .chip-main small.note {
+  white-space: normal;
+}
+
+/* Ro'yxatdan o'tishning oxirgi qadamida: yo'nalish botda tanlanadi */
+.route-note {
+  margin: 0 4px 12px;
+}
+
 .field {
   display: flex;
   align-items: center;

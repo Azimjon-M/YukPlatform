@@ -43,13 +43,25 @@ export function useScopeChoices(scope) {
 
 export const OPEN_FROM_MENU = "Saqlash uchun formani botdagi pastki menyudan — «⚙️ Sozlamalar» tugmasi bilan oching.";
 
-// Saqlash: server bilan aloqa bo'lsa — server orqali (istalgan joydan ochilganda ham ishlaydi);
-// bo'lmasa, Telegram ichida — botga sendData bilan (faqat pastki menyudagi tugmadan ochilganda).
-// → { me } (server saqladi) | { sent: true } (botga ketdi, Mini App yopiladi) | { preview } (oddiy brauzer, server yo'q) | {}
+// Saqlash: server bilan aloqa bo'lsa — server orqali (istalgan joydan ochilganda ham ishlaydi).
+// Botning pastki menyu tugmasidan ochilgan bo'lsa (canSendData) — keyin botga ham sendData bilan yuboriladi:
+// bot chatda «✅ Saqlandi» deb javob beradi, menyuni yangilaydi («🚚 Ro'yxatdan o'tish» → «⚙️ Sozlamalar»), birinchi
+// marta bo'lsa raqam so'raydi; Mini App o'zi yopiladi. Server bilan aloqa yo'q bo'lsa — faqat botga.
+// → { me?, sent? } (me — server saqladi, sent — botga ketdi) | { preview } (oddiy brauzer, server yo'q) | {}
 export async function submitProfile({ online, role, profile }) {
-  if (online) return { me: await saveProfile(profile, role) };
+  const payload = { type: "profile", role, profile };
+  if (online) {
+    try {
+      const me = await saveProfile(profile, role);
+      if (canSendData) sendToBot(payload);
+      return { me, sent: canSendData };
+    } catch (error) {
+      // Server javob bermadi, lekin bot bor — sozlamalar baribir saqlanadi (bot o'zi tekshiradi)
+      if (error.code !== "offline" || !canSendData) throw error;
+    }
+  }
   if (canSendData) {
-    sendToBot({ type: "profile", role, profile });
+    sendToBot(payload);
     return { sent: true };
   }
   if (inTelegram) {

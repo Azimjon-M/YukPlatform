@@ -1,6 +1,7 @@
-// Tashqi dasturlarni topish: nginx va cloudflared (.exe). Ular npm paketi emas — kompyuterga alohida o'rnatiladi.
+// Tashqi dasturlarni topish: nginx, cloudflared va tailscale (.exe). Ular npm paketi emas — kompyuterga alohida o'rnatiladi.
 //   nginx       — YukPlatform/tools/nginx-<versiya>/nginx.exe (nginx.org dan, README), yoki .env dagi NGINX_EXE, yoki PATH
 //   cloudflared — `winget install --id Cloudflare.cloudflared`, yoki .env dagi CLOUDFLARED_EXE, yoki PATH
+//   tailscale   — tailscale.com/download (Windows ilovasi), yoki .env dagi TAILSCALE_EXE, yoki PATH
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +53,17 @@ export function findCloudflared({ env = process.env, places = CLOUDFLARED_PLACES
   const explicit = fromEnv(env.CLOUDFLARED_EXE);
   if (explicit !== undefined) return explicit;
   return onPath(exeName("cloudflared"), env) ?? places.find((file) => existsSync(file)) ?? null;
+}
+
+// Tailscale Windows ilovasi CLI'ni "Program Files\Tailscale" ga qo'yadi (PATH ga ham qo'shadi, lekin yangi oynalarda)
+const TAILSCALE_PLACES = WINDOWS
+  ? ["C:\\Program Files\\Tailscale\\tailscale.exe", "C:\\Program Files (x86)\\Tailscale\\tailscale.exe"]
+  : ["/usr/bin/tailscale", "/usr/local/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"];
+
+export function findTailscale({ env = process.env, places = TAILSCALE_PLACES } = {}) {
+  const explicit = fromEnv(env.TAILSCALE_EXE);
+  if (explicit !== undefined) return explicit;
+  return onPath(exeName("tailscale"), env) ?? places.find((file) => existsSync(file)) ?? null;
 }
 
 // Portlar .env dan (server.js, nginx va tunnel bir xil o'qiydi)

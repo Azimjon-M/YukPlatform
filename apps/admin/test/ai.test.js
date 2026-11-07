@@ -108,12 +108,12 @@ test("modellar, provayder nomi, sinov natijasi", () => {
   assert.equal(providerOptionLabel({ title: "Anthropic Claude", free: false }), "Anthropic Claude — pullik");
   assert.equal(providerOptionLabel({ title: "1pro.uz (Qwen)", free: null, limitNote: "kuniga 1 mln token" }), "1pro.uz (Qwen) — kuniga 1 mln token");
   assert.equal(secondsText(1234), "1,2 s");
-  assert.equal(testLoadText({ from: "Toshkent", to: "samarqand", weightT: 20, cargo: "un", truckClass: "fura", bodyType: "tent" }), "Toshkent → Samarqand vil., 20 t un · fura, tent");
+  assert.equal(testLoadText({ from: "Toshkent", to: "samarqand", weightT: 20, cargo: "un", truckClass: "fura", bodyType: "tent" }), "Toshkent → Samarqand vil., 20 tonna un · fura, tent");
   assert.equal(testLoadText({ from: "Toshkent", to: null }), "Toshkent → ?");
   assert.deepEqual(testResultText({ ok: true, ms: 1200, loads: [{ from: "Toshkent", to: "Samarqand", weightT: 20, cargo: "un" }] }), {
     ok: true,
     title: "✓ 1,2 s",
-    text: "Toshkent → Samarqand, 20 t un",
+    text: "Toshkent → Samarqand, 20 tonna un",
   });
   assert.equal(testResultText({ ok: true, ms: 900, loads: [] }).text, "Javob keldi, lekin yuk ajratilmadi — boshqa modelni sinab ko'ring");
   assert.deepEqual(testResultText({ ok: false, error: "Kunlik limit tugadi" }), { ok: false, title: "✖ Ishlamadi", text: "Kunlik limit tugadi" });

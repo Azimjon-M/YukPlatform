@@ -16,10 +16,8 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 const DAY_S = 24 * 60 * 60;
 export const AUTH_MAX_AGE_S = DAY_S; // Telegram ma'lumoti 24 soatdan eski bo'lsa — qayta kirish kerak
-export const SESSION_TTL_S = 30 * DAY_S;
 
 const hmac = (key, text) => createHmac("sha256", key).update(text).digest();
-const b64url = (buffer) => Buffer.from(buffer).toString("base64url");
 
 // Ikki hex/bayt qatorni vaqt bo'yicha teng solishtirish (qaysi belgida farq qilganini vaqtdan bilib bo'lmasin)
 function sameHex(expected, given) {
@@ -85,35 +83,8 @@ export function verifyLoginWidget(data, botToken, { now = Date.now(), maxAgeS = 
   return user ? { user } : { error: "Foydalanuvchi ma'lumoti yo'q" };
 }
 
-// secret — data/secret.key (32 bayt). Undan alohida kalit hosil qilinadi: AI kalitlarini shifrlash kaliti bilan aralashmasin.
-export function createSessions(secret, { now = () => Date.now(), ttlS = SESSION_TTL_S } = {}) {
-  if (!secret) throw new Error("Sessiya uchun data/secret.key kerak");
-  const key = hmac(secret, "yuk-web-session-v1");
-  const sign = (body) => b64url(hmac(key, body));
-  return {
-    // → token (matn); ttl — soniya
-    issue(uid, { ttl = ttlS } = {}) {
-      const body = b64url(JSON.stringify({ uid, exp: Math.floor(now() / 1000) + ttl }));
-      return `${body}.${sign(body)}`;
-    },
-    // → uid yoki null (buzilgan, boshqa kalit bilan imzolangan yoki muddati o'tgan)
-    verify(token) {
-      if (typeof token !== "string" || token.length > 512) return null;
-      const [body, signature, extra] = token.split(".");
-      if (!body || !signature || extra !== undefined) return null;
-      const expected = Buffer.from(sign(body));
-      const given = Buffer.from(signature);
-      if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
-      try {
-        const { uid, exp } = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-        if (!Number.isSafeInteger(uid) || !(exp > now() / 1000)) return null;
-        return uid;
-      } catch {
-        return null;
-      }
-    },
-  };
-}
+// Sessiya tokeni — @yuk/store sessions.js (bot ham pastki menyu tugmasi uchun shu bilan token yaratadi)
+export { createSessions, SESSION_TTL_S } from "@yuk/store";
 
 // Testlar uchun: Telegram qanday imzolasa, xuddi shunday imzolangan initData / vidjet ma'lumoti
 export function signWebAppData(fields, botToken) {

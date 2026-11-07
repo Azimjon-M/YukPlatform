@@ -13,14 +13,15 @@
   Rolni almashtirish — pastki menyudagi «🔄 Rolni almashtirish» yoki `/rol`. Har rolning sozlamalari alohida saqlanadi (`store.switchRole`): yuk beruvchi bo'lib, keyin haydovchiga qaytsa, mashinasi va yo'nalishi tiklanadi («Oldingi sozlamalaringiz tiklandi»), qaytadan so'ralmaydi. Admin — rol emas: `ADMIN_IDS` yoki boshqaruv markazidagi belgi; adminning menyusida «🛠 Boshqaruv» (Mini App ichida).
   Pullik obuna hali yo'q: bazada `plan` ustuni (hammasi `free`) va `planAllows()` (`packages/shared/src/roles.js`) — keyin shu yerda cheklanadi.
 
-- **Pastki menyu** — yozuv qatori ostida doim turadigan tugmalar (javob xabariga tugma yopishtirilmaydi):
+- **Pastki menyu** — yozuv qatori ostidagi tugmalar (javob xabariga tugma yopishtirilmaydi). Yig'iladi: yozish qatorining o'ng tomonidagi Telegram belgisi menyuni ochib-yopadi (`is_persistent` yo'q, 2026-11-07). Bot har javobi va har yuk xabari bilan menyuni yuboradi — yopilgan menyu yangi xabar kelganda yana ochiladi (bot chat ochilganini bilmaydi):
 
   | Tugma | Nima qiladi |
   |---|---|
-  | 📋 Mos yuklar / 🚚 Bo'sh mashinalar | Rolga qarab: oxirgi 24 soatdagi mos yuklar yoki bo'sh mashinalar (eng yangi 5 tasi) |
+  | 📋 Mos yuklar / 🚚 Bo'sh mashinalar | Haydovchi: avval «📍 Qayerdan?» → «🏁 Qayerga?» (tugmalar, har birida oxirgi 24 soatdagi mos yuklar soni; «🔁 oxirgi yo'nalish», «🌐 Hamma joy»), keyin shu yo'nalishdagi mos yuklar (eng yangi 5 tasi). Tanlangan yo'nalish saqlanadi — yangi yuklar ham shu bo'yicha keladi. Yuk beruvchi: darhol oxirgi 24 soatdagi mos bo'sh mashinalar |
   | 🚚 Ro'yxatdan o'tish / ⚙️ Sozlamalar | Mini App formasini ochadi (`MINIAPP_URL` bo'lsa). Bo'lmasa — chatda savol-javob |
   | ⏸ Pauza / ▶️ Davom ettirish | Yuk yuborishni to'xtatadi yoki yoqadi. Tugma yozuvi holatga qarab almashadi |
-  | 📱 Ilovalar | Android/iPhone havolalari yoki APK fayl (bo'lmasa "tez orada"); kanal — faqat `CHANNEL_LOADS=1` bo'lsa |
+  | 📱 Raqam ulashish | Doim `request_contact`: bir bosishda raqamni ulashadi (raqami bor odamda — yangilaydi). Ko'rish/almashtirish — `/raqam` |
+  | `/ilovalar` | Android/iPhone havolalari yoki APK fayl (bo'lmasa "tez orada"); kanal — faqat `CHANNEL_LOADS=1` bo'lsa. 2026-11-07 gacha menyuda «📱 Ilovalar» tugmasi edi — eski menyuda bosilsa ham ishlaydi |
   | 🔄 Rolni almashtirish | `/rol` bilan bir xil: hozirgi rol va «Haydovchiman» / «Yuk beruvchiman» tugmalari. Faqat rol tanlangach ko'rinadi |
   | ❓ Yordam | Yordam |
   | 🛠 Boshqaruv | Faqat adminlarga: Mini App'ning boshqaruv bo'limi (`?v=admin`) |
@@ -41,7 +42,7 @@
    | `CHANNEL_LOADS` | `1` | Yuklarni kanalga ham joylash. Standart — **yo'q** (2026-11-06): yuklar faqat mos haydovchilarga shaxsiy xabarda boradi. Kanal va guruh keyin boshqa maqsadda ishlatiladi |
    | `ADMIN_IDS` | `123456789` | Adminlar: `/holat` buyrug'i va menyudagi «🛠 Boshqaruv». O'z id'ingizni botga `/id` yozib bilasiz. Boshqaruv markazida ham «Admin» qilish mumkin |
    | `MINIAPP_URL` | `https://yuk-ekspert.pages.dev` | Mini App manzili ([qanday joylash](../web/README.md)). Bo'sh bo'lsa — chatda savol-javob |
-   | `ANDROID_URL`, `IOS_URL` | `https://play.google.com/...` | Ixtiyoriy: «📱 Ilovalar» tugmasidagi havolalar |
+   | `ANDROID_URL`, `IOS_URL` | `https://play.google.com/...` | Ixtiyoriy: `/ilovalar` dagi havolalar |
    | `APK_FILE` | `data/apk/yuk-ekspert.apk` | Ixtiyoriy: Android o'rnatish fayli (50 MB gacha), bot o'zi yuboradi |
    | `ROUTE_SCOPE` | `qoshni` | Qaysi yo'nalishlar: `qoshni` (standart) — O'zbekiston ichi va O'zbekiston ↔ Qozog'iston, Qirg'iziston, Tojikiston, Turkmaniston, Afg'oniston; `ichki` — faqat O'zbekiston ichi; `hammasi` — cheklovsiz. Haydovchi sozlamalarida (savol-javob, Mini App) ham faqat shu doiradagi davlatlar chiqadi |
    | `POST_MAX_AGE_HOURS` | `3` | Joylanganiga shuncha soatdan oshgan e'lon AI'ga bormaydi: boshqaruv markazida «Tayyor», izohi «Eskirgan». Bot o'chib turganda to'plangan kechagi e'lonlar kanalga "yangi yuk" bo'lib chiqmaydi va bepul AI limitini yemaydi. `0` — cheklovsiz. `--dry-run` bu cheklovni ishlatmaydi |
@@ -118,8 +119,9 @@ guruh (bot admin)  ──┘    AI → takror? → baza             └─► «
 | `src/config.js` | `.env` sozlamalarini tekshiradi (qiymatlarni ekranga chiqarmaydi) |
 | `src/bot.js` | grammY: buyruqlar, pastki menyu tugmalari, Mini App ma'lumoti, guruh xabarlari, kanalga va haydovchiga yuborish |
 | `src/menu.js` | Pastki menyu (reply keyboard) va Mini App manzili |
-| `src/wizard.js` | Chatdagi savol-javob (haydovchi va yuk beruvchi), Mini App bo'lmasa ishlatiladi (Telegram'siz test qilinadi) |
+| `src/wizard.js` | Chatdagi savol-javob (haydovchi: transport → kuzov → sig'im → o'lcham → yuklash tomoni → qayerda ishlaydi; yuk beruvchi: yo'nalish → transport → kuzov), Mini App bo'lmasa ishlatiladi (Telegram'siz test qilinadi) |
+| `src/route.js` | «📋 Mos yuklar» dagi yo'nalish tanlash: tugmalar (`mr:f:<joy>`, `mr:t:<qayerdan>:<qayerga>`, `mr:last`, `mr:back`), joylar «Qayerda ishlaysiz?» ga qarab (faqat O'zbekiston — viloyatlar; qo'shnilar bilan — davlatlar ham). Joylar va sonlar `@yuk/shared` `route.js` da — web'dagi «📋 Yuklar» ham shundan |
 | `src/format.js` | Yuk va bo'sh mashina xabarining ko'rinishi |
-| `src/pipeline.js` | Navbat → AI → takror → yuborish; limitlarda kutish |
+| `src/pipeline.js` | Navbat → AI → takror → yuborish; limitlarda kutish. Yo'nalishni hali tanlamagan haydovchiga yuk yuborilmaydi (`routeChosen`) |
 
 **Texnologiya:** Node.js + grammY (+ auto-retry: Telegram "juda tez" desa, kutib qayta yuboradi). Testlar soxta Telegram bilan ishlaydi: `npm test`.

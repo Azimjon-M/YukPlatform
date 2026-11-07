@@ -2,6 +2,7 @@
 // shuning uchun "JSON buzilib keldi" degan muammo bo'lmaydi.
 // Maydonlar ma'nosi: docs/haydovchi-suhbati.md va prompt.js dagi qoidalar.
 import {
+  AI_TRUCK_CLASS_IDS,
   BODY_TYPE_IDS,
   CATEGORY_IDS,
   CURRENCIES,
@@ -10,7 +11,6 @@ import {
   POST_TYPE_IDS,
   PRICE_UNIT_IDS,
   REGION_IDS,
-  TRUCK_CLASS_IDS,
 } from "@yuk/shared";
 
 const nullable = (schema) => ({ anyOf: [schema, { type: "null" }] });
@@ -33,8 +33,9 @@ export const LOAD_PROPERTIES = {
   weightT: nullable({ type: "number" }),
   volumeM3: nullable({ type: "number" }),
   pallets: nullable({ type: "integer" }),
-  // Mashina: sinfi (o'lchami) va kuzov turi — faqat e'londa aytilgan bo'lsa
-  truckClass: oneOf(TRUCK_CLASS_IDS),
+  // Mashina: sinfi (o'lchami) va kuzov turi — faqat e'londa aytilgan bo'lsa. "Katta fura" / "Katta Isuzu" AI uchun
+  // alohida emas (fura / isuzu): ularni og'irlik ajratadi (@yuk/shared AI_TRUCK_CLASSES)
+  truckClass: oneOf(AI_TRUCK_CLASS_IDS),
   bodyType: oneOf(BODY_TYPE_IDS),
   vehicleCount: nullable({ type: "integer" }),
   loadingSides: { type: "array", items: { type: "string", enum: LOADING_SIDE_IDS } },

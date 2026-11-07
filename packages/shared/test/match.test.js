@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
+import { bodyFits,
   findDrivers,
   isInternational,
   loadFitsVehicle,
@@ -26,7 +26,9 @@ test("kuzov o'lchamidan kub, palet va sig'im", () => {
   assert.equal(vehiclePallets(FURA), 33, "13.6 m furaga 33 ta yevropalet");
   assert.equal(vehiclePallets(ISUZU), 8);
   assert.equal(vehicleVolumeM3({}), null);
-  assert.equal(vehicleCapacityKg({ truckClass: "isuzu" }), 9000, "sig'im yozilmasa — sinfning eng ko'pi");
+  assert.equal(vehicleCapacityKg({ truckClass: "isuzu" }), 5000, "sig'im yozilmasa — sinfning eng ko'pi (Isuzu 5 t)");
+  assert.equal(vehicleCapacityKg({ truckClass: "katta_isuzu" }), 10000);
+  assert.equal(vehiclePallets({ ...FURA, bodyType: "samosval" }), null, "samosvalga palet qo'yilmaydi");
   assert.equal(vehicleCapacityKg(ISUZU), 5000);
 });
 
@@ -74,12 +76,11 @@ test("yo'nalish: viloyat, Toshkent shahri = viloyati, davlat nomi, qaytish yuki"
   assert.equal(routeMatches(fromRussia, { international: true, fromAreas: ["Qozog'iston"] }).ok, false);
 });
 
-test("'hammasi' rejimi mashinani tekshirmaydi, yo'nalishni tekshiradi", () => {
+test("eski «hammasini ko'rish» (mode all) endi yo'q: mashinaga mos bo'lmagan yuk yuborilmaydi", () => {
   const big = load({ weightT: 24, truckClass: "fura" });
   const isuzuDriver = { vehicle: ISUZU, mode: "own", fromAreas: ["toshkent_sh"] };
   assert.equal(matchLoad(big, isuzuDriver).ok, false);
-  assert.equal(matchLoad(big, { ...isuzuDriver, mode: "all" }).ok, true);
-  assert.equal(matchLoad(big, { ...isuzuDriver, mode: "all", fromAreas: ["andijon"] }).ok, false);
+  assert.equal(matchLoad(big, { ...isuzuDriver, mode: "all" }).ok, false, "bazadagi eski profil ham");
 });
 
 test("yuk kimlarga yuboriladi", () => {
@@ -90,4 +91,26 @@ test("yuk kimlarga yuboriladi", () => {
   ];
   assert.deepEqual(findDrivers(load({ weightT: 20 }), drivers).map((d) => d.id), [1]);
   assert.deepEqual(findDrivers(load({ weightT: 3 }), drivers).map((d) => d.id), [1, 2]);
+});
+
+test("katta fura va katta Isuzu: AI «fura» / «isuzu» degan yuklarni oladi, og'irlikni sig'im hal qiladi", () => {
+  const kattaFura = { truckClass: "katta_fura", bodyType: "tent", capacityKg: 40_000 };
+  const fura = { truckClass: "fura", bodyType: "tent", capacityKg: 25_000 };
+  assert.equal(loadFitsVehicle(load({ truckClass: "fura", weightT: 35 }), kattaFura).ok, true);
+  assert.deepEqual(loadFitsVehicle(load({ truckClass: "fura", weightT: 35 }), fura).reasons, ["og'irligi 35 tonna, mashina 25 tonna ko'taradi"]);
+  assert.equal(loadFitsVehicle(load({ truckClass: "isuzu", weightT: 8 }), { truckClass: "katta_isuzu", capacityKg: 10_000 }).ok, true);
+  assert.deepEqual(loadFitsVehicle(load({ truckClass: "kamaz" }), fura).reasons, ["Kamaz kerak"], "Kamaz yuki furaga emas");
+  assert.deepEqual(loadFitsVehicle(load({ weightT: 0.3 }), { truckClass: "yengil_avto", capacityKg: 200 }).reasons, ["og'irligi 300 kg, mashina 200 kg ko'taradi"]);
+});
+
+test("kuzov almashinuvi: ref izotermik yukni ham oladi, plashatka — konteynerni; eski kodlar (bort, tral) — plashatka", () => {
+  assert.equal(bodyFits("izoterm", "ref"), true);
+  assert.equal(bodyFits("ref", "izoterm"), false, "sovutgichsiz kuzov ref yukini olmaydi");
+  assert.equal(bodyFits("konteyner", "ploshatka"), true);
+  assert.equal(bodyFits("bort", "ploshatka"), true);
+  assert.equal(bodyFits("tral", "ploshatka"), true);
+  assert.equal(bodyFits("sementavoz", "sisterna"), true);
+  assert.equal(bodyFits("tent", "ref"), false);
+  assert.equal(bodyFits(null, "ref"), true, "kuzov aytilmagan — cheklov yo'q");
+  assert.deepEqual(loadFitsVehicle(load({ bodyType: "ref" }), { bodyType: "tent" }).reasons, ["Refrijerator / Ref kuzov kerak"]);
 });

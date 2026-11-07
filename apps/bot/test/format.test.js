@@ -34,7 +34,7 @@ test("joy nomi: avval viloyat, keyin shahar; tuman, faqat viloyat, xorij", () =>
 
 test("og'irlik va narx", () => {
   assert.equal(weightText(0.7), "700 kg");
-  assert.equal(weightText(7.5), "7,5 t");
+  assert.equal(weightText(7.5), "7,5 tonna");
   assert.equal(weightText(null), null);
   assert.equal(priceText(LOAD), "3 800 000 so'm · naqd");
   assert.equal(priceText({ price: 200, priceUnit: "kg", currency: "UZS" }), "200 so'm / kilosi");

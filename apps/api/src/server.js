@@ -17,7 +17,8 @@ import { loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
 import { createProcessManager } from "./processes.js";
 import { createPublicApp } from "./public.js";
-import { findCloudflared, findNginx } from "./edge/tools.js";
+import { createBotMessenger } from "./botMessage.js";
+import { findCloudflared, findNginx, findTailscale } from "./edge/tools.js";
 import { createSessions } from "./telegramAuth.js";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -30,7 +31,7 @@ const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tash
 const log = (message) => console.log(`[${time()}] ${message}`);
 
 // AUTOSTART bo'sh yoki yozilmagan — hammasi (nginx va tunnel — kompyuterda o'rnatilgan bo'lsa); "none" — hech biri
-const defaults = [findNginx() && "nginx", findCloudflared() && "tunnel", "bot", "collector"].filter(Boolean).join(",");
+const defaults = [findNginx() && "nginx", (findCloudflared() || findTailscale()) && "tunnel", "bot", "collector"].filter(Boolean).join(",");
 const wanted = process.env.AUTOSTART?.trim() || defaults;
 const autostart = process.argv.includes("--no-autostart") || wanted === "none" ? [] : wanted.split(/[,\s]+/).filter(Boolean);
 
@@ -56,7 +57,13 @@ const app = createApp({
   sessions,
   publicUrl: PUBLIC_LOCAL_URL,
 });
-const publicApp = createPublicApp({ store, sessions, scope: routeScopeFrom(), webDist: path.join(ROOT, "apps/web/dist") });
+const publicApp = createPublicApp({
+  store,
+  sessions,
+  scope: routeScopeFrom(),
+  webDist: path.join(ROOT, "apps/web/dist"),
+  notify: createBotMessenger(process.env.BOT_TOKEN?.trim()), // web'dan hisob o'chirilsa — chatdagi menyuni olib tashlash
+});
 
 function failed(port, name) {
   return (error) => {

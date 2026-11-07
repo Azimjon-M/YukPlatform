@@ -112,6 +112,11 @@ export function createAdminQueries(db, now) {
           // O'z raqami (ixtiyoriy). Faqat boshqaruv markazida (localhost) ko'rsatiladi, Mini App'dagi admin ro'yxatida — yo'q
           phone: row.phone ?? null,
           phoneAt: row.phone_at ?? null,
+          // Hisobdan chiqqan (web «🚪 Chiqish», store.signOut): rol va profil ustunlari bo'sh, lekin ma'lumot o'chmagan —
+          // oxirgi rol va o'sha rolning sozlamalari ko'rsatiladi
+          signedOutAt: row.signed_out_at ?? null,
+          signedOutRole: row.signed_out_role ?? null,
+          savedProfile: row.signed_out_role ? ((parse(row.profiles) ?? {})[row.signed_out_role] ?? null) : null,
           createdAt: row.created_at,
           updatedAt: row.updated_at,
         }));

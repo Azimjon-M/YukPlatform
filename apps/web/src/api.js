@@ -1,7 +1,7 @@
 // Haydovchilar serveri (apps/api public.js) bilan aloqa: kirish, token, so'rovlar.
 // Server manzili: odatda shu sayt bilan bir joyda (/pub/...). Sayt boshqa joyda (Cloudflare Pages) bo'lsa —
 // yig'ishda VITE_API_URL=https://... beriladi (apps/web/README.md).
-import { inTelegram, initData } from "./telegram.js";
+import { initData } from "./telegram.js";
 
 export const API_URL = (import.meta.env?.VITE_API_URL ?? "").replace(/\/+$/, "");
 const TOKEN_KEY = "yuk-token";
@@ -36,8 +36,20 @@ export const tokenStore = {
   },
 };
 
-// Boshqaruv markazidagi «Web'da ochish» havolasi: http://localhost:3001/#token=... — tokenni olib, manzildan o'chiramiz
+// Manzildagi kirish tokeni — olib, manzildan o'chiramiz (ekranda, nusxa olinganda ko'rinmasin):
+//   ?t=...      — botning pastki menyu tugmasi (Telegram u yerda initData bermaydi, bot shu odamning tokenini qo'yadi);
+//                 boshqa parametrlar (?v=&r=&p=&s=) va Telegram'ning #tgWebApp... qismi qoladi
+//   #token=...  — boshqaruv markazidagi «Web'da ochish» havolasi (http://localhost:3001/#token=...)
+const TOKEN_RE = /^[\w.-]{20,512}$/;
 export function takeTokenFromUrl(location = window.location, history = window.history) {
+  const params = new URLSearchParams(location.search);
+  const fromQuery = params.get("t");
+  if (fromQuery !== null) {
+    params.delete("t");
+    const search = params.toString();
+    history.replaceState(history.state ?? null, "", `${location.pathname}${search ? `?${search}` : ""}${location.hash}`);
+    return TOKEN_RE.test(fromQuery) ? fromQuery : null;
+  }
   const match = /(?:^#|&)token=([\w.-]+)/.exec(location.hash);
   if (!match) return null;
   history.replaceState(null, "", location.pathname + location.search);
@@ -61,6 +73,14 @@ export async function request(method, path, { body, token = tokenStore.get() } =
     json = null;
   }
   if (response.ok && json) return json;
+  // Ilova (nginx'dagi apps/web/dist) yangilangan, server esa hali eski kodda: yangi yo'l unda yo'q va u umumiy «Topilmadi»
+  // deydi (2026-11-07 da «Chiqish» shunday bo'lgan). Ilova faqat o'zi biladigan yo'llarni so'raydi — demak, server eski
+  if (response.status === 404 && json?.error === "Topilmadi" && !json.code) {
+    throw new ApiError(
+      "Server hali eski versiyada ishlayapti — bu amal server qayta ishga tushirilgach ishlaydi. Hech narsa o'zgarmadi.",
+      { status: 404, code: "outdated" },
+    );
+  }
   if (json?.error) throw new ApiError(json.error, { status: response.status, code: json.code ?? null });
   // JSON emas (server yo'q, tunnel o'chiq, statik hosting 404 qaytardi)
   throw new ApiError("Server hozir ishlamayapti. Birozdan keyin qayta urinib ko'ring.", { status: response.status, code: "offline" });
@@ -76,11 +96,20 @@ export async function login({ widget } = {}) {
   return me;
 }
 
-// Ilova ochilganda: Telegram ichida har safar yangidan kiradi (initData 24 soat amal qiladi);
-// saytda — saqlangan token bilan. → { me } | { me: null } (kirish kerak)
+// Ilova ochilganda, tartib bilan:
+//   1) initData bor (inline / menyu tugmasi, havola) — har safar yangidan kiradi (initData 24 soat amal qiladi);
+//   2) manzilda token (botning pastki menyu tugmasi ?t=, boshqaruv markazi #token=) — o'sha bilan;
+//   3) avval saqlangan token bilan.
+// → { me } | { me: null } (kirish kerak: saytda — kirish sahifasi, Telegram ichida — sozlamalar botga sendData bilan)
 export async function resume() {
-  if (inTelegram) return { me: await login() };
   const fromUrl = takeTokenFromUrl();
+  if (initData) {
+    try {
+      return { me: await login() };
+    } catch (error) {
+      if (error.code !== "auth") throw error; // imzo o'tmadi — pastda token bilan urinib ko'ramiz
+    }
+  }
   if (fromUrl) tokenStore.set(fromUrl);
   if (!tokenStore.get()) return { me: null };
   try {
@@ -102,6 +131,11 @@ export const saveProfile = (profile, role) => request("PUT", "/pub/me/profile", 
 // Boshqa rolga o'tilsa, server eski rolning sozlamalarini saqlab qo'yadi; yangi rolda avval to'ldirilgani bo'lsa — me.profile da
 export const setRole = (role) => request("PUT", "/pub/me/role", { body: { role } });
 export const setActive = (active) => request("PATCH", "/pub/me", { body: { active } });
+// Hisobdan chiqish — serverda (faqat tokenni o'chirish yetmaydi: Telegram'da bot odamni baribir taniydi):
+// rol va sozlamalar yashiriladi, bot yubormaydi; qayta kirib rolni tanlasa — tiklanadi → me (role: null)
+export const signOut = () => request("POST", "/pub/me/logout");
+// Hisobni butunlay o'chirish (botdagi /ochirish → «Hammasini o'chirish» bilan bir xil) → { deleted: true }
+export const deleteMe = () => request("DELETE", "/pub/me");
 
 const query = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 
@@ -109,6 +143,12 @@ const query = (params) => new URLSearchParams(Object.entries(params).filter(([, 
 export const getLoads = (params = {}) => request("GET", `/pub/loads?${query(params)}`);
 // Bo'sh mashinalar (yuk beruvchiga) — parametrlar xuddi shunday
 export const getTrucks = (params = {}) => request("GET", `/pub/trucks?${query(params)}`);
+
+// Haydovchining yo'nalishi (botdagi «📋 Mos yuklar» bilan bir xil): { from, hours } → { areas: [{ id, label, count }], any }.
+// from yo'q — «Qayerdan?» tugmalari, bor — «Qayerga?» ("*" = hamma joydan)
+export const getRoute = (params = {}) => request("GET", `/pub/me/route?${query(params)}`);
+// "*" = istalgan joy → yangilangan me (bot ham yangi yuklarni shu yo'nalish bo'yicha yuboradi)
+export const saveRoute = (from, to) => request("PUT", "/pub/me/route", { body: { from, to } });
 
 // --- Admin («🛠 Boshqaruv»): server har safar admin ekanini tekshiradi, boshqalarga 403 ---
 export const getAdminOverview = () => request("GET", "/pub/admin/overview");

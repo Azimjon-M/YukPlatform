@@ -9,5 +9,7 @@ export * from "./roles.js";
 export * from "./contact.js";
 export * from "./scope.js";
 export * from "./loadText.js";
+export * from "./profileText.js";
+export * from "./route.js";
 export * from "./geo.js";
 export { CITY_COORDS, COUNTRY_COORDS, REGION_COORDS } from "./geoData.js";

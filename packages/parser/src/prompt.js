@@ -4,6 +4,7 @@
 // Qoidalar manbai: docs/haydovchi-suhbati.md (haydovchi bilan suhbat, 2026-11-04).
 // Misollar ataylab sinov e'lonlaridan (data/samples) farqli qilib yozilgan, aks holda natija "yodlangan" bo'ladi.
 import {
+  AI_TRUCK_CLASSES,
   BODY_TYPES,
   CATEGORIES,
   COUNTRIES,
@@ -11,7 +12,6 @@ import {
   PAYMENT_TYPES,
   REGIONS,
   TASHKENT_DISTRICTS,
-  TRUCK_CLASSES,
 } from "@yuk/shared";
 
 const aliasText = (aliases = {}) =>
@@ -26,7 +26,7 @@ const regionLines = REGIONS.map((r) => {
 }).join("\n");
 
 const countryLines = COUNTRIES.map((c) => `- ${c.name}: ${c.cities.join(", ")}`).join("\n");
-const truckLines = TRUCK_CLASSES.map((t) => `- ${t.id}: ${t.hint} — words: ${t.words.join(", ")}`).join("\n");
+const truckLines = AI_TRUCK_CLASSES.map((t) => `- ${t.id}: ${t.hint} — words: ${t.words.join(", ")}`).join("\n");
 const bodyLines = BODY_TYPES.map((b) => `- ${b.id}: ${b.hint}${b.words.length ? ` — words: ${b.words.join(", ")}` : ""}`).join("\n");
 const sideLines = LOADING_SIDES.map((s) => `- ${s.id}: ${s.words.join(", ")}`).join("\n");
 const paymentLines = PAYMENT_TYPES.map((p) => `- ${p.id}: ${p.words.join(", ")}`).join("\n");
@@ -73,7 +73,7 @@ For mashina_bor posts, describe the vehicle's offered route and capacity in the 
 Two separate things: the truck class (size) and the body type. Set each ONLY if the post names it.
 - truckClass:
 ${truckLines}
-  "fura kerak" → fura. "tyagach kerak" → fura. "katta isuzu" → isuzu.
+  "fura kerak" → fura. "katta fura" → fura. "tyagach kerak" → fura. "katta isuzu" → isuzu. "kamaz kerak", "камаз самосвал" → kamaz.
   If no size or model is named: weight above 15 t → fura (nothing smaller carries it); otherwise null. Do not guess a smaller class from the weight.
   A body type alone names no size: "tent kerak", "ref kerak", "ТЕНТ КЕРАК" → truckClass null (unless the weight is above 15 t), even for long or international routes.
 - bodyType:
@@ -88,7 +88,7 @@ ${sideLines}
 - partial: true when the load fills only part of a vehicle or tops up a partly loaded one ("dogruz", "догруз", "qo'shimcha yuk", "furaga qo'shimcha", "сборный груз", "пол груз", "yarim yuk"); otherwise false.
 - category:
 ${categoryLines}
-  Use the truck class when known: fura and mini_fura → fura; isuzu, kichik and labo → yengil.
+  Use the truck class when known: fura, kamaz and mini_fura → fura; isuzu, kichik, labo and yengil_avto → yengil.
   Otherwise use weight: 10 t or more → fura, less → yengil. If neither is known → fura.
 
 ### Price and payment

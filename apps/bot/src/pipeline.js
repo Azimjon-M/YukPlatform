@@ -12,6 +12,7 @@ import {
   KIND_ROLE,
   loadKeys,
   planAllows,
+  routeChosen,
   routeInScope,
   routeText,
 } from "@yuk/shared";
@@ -63,6 +64,8 @@ export async function handleParsed(post, result, deps) {
     const channelMessageId = kind === "yuk" ? ((await deps.publish?.(load, post)) ?? null) : null;
     let count = 0;
     for (const user of users) {
+      // Haydovchi yo'nalishni («📋 Mos yuklar» da) tanlamaguncha yuk yuborilmaydi — aks holda butun O'zbekistondagi yuklar
+      if (kind === "yuk" && !routeChosen(user.profile)) continue;
       if (!matches(load, user.profile).ok) continue;
       // Obuna (hozircha hamma bepul va hammaga yuboriladi — roles.js planAllows)
       if (!planAllows(user, { kind })) continue;

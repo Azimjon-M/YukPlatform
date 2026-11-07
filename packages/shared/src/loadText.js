@@ -3,7 +3,7 @@
 import { placeKey } from "./places.js";
 import { REGIONS } from "./regions.js";
 import { PAYMENT_TYPES } from "./categories.js";
-import { BODY_TYPES, LOADING_SIDES, TRUCK_CLASSES } from "./vehicles.js";
+import { BODY_TYPES, LOADING_SIDES, TRUCK_CLASSES, bodyId } from "./vehicles.js";
 
 const TIME_ZONE = "Asia/Tashkent";
 
@@ -43,10 +43,17 @@ export function placeText(load, side) {
 // 3800000 → "3 800 000"
 export const groupDigits = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 
-// 0.7 → "700 kg", 22 → "22 t", 1.5 → "1,5 t"
+// 0.7 → "700 kg", 22 → "22 tonna", 1.5 → "1,5 tonna" (Azimjon: "t" emas, "tonna" — hamma joyda)
 export function weightText(weightT) {
   if (weightT == null) return null;
-  return weightT < 1 ? `${groupDigits(weightT * 1000)} kg` : `${String(weightT).replace(".", ",")} t`;
+  return weightT < 1 ? `${groupDigits(weightT * 1000)} kg` : `${String(Math.round(weightT * 1000) / 1000).replace(".", ",")} tonna`;
+}
+
+// Transport turining yuk ko'tarishi: [0.3, 0.7] → "300–700 kg", [20, 40] → "20–40 tonna"
+export function capacityRangeText([min, max]) {
+  if (max < 1) return `${groupDigits(min * 1000)}–${groupDigits(max * 1000)} kg`;
+  const t = (n) => String(n).replace(".", ",");
+  return min < 1 ? `${groupDigits(min * 1000)} kg – ${t(max)} tonna` : `${t(min)}–${t(max)} tonna`;
 }
 
 const UNIT_TEXT = { reys: "reys", tonna: "tonnasi", kg: "kilosi", kub: "kubi" };
@@ -77,8 +84,8 @@ export function vehicleText(load) {
   const parts = [];
   if (load.vehicleCount > 1) parts.push(`${load.vehicleCount} ta`);
   const cls = TRUCK_CLASSES.find((t) => t.id === load.truckClass)?.name;
-  // "Ploshatka / shalanda / kontenerovoz" → "ploshatka": birinchi nomi yetadi
-  const body = BODY_TYPES.find((b) => b.id === load.bodyType)?.name.split(" / ")[0];
+  // "Plashatka / shalanda" → "plashatka": birinchi nomi yetadi (eski kodlar: bort → plashatka)
+  const body = BODY_TYPES.find((b) => b.id === bodyId(load.bodyType))?.name.split(" / ")[0];
   if (cls) parts.push(cls);
   if (body) parts.push(body.toLowerCase());
   if (load.loadingSides?.length) {
@@ -97,12 +104,12 @@ export function truckPlaceText(truck, side) {
   return side === "to" ? "istalgan joyga" : "?";
 }
 
-// "Fura · tent · 22 t ko'taradi"
+// "Fura · tent · 22 tonna ko'taradi"
 export function truckVehicleText(truck) {
   return [vehicleText(truck), truck.weightT != null ? `${weightText(truck.weightT)} ko'taradi` : null].filter(Boolean).join(" · ");
 }
 
-// "un · 22 t · 80 kub · 33 palet"
+// "un · 22 tonna · 80 kub · 33 palet"
 export function cargoText(load) {
   return [load.cargo, weightText(load.weightT), load.volumeM3 != null ? `${load.volumeM3} kub` : null, load.pallets ? `${load.pallets} palet` : null]
     .filter(Boolean)

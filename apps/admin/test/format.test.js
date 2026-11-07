@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   areasText,
   cargoText,
+  driverShown,
   durationMin,
   formatDateTime,
   formatNumber,
@@ -68,15 +69,16 @@ test("joy: avval viloyat, keyin shahar; markaz va xorij", () => {
 
 test("og'irlik, narx, mashina, yuk matni", () => {
   assert.equal(weightText(0.7), "700 kg");
-  assert.equal(weightText(1.5), "1,5 t");
+  assert.equal(weightText(1.5), "1,5 tonna");
   assert.equal(weightText(null), null);
   assert.equal(priceText(LOAD), "3 800 000 so'm · kelishiladi · naqd");
   assert.equal(priceText({ price: 200, priceUnit: "kg" }), "200 so'm / kilosi");
   assert.equal(priceText({ price: 1500, currency: "USD" }), "$1 500");
   assert.equal(priceText({}), "narx yozilmagan");
   assert.equal(vehicleText(LOAD), "2 ta · Fura · tent · orqadan");
-  assert.equal(vehicleText({ bodyType: "ref" }), "Ref");
-  assert.equal(cargoText(LOAD), "Sement · 22 t · 33 palet");
+  assert.equal(vehicleText({ bodyType: "ref" }), "Refrijerator");
+  assert.equal(vehicleText({ bodyType: "bort" }), "Plashatka", "eski kod — yangi nom");
+  assert.equal(cargoText(LOAD), "Sement · 22 tonna · 33 palet");
 });
 
 test("telefon tel: havolasiga aylanadi, qisqa raqam tashlanadi", () => {
@@ -99,7 +101,7 @@ test("loadView kartochka uchun hamma matnni beradi", () => {
 test("yuk beruvchi profili: kerakli mashina va kuzov", () => {
   const summary = profileSummary({ fromAreas: ["samarqand"], toAreas: [], domestic: true, international: false, truckClasses: ["fura", "isuzu"], bodyTypes: ["tent", "ploshatka"] });
   assert.equal(summary.vehicle, "Kerak: Fura, Isuzu");
-  assert.equal(summary.size, "Kuzov: tent, ploshatka");
+  assert.equal(summary.size, "Kuzov: tent, plashatka");
   assert.equal(summary.from, "Samarqand vil.");
   assert.equal(summary.to, "Hamma joy");
   assert.equal(profileSummary({ fromAreas: [], toAreas: [], truckClasses: [], bodyTypes: [] }).vehicle, "Istalgan mashina");
@@ -114,12 +116,16 @@ test("haydovchi profili qisqa ko'rinishda", () => {
     international: true,
     mode: "own",
   });
-  assert.equal(summary.vehicle, "Fura · ref · 22 t");
+  assert.equal(summary.vehicle, "Fura · refrijerator · 22 tonna");
   assert.equal(summary.size, "13,6 × 2,45 × 2,7 m");
   assert.equal(summary.from, "Andijon vil., Rossiya");
   assert.equal(summary.to, "Hamma joy");
   assert.equal(summary.intl, "O'zbekiston va xalqaro");
-  assert.equal(summary.mode, "Faqat mashinamga mos yuklar");
+  assert.equal(summary.mode, null, "«Qaysi yuklar» savoli olib tashlandi");
+  // Yo'nalish tanlanmagan (yangi haydovchi) — ko'rinib tursin
+  const fresh = profileSummary({ vehicle: { truckClass: "isuzu" }, fromAreas: [], toAreas: [], routeAt: null });
+  assert.deepEqual([fresh.from, fresh.to], ["tanlanmagan — yuk bormaydi", "—"]);
+  assert.equal(profileSummary({ vehicle: {}, fromAreas: [], toAreas: [], routeAt: 1 }).from, "Hamma joy");
   assert.equal(profileSummary(null), null);
   assert.equal(areasText(["toshkent_sh"]), "Toshkent shahri");
 });
@@ -153,4 +159,18 @@ test("davomiylik va ishlash vaqti", () => {
   assert.equal(uptimeText(now - 5 * MIN, now), "5 daq");
   assert.equal(uptimeText(now - (2 * HOUR + 5 * MIN), now), "2 soat 5 daq");
   assert.equal(uptimeText(null, now), "—");
+});
+
+test("hisobdan chiqqan foydalanuvchi: oxirgi roli va sozlamalari ko'rinadi", () => {
+  const truck = { vehicle: { truckClass: "fura" }, fromAreas: ["samarqand"] };
+  assert.deepEqual(driverShown({ role: null, profile: null, signedOutAt: 5, signedOutRole: "haydovchi", savedProfile: truck }), {
+    signedOut: true,
+    role: "haydovchi",
+    profile: truck,
+  });
+  assert.deepEqual(driverShown({ role: "haydovchi", profile: truck, signedOutAt: null }), { signedOut: false, role: "haydovchi", profile: truck });
+  // Hali rol tanlamagan yangi odam — chiqqan emas
+  assert.deepEqual(driverShown({ role: null, profile: null, signedOutAt: null, signedOutRole: null }), { signedOut: false, role: null, profile: null });
+  // Ikkala rol saqlangan, qaysi biridan chiqqani noma'lum (eski yozuv)
+  assert.deepEqual(driverShown({ role: null, profile: null, signedOutAt: 5, signedOutRole: null, savedProfile: null }), { signedOut: true, role: null, profile: null });
 });

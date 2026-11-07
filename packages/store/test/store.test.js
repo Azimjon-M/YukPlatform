@@ -147,6 +147,38 @@ test("switchRole: har rolning sozlamalari alohida saqlanadi, qaytganda tiklanadi
   assert.deepEqual([user.role, user.profile, user.profiles], ["haydovchi", null, {}]);
 });
 
+test("signOut: rol va sozlamalar yashiriladi, yuborish to'xtaydi; rolni qayta tanlasa — tiklanadi", () => {
+  const store = openStore({ file: ":memory:" });
+  const truck = { vehicle: { truckClass: "isuzu" }, fromAreas: ["toshkent"], routeAt: 1 };
+  const cargo = { fromAreas: ["samarqand"], truckClasses: ["fura"] };
+  store.saveDriver(42, { name: "Ali", role: "haydovchi", profile: truck, active: true, phone: "+998901112233", isAdmin: true });
+  store.switchRole(42, "yuk_beruvchi");
+  store.saveDriver(42, { profile: cargo });
+  store.switchRole(42, "haydovchi");
+
+  const out = store.signOut(42);
+  assert.deepEqual([out.role, out.profile, out.active, out.draft], [null, null, false, null]);
+  assert.deepEqual(out.profiles, { haydovchi: truck, yuk_beruvchi: cargo }, "ikkala rolning sozlamalari saqlandi");
+  assert.deepEqual([out.name, out.phone, out.isAdmin], ["Ali", "+998901112233", true], "raqam va ism qoladi");
+  assert.equal(store.activeUsers("haydovchi").length, 0, "bot yuk yubormaydi");
+  assert.ok(out.signedOutAt > 0);
+  assert.equal(out.signedOutRole, "haydovchi");
+  // Boshqaruv markazi: rol ustuni bo'sh, lekin oxirgi rol va sozlamalari ko'rinadi
+  const listed = store.listDrivers().find((d) => d.chatId === 42);
+  assert.deepEqual([listed.role, listed.profile, listed.signedOutRole, listed.savedProfile], [null, null, "haydovchi", truck]);
+  assert.ok(listed.signedOutAt > 0);
+  const again = store.signOut(42);
+  assert.deepEqual(again.profiles, out.profiles, "ikkinchi marta — hech narsa yo'qolmaydi");
+  assert.deepEqual([again.signedOutAt, again.signedOutRole], [out.signedOutAt, "haydovchi"], "vaqti va roli o'zgarmaydi");
+
+  const back = store.switchRole(42, "haydovchi");
+  assert.deepEqual([back.role, back.profile, back.active], ["haydovchi", truck, true], "qayta kirdi — yo'nalish bilan tiklandi");
+  assert.deepEqual([back.signedOutAt, back.signedOutRole], [null, null], "«chiqqan» belgisi tozalandi");
+  assert.equal(store.listDrivers().find((d) => d.chatId === 42).savedProfile, null);
+  assert.deepEqual(store.activeUsers("haydovchi").map((u) => u.chatId), [42]);
+  assert.equal(store.signOut(404), null, "yozuv yo'q");
+});
+
 test("eski baza: telefon va profiles ustunlari migratsiyada qo'shiladi, yozuvlar saqlanadi", () => {
   const file = `${process.env.TEMP ?? "/tmp"}/yuk-migrate-${process.pid}-${Date.now()}.db`;
   const old = openStore({ file });
@@ -161,6 +193,38 @@ test("eski baza: telefon va profiles ustunlari migratsiyada qo'shiladi, yozuvlar
   assert.deepEqual(user.profiles, {});
   assert.deepEqual(store.switchRole(7, "yuk_beruvchi").profiles, { haydovchi: { fromAreas: [] } });
   assert.equal(store.saveDriver(7, { phone: "+998901234567" }).phone, "+998901234567");
+  store.close();
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      unlinkSync(file + suffix);
+    } catch {
+      // yo'q bo'lsa — mayli
+    }
+  }
+});
+
+test("eski baza: ustunlardan oldin hisobdan chiqqanlar migratsiyada «chiqqan» deb belgilanadi", () => {
+  const file = `${process.env.TEMP ?? "/tmp"}/yuk-signout-${process.pid}-${Date.now()}.db`;
+  const old = openStore({ file });
+  const truck = { vehicle: { truckClass: "fura" }, fromAreas: ["samarqand"] };
+  old.saveDriver(1, { name: "Chiqqan", role: "haydovchi", profile: truck, active: true });
+  old.signOut(1);
+  old.saveDriver(2, { name: "Ikki rol", role: "haydovchi", profile: truck });
+  old.switchRole(2, "yuk_beruvchi");
+  old.saveDriver(2, { profile: { fromAreas: [] } });
+  old.signOut(2);
+  old.saveDriver(3, { name: "Yangi" }); // rol tanlamagan, hech narsa saqlanmagan
+  old.saveDriver(4, { name: "Faol", role: "haydovchi", profile: truck, active: true });
+  // signOut yozgan belgilarsiz eski bazani yasaymiz
+  for (const column of ["signed_out_at", "signed_out_role"]) old.db.exec(`ALTER TABLE drivers DROP COLUMN ${column}`);
+  old.close();
+  const store = openStore({ file });
+  const byId = Object.fromEntries(store.listDrivers().map((d) => [d.chatId, d]));
+  assert.ok(byId[1].signedOutAt > 0);
+  assert.deepEqual([byId[1].signedOutRole, byId[1].savedProfile], ["haydovchi", truck], "yagona saqlangan rol — o'shandan chiqqan");
+  assert.ok(byId[2].signedOutAt > 0);
+  assert.equal(byId[2].signedOutRole, null, "ikkala rol saqlangan — qaysi biridan chiqqani noma'lum");
+  assert.deepEqual([byId[3].signedOutAt, byId[4].signedOutAt], [null, null], "yangi va faol foydalanuvchiga tegmaydi");
   store.close();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {

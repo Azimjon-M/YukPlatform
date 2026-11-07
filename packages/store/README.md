@@ -8,7 +8,7 @@ Collector va bot — alohida dasturlar, ikkalasi shu faylni ochadi. Collector e'
 |---|---|
 | `posts` | E'lonlar navbati: manba guruh, xabar raqami, havola, matn, joylangan vaqti, holati (`new` / `done` / `duplicate` / `failed`) |
 | `loads` | Tahlil qilingan yangi yuklar: takror kaliti, JSON, nechta haydovchiga ketgani, kanal xabari raqami |
-| `drivers` | Haydovchilar: profil (`@yuk/shared` match.js formatida), ro'yxatdan o'tish qoralamasi, faol yoki pauza |
+| `drivers` | Haydovchilar: profil (`@yuk/shared` match.js formatida), ro'yxatdan o'tish qoralamasi, faol yoki pauza; hisobdan chiqqanda (`signOut`) `signed_out_at` / `signed_out_role` (qayta rol tanlasa — tozalanadi) |
 | `cursors` | Collector har bir guruhni qaysi xabargacha o'qigani |
 
 - Boshqa fayl bilan sinash: `YUK_DB=data/sinov.db`.

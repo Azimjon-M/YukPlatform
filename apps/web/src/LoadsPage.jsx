@@ -1,9 +1,13 @@
 // Lenta: yuklar (haydovchiga) yoki bo'sh mashinalar (kind "mashina", yuk beruvchiga).
-// «Menga mos» (bot yuboradiganlari) yoki «Hammasi», qayerdan filtri, eng yangisi tepada. Har daqiqada o'zi yangilanadi.
+// «Menga mos» (bot yuboradiganlari) yoki «Hammasi», eng yangisi tepada. Har daqiqada o'zi yangilanadi.
+// Haydovchining «Menga mos» i — tanlangan yo'nalish bo'yicha (tepada «🧭 Qayerdan → Qayerga», «O'zgartirish»).
+// Yo'nalish hali tanlanmagan bo'lsa, ro'yxat o'rniga avval «📍 Qayerdan?» → «🏁 Qayerga?» (RoutePicker) — botdagidek.
+// «Hammasi» da va yuk beruvchida — oddiy «📍 Qayerdan» filtri.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { REGIONS, regionLabel, scopeCountries } from "@yuk/shared";
+import { REGIONS, regionLabel, routeChosen, routeLabel, scopeCountries } from "@yuk/shared";
 import { getLoads, getTrucks } from "./api.js";
 import { LoadCard, TruckCard } from "./LoadCard.jsx";
+import { RoutePicker, hoursText } from "./RoutePicker.jsx";
 import { Notice, Segmented, Spinner } from "./ui.jsx";
 
 const PAGE = 30;
@@ -21,8 +25,8 @@ const KINDS = {
     Card: LoadCard,
     one: "yuk",
     fromLabel: "Qayerdan",
-    needProfile: "«Menga mos» yuklarni ko'rsatish uchun mashina turi va yo'nalishingiz kerak.",
-    needTitle: "Mashinangizni kiriting",
+    needProfile: "«Menga mos» yuklarni ko'rsatish uchun transportingiz kerak.",
+    needTitle: "Transportingizni kiriting",
   },
   mashina: {
     fetch: getTrucks,
@@ -41,20 +45,26 @@ export function areaOptions(scope) {
   ];
 }
 
-export function LoadsPage({ kind = "yuk", scope, view, onView, onNeedProfile, onAuthLost }) {
+// profile — foydalanuvchining sozlamalari (me.profile); onRouteSaved(me) — yo'nalish saqlangach (App yangilaydi)
+export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteSaved, onNeedProfile, onAuthLost }) {
   const k = KINDS[kind];
   const [from, setFrom] = useState("");
   const [hours, setHours] = useState(24);
   const [state, setState] = useState({ items: [], total: 0, loading: true, error: null });
   const [now, setNow] = useState(() => Date.now());
+  const [picking, setPicking] = useState(false);
   const shown = useRef(PAGE);
+  // Yo'nalish bo'yicha ro'yxat: haydovchi, «Menga mos», sozlamalari bor
+  const routed = kind === "yuk" && view === "mine" && Boolean(profile);
+  const choosing = routed && (picking || !routeChosen(profile));
+  const area = routed ? "" : from; // «Menga mos» da joyni yo'nalish belgilaydi
 
   // count — nechta yuk ko'rsatiladi (yangilashda ham shuncha qoladi); silent — ro'yxat o'rniga spinner chiqmasin
   const fetchLoads = useCallback(
     async (count, { silent = false } = {}) => {
       if (!silent) setState((s) => ({ ...s, loading: true, error: null }));
       try {
-        const data = await k.fetch({ view, from, hours, limit: Math.min(count, 500) });
+        const data = await k.fetch({ view, from: area, hours, limit: Math.min(count, 500) });
         shown.current = count;
         setNow(Date.now());
         setState({ items: data.items, total: data.total, loading: false, error: null });
@@ -63,41 +73,60 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, onNeedProfile, on
         setState((s) => ({ ...s, loading: false, error: silent && s.items.length ? null : error }));
       }
     },
-    [k, view, from, hours, onAuthLost],
+    [k, view, area, hours, onAuthLost],
   );
 
+  // Yo'nalish tanlanayotganda ro'yxat so'ralmaydi; tanlangach (choosing → false) yangi yo'nalish bilan so'raladi
   useEffect(() => {
-    fetchLoads(PAGE);
-  }, [fetchLoads]);
+    if (!choosing) fetchLoads(PAGE);
+  }, [fetchLoads, choosing]);
 
   useEffect(() => {
+    if (choosing) return undefined;
     const timer = setInterval(() => fetchLoads(shown.current, { silent: true }), REFRESH_MS);
     return () => clearInterval(timer);
-  }, [fetchLoads]);
+  }, [fetchLoads, choosing]);
+
+  const routeSaved = (me) => {
+    setPicking(false);
+    onRouteSaved(me);
+  };
 
   const { items, total, loading, error } = state;
   return (
     <>
       <div className="toolbar">
         <Segmented label={kind === "mashina" ? "Qaysi mashinalar" : "Qaysi yuklar"} options={VIEW_OPTIONS} value={view} onChange={onView} />
+        {routed && !choosing && (
+          <div className="route-bar">
+            <span>
+              🧭 <b>{routeLabel(profile)}</b>
+            </span>
+            <button type="button" className="link" onClick={() => setPicking(true)}>
+              O'zgartirish
+            </button>
+          </div>
+        )}
         <div className="filters">
-          <label className="select">
-            <span className="sr-only">{k.fromLabel}</span>
-            <select value={from} onChange={(e) => setFrom(e.target.value)}>
-              <option value="">📍 {k.fromLabel}: hamma joy</option>
-              {areaOptions(scope).map((o) => (
-                <option key={o.id} value={o.id}>
-                  📍 {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="select narrow">
+          {!routed && (
+            <label className="select">
+              <span className="sr-only">{k.fromLabel}</span>
+              <select value={from} onChange={(e) => setFrom(e.target.value)}>
+                <option value="">📍 {k.fromLabel}: hamma joy</option>
+                {areaOptions(scope).map((o) => (
+                  <option key={o.id} value={o.id}>
+                    📍 {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className={`select${routed ? "" : " narrow"}`}>
             <span className="sr-only">Muddat</span>
             <select value={hours} onChange={(e) => setHours(Number(e.target.value))}>
               {HOUR_OPTIONS.map((h) => (
                 <option key={h} value={h}>
-                  {h === 72 ? "3 kun" : `${h} soat`}
+                  {routed ? `🕒 Oxirgi ${hoursText(h)}` : hoursText(h)}
                 </option>
               ))}
             </select>
@@ -105,7 +134,15 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, onNeedProfile, on
         </div>
       </div>
 
-      {error?.code === "no_profile" ? (
+      {choosing ? (
+        <RoutePicker
+          profile={profile}
+          hours={hours}
+          onSaved={routeSaved}
+          onCancel={routeChosen(profile) ? () => setPicking(false) : null}
+          onAuthLost={onAuthLost}
+        />
+      ) : error?.code === "no_profile" ? (
         <Notice
           title={k.needTitle}
           action={
@@ -130,10 +167,21 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, onNeedProfile, on
       ) : loading && !items.length ? (
         <Spinner />
       ) : !items.length ? (
-        <Notice title={`Hozircha ${k.one} yo'q`}>
-          {view === "mine"
-            ? `Oxirgi ${hours} soatda sizga mos ${k.one} chiqmadi. Yangisi chiqishi bilan botda ham xabar beramiz.`
-            : `Oxirgi ${hours} soatda bu yo'nalishda ${k.one} yo'q.`}
+        <Notice
+          title={`Hozircha ${k.one} yo'q`}
+          action={
+            routed && (
+              <button type="button" className="primary" onClick={() => setPicking(true)}>
+                🧭 Yo'nalishni o'zgartirish
+              </button>
+            )
+          }
+        >
+          {routed
+            ? `Oxirgi ${hoursText(hours)}da bu yo'nalishda mashinangizga mos yuk chiqmadi. Yangisi chiqishi bilan botda xabar beramiz.`
+            : view === "mine"
+              ? `Oxirgi ${hoursText(hours)}da sizga mos ${k.one} chiqmadi. Yangisi chiqishi bilan botda ham xabar beramiz.`
+              : `Oxirgi ${hoursText(hours)}da bu yo'nalishda ${k.one} yo'q.`}
         </Notice>
       ) : (
         <>

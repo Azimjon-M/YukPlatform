@@ -5,7 +5,7 @@
 import { existsSync, statSync } from "node:fs";
 import { createParser, createParserPool, envSeedEntries, resolveSettings } from "@yuk/parser";
 import { ROUTE_SCOPES, routeScopeFrom } from "@yuk/shared";
-import { acquireRunLock, loadSecret, openStore, tunnelUrl } from "@yuk/store";
+import { acquireRunLock, createSessions, loadSecret, openStore, tunnelUrl } from "@yuk/store";
 import { createBot } from "./bot.js";
 import { readConfig } from "./config.js";
 import { formatLoad } from "./format.js";
@@ -135,7 +135,11 @@ async function main() {
   const pool = createAiPool(store);
   // Mini App: .env dagi doimiy manzil, bo'lmasa — ishlab turgan tunnel bergani (har so'rovda yangidan o'qiladi)
   const appUrl = () => config.miniappUrl ?? tunnelUrl(store);
-  const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log, appUrl });
+  // Pastki menyudagi Mini App tugmasi foydalanuvchini shu token bilan kiritadi (Telegram u yerda initData bermaydi).
+  // Kalit — data/secret.key: haydovchilar serveri (apps/api) ham shuni o'qiydi va tokenni taniydi
+  const sessions = createSessions(loadSecret());
+  const linkToken = (chatId) => sessions.link(chatId);
+  const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log, appUrl, linkToken });
   await init();
   const { routeScope, maxPostAgeMs } = config;
   const worker = createWorker({ pool, store, publish, deliver, routeScope }, { log, maxAgeMs: maxPostAgeMs });

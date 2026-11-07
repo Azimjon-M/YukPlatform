@@ -1,5 +1,5 @@
 // Sozlamalar ostida: foydalanuvchining O'Z telefon raqami (ixtiyoriy).
-// Telegram ichida «📱 Raqamni ulashish» → Telegram so'raydi → raqam botga kontakt bo'lib boradi → bot saqlaydi
+// Telegram ichida «📱 Raqam ulashish» → Telegram so'raydi → raqam botga kontakt bo'lib boradi → bot saqlaydi
 // (apps/bot bot.js, faqat o'z kontakti). Ilova serverdan /pub/me ni bir necha marta so'rab, saqlanganini ko'radi.
 // Saytda (Telegram'dan tashqarida) tugma yo'q — botdagi /raqam buyrug'i.
 import { useState } from "react";
@@ -10,7 +10,8 @@ import { Section } from "./ui.jsx";
 
 const WAIT_TRIES = 8; // bot kontaktni olib saqlaguncha: 8 marta, har 1 soniyada
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const HINT = "Ixtiyoriy. Telegram'da xabar yetib bormay qolsa, siz bilan bog'lanish uchun. Hech kimga ko'rsatilmaydi.";
+const HINT =
+  "Ixtiyoriy. Raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi. Hech kimga ko'rsatilmaydi.";
 
 // me — serverdagi foydalanuvchi; onChange(me) — raqam saqlangach
 export function PhoneCard({ me, onChange }) {
@@ -48,7 +49,7 @@ export function PhoneCard({ me, onChange }) {
       )}
       {canRequestContact ? (
         <button type="button" className="primary" disabled={busy} onClick={share}>
-          {busy ? "Kutilyapti..." : me.phone ? "Raqamni almashtirish" : "📱 Raqamni ulashish"}
+          {busy ? "Kutilyapti..." : me.phone ? "Raqamni almashtirish" : "📱 Raqam ulashish"}
         </button>
       ) : (
         !me.phone && <p className="hint">Raqamni botda ulashasiz: /raqam buyrug'ini yuboring.</p>

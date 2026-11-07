@@ -50,6 +50,16 @@ test("yuk kanalga va faqat mos, faol haydovchiga boradi", async () => {
   assert.equal(store.stats().loads24h.sent, 1);
 });
 
+test("yo'nalishini «📋 Mos yuklar» da tanlamagan haydovchiga yuk bormaydi; «Hamma joy» tanlagan — oladi", async () => {
+  const { store, deps, delivered, add } = setup([{ ok: true, postType: "yuk_bor", loads: [LOAD] }]);
+  const fresh = { vehicle: FURA.vehicle, fromAreas: [], toAreas: [], routeAt: null, mode: "own" };
+  store.saveDriver(4, { role: "haydovchi", profile: fresh, active: true });
+  store.saveDriver(5, { role: "haydovchi", profile: { ...fresh, routeAt: Date.now() }, active: true });
+  add(1);
+  await processPost(store.takeNewPosts()[0], deps);
+  assert.deepEqual(delivered.sort(), [1, 5], "4 — yo'nalish tanlanmagan (aks holda butun O'zbekistondagi yuklar kelardi)");
+});
+
 test("boshqa guruhdagi o'sha yuk (boshqacha matn) ikkinchi marta yuborilmaydi", async () => {
   const answer = { ok: true, postType: "yuk_bor", loads: [LOAD] };
   const { store, deps, published, delivered, add } = setup([answer, { ...answer, loads: [{ ...LOAD, price: 5000000 }] }]);

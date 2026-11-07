@@ -1,6 +1,7 @@
 // Telegram bot (grammY): rol tanlash (haydovchi / yuk beruvchi), pastki menyu, sozlamalar (Mini App yoki chatda savol-javob),
 // guruhdagi e'lonlarni navbatga qo'yish, haydovchilarga yuk va yuk beruvchilarga bo'sh mashina yuborish.
-// Savol-javob mantig'i wizard.js da, pastki menyu menu.js da, xabar ko'rinishi format.js da.
+// Savol-javob mantig'i wizard.js da, pastki menyu menu.js da, xabar ko'rinishi format.js da,
+// «📋 Mos yuklar» dagi «Qayerdan? → Qayerga?» route.js da.
 // Telefon raqami — ixtiyoriy: profil saqlangach bir marta so'raladi (/raqam — keyin), /ochirish — ma'lumotlarni o'chirish.
 import { existsSync } from "node:fs";
 import { autoRetry } from "@grammyjs/auto-retry";
@@ -16,23 +17,28 @@ import {
   isOwnContact,
   normalizeContactPhone,
   roleOf,
+  routeChosen,
   sanitizeProfileFor,
   shouldAskPhone,
   validRole,
+  withRoute,
 } from "@yuk/shared";
 import { escapeHtml, formatLoad, formatTruck } from "./format.js";
 import { MENU, PHONE, mainMenu, matchesLabel, phoneKeyboard, settingsLabel } from "./menu.js";
+import { applyRoute, chosenText, fromStep, toStep, validArea } from "./route.js";
 import { applyAction, applyText, describeProfile, newDraft, profileFromDraft, renderStep } from "./wizard.js";
 
 const LOADS_WINDOW_MS = 24 * 60 * 60 * 1000; // "📋 Mos yuklar" / "🚚 Bo'sh mashinalar" — oxirgi 24 soat
 const LOADS_SHOWN = 5;
+const LOADS_LIMIT = 5000; // 24 soatda ~4 000 yuk — hammasidan sanaladi (store standarti 500)
 
 // Bot profilidagi matnlar (botni birinchi ochganda "Bu bot nima qila oladi?" o'rnida chiqadi)
 const DESCRIPTION =
-  "🚛 Yuk Ekspert — O'zbekistondagi katta yuk guruhlaridan haydovchiga mashinasi va yo'nalishiga mos yuklarni, " +
-  "yuk beruvchiga esa yo'nalishidagi bo'sh mashinalarni topib, shaxsiy xabarda yuboradi.\n\n" +
-  "Telefon raqamini bosing — qo'ng'iroq qiling. Boshlash uchun «Start» ni bosing.";
-const SHORT_DESCRIPTION = "Haydovchiga mos yuklar, yuk beruvchiga bo'sh mashinalar — katta yuk guruhlaridan.";
+  "🚛 Yuk Ekspert — yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazadi: vositachisiz.\n\n" +
+  "Bundan tashqari, O'zbekistondagi katta yuk guruhlaridan haydovchiga mashinasi va yo'nalishiga mos yuklarni, " +
+  "yuk beruvchiga esa yo'nalishidagi bo'sh mashinalarni saralab, shaxsiy xabarda yuboradi.\n\n" +
+  "Boshlash uchun «Start» ni bosing.";
+const SHORT_DESCRIPTION = "Yuk beruvchidan haydovchiga — to'g'ridan-to'g'ri. Katta yuk guruhlaridan mos yuklar va bo'sh mashinalar.";
 
 const COMMANDS = [
   { command: "start", description: "Boshlash va menyu" },
@@ -41,6 +47,7 @@ const COMMANDS = [
   { command: "pauza", description: "Yuk yuborishni to'xtatib turish" },
   { command: "davom", description: "Yana yuborish" },
   { command: "raqam", description: "Telefon raqamni ulashish (ixtiyoriy)" },
+  { command: "ilovalar", description: "Telefon ilovalari" },
   { command: "ochirish", description: "Ma'lumotlarimni o'chirish" },
   { command: "yordam", description: "Yordam" },
 ];
@@ -48,10 +55,12 @@ const COMMANDS = [
 // Rolni almashtirishdan oldin (/rol, «🔄 Rolni almashtirish»)
 const ROLE_SWITCH_NOTE = "Har rolning sozlamalari alohida saqlanadi — qaytib kelsangiz, qaytadan kiritish shart emas.";
 
-// Nega raqam so'raymiz — so'rashda va /raqam da bir xil matn
+// Nega raqam so'raymiz — so'rashda, /raqam da va /start dagi menyu tavsifida bir xil ma'no
+// (raqam keyin ilovaga kirishda ham kerak bo'ladi — Azimjon, 2026-11-07)
 const PHONE_WHY =
-  "Ixtiyoriy. Raqamingiz bo'lsa, Telegram'da xabar yetib bormay qolsa (masalan, botni o'chirib qo'ysangiz) siz bilan bog'lana olamiz. " +
-  "Raqamingiz hech kimga ko'rsatilmaydi va e'lonlarga qo'shilmaydi. O'chirish — /ochirish";
+  "Ixtiyoriy. Raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz " +
+  "saqlanib qoladi va joyidan davom etasiz — qaytadan ro'yxatdan o'tish shart emas. Raqamingiz hech kimga ko'rsatilmaydi va " +
+  "e'lonlarga qo'shilmaydi. O'chirish — /ochirish";
 
 // /ochirish: nimani saqlaymiz (inline tugmalar: del:phone | del:all | del:no)
 function storedDataText(driver) {
@@ -66,19 +75,27 @@ function storedDataText(driver) {
   ].join("\n");
 }
 
+// /start matnining boshi (Azimjon, 2026-11-07): avval — yuk beruvchidan to'g'ridan-to'g'ri yuk (yuk berish qismi qo'shiladi),
+// keyin — katta guruhlardagi e'lonlarni saralab yuborish (ROLE_TEXT[rol].groups)
+const INTRO = "🚛 <b>Yuk Ekspert</b> — yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazadi";
+
 // Rolga qarab so'zlar: nima keladi, sozlamalarda nima so'raladi
 const ROLE_TEXT = {
   haydovchi: {
-    intro: "katta yuk guruhlaridagi e'lonlardan faqat sizning mashinangiz va yo'nalishingizga mos yuklarni shaxsiy xabarda yuboradi.",
+    direct: "vositachisiz, yuk egasining o'zi bilan gaplashasiz.",
+    groups: "Bundan tashqari, katta yuk guruhlaridagi minglab e'lonlarni saralab, faqat sizning mashinangiz va yo'nalishingizga mos yuklarni shaxsiy xabarda yuboramiz.",
     one: "yuk",
     many: "yuklar",
-    settings: "mashina va yo'nalish",
-    setup: "mashinangiz va yo'nalishingizni",
+    matches: "qayerdan qayerga — tanlaysiz: oxirgi 24 soatdagi mos yuklar chiqadi, yangilari ham shu yo'nalishda keladi",
+    settings: "transport va qayerda ishlashingiz",
+    setup: "transportingizni",
   },
   yuk_beruvchi: {
-    intro: "katta yuk guruhlaridagi «mashina bo'sh» e'lonlaridan sizning yo'nalishingizdagi bo'sh mashinalarni shaxsiy xabarda yuboradi.",
+    direct: "yukingiz vositachisiz, to'g'ridan-to'g'ri mos haydovchilarga boradi.",
+    groups: "Bundan tashqari, katta yuk guruhlaridagi «mashina bo'sh» e'lonlarini saralab, yo'nalishingizdagi bo'sh mashinalarni shaxsiy xabarda yuboramiz.",
     one: "bo'sh mashina",
     many: "bo'sh mashinalar",
+    matches: "oxirgi 24 soatdagi mos bo'sh mashinalar",
     settings: "yo'nalish va kerakli mashina",
     setup: "yo'nalishingizni va qanday mashina kerakligini",
   },
@@ -88,29 +105,29 @@ function helpText(driver) {
   const role = roleOf(driver);
   if (!role) {
     return [
-      "🚛 <b>Yuk Ekspert</b> — katta yuk guruhlaridagi e'lonlarni saralab, shaxsiy xabarda yuboradi:",
+      `${INTRO} — vositachisiz.`,
+      "",
+      "Bundan tashqari, katta yuk guruhlaridagi e'lonlarni saralab, shaxsiy xabarda yuboramiz:",
       `${ROLES.haydovchi.icon} haydovchiga — ${ROLES.haydovchi.gets};`,
       `${ROLES.yuk_beruvchi.icon} yuk beruvchiga — ${ROLES.yuk_beruvchi.gets}.`,
-      "",
-      "Xabardagi telefon raqamini bossangiz — qo'ng'iroq qilasiz.",
     ].join("\n");
   }
   const t = ROLE_TEXT[role];
   return [
-    `🚛 <b>Yuk Ekspert</b> — ${t.intro}`,
+    `${INTRO}: ${t.direct}`,
     "",
-    "Xabardagi telefon raqamini bossangiz — qo'ng'iroq qilasiz.",
+    t.groups,
     "",
     "<b>Pastdagi menyu:</b>",
-    `${matchesLabel(driver)} — oxirgi 24 soatdagi mos ${t.many}`,
+    `${matchesLabel(driver)} — ${t.matches}`,
     `${settingsLabel(driver)} — ${t.settings}`,
     `${MENU.pause} / ${MENU.resume} — yuborishni to'xtatish va yoqish`,
-    `${MENU.apps} — telefon ilovalari`,
+    `${MENU.phone} — raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi va joyidan davom etasiz`,
     `${MENU.role} — haydovchi ↔ yuk beruvchi (yoki /rol)`,
     "",
     `Siz: ${ROLES[role].icon} ${ROLES[role].name}.`,
-    "Menyu yo'qolsa — /start",
-    "Telefon raqam — /raqam, ma'lumotlarni o'chirish — /ochirish",
+    "Menyuni yozish qatorining o'ng tomonidagi belgi ochib-yopadi, umuman yo'qolsa — /start",
+    "Telefon ilovalari — /ilovalar, ma'lumotlarni o'chirish — /ochirish",
   ].join("\n");
 }
 
@@ -141,7 +158,8 @@ export function postFromMessage(chat, message) {
 // botInfo — testda Telegram'ga ulanmasdan ishlatish uchun (odatda init() o'zi oladi)
 // appUrl — Mini App manzili HOZIR: .env dagi MINIAPP_URL yoki ishlab turgan tunnel bergani (main.js). Tunnel qayta yoqilsa,
 // manzil o'zgaradi — shuning uchun har safar shu funksiyadan so'raladi, ishga tushganda bir marta emas.
-export function createBot({ token, store, config, log = console.log, botInfo, appUrl = () => config.miniappUrl }) {
+// linkToken(chatId) — Mini App tugmasiga qo'shiladigan kirish tokeni (main.js: @yuk/store sessions.link; bir hafta bir xil)
+export function createBot({ token, store, config, log = console.log, botInfo, appUrl = () => config.miniappUrl, linkToken = () => null }) {
   const bot = new Bot(token, botInfo ? { botInfo } : undefined);
   // Telegram "juda tez" (429) desa, aytilgan vaqtcha kutib qayta yuboradi
   bot.api.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 60 }));
@@ -155,12 +173,11 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     message.via_bot?.id === bot.botInfo?.id;
 
   const scope = config.routeScope; // yo'nalish doirasi: sozlamalarda qaysi davlatlar tanlanadi
-  // Har bir haydovchiga oxirgi marta qaysi Mini App manzili bilan menyu berilgan (xotirada; bot qayta yoqilsa — bo'sh)
-  const shownUrl = new Map();
+  // Pastki menyu (Mini App manzili + shu odamning tokeni har safar yangidan — tunnel yoki hafta almashsa ham to'g'ri)
   const menu = (driver) => {
     const url = appUrl() ?? null;
-    if (driver?.chatId != null) shownUrl.set(driver.chatId, url);
-    return { reply_markup: mainMenu(driver, url, scope, { admin: isAdmin(driver, config.admins ?? []) }) };
+    const token = driver?.chatId != null && url ? linkToken(driver.chatId) : null;
+    return { reply_markup: mainMenu(driver, url, scope, { admin: isAdmin(driver, config.admins ?? []), token }) };
   };
   const html = (driver) => ({ parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...menu(driver) });
 
@@ -174,7 +191,27 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   function matching(user) {
     const kind = ROLE_KIND[roleOf(user)];
     const matches = KIND_MATCHERS[kind];
-    return store.recentLoads({ sinceMs: LOADS_WINDOW_MS, kind }).filter((row) => matches(row.load, user.profile).ok);
+    return store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind }).filter((row) => matches(row.load, user.profile).ok);
+  }
+
+  // Yangi xabar yoki o'sha xabarni o'zgartirish (tugma bosilganda). "message is not modified" — o'sha tugma ikki marta bosildi
+  async function render(ctx, text, options, edit) {
+    if (edit) {
+      try {
+        await ctx.editMessageText(text, options);
+        return;
+      } catch (error) {
+        if (error instanceof GrammyError && /not modified/.test(error.description)) return;
+      }
+    }
+    await ctx.reply(text, options);
+  }
+
+  // «📋 Mos yuklar» → «📍 Qayerdan yuk olasiz?» (route.js). Tugmalarda — har joydagi mos yuklar soni
+  async function askRoute(ctx, driver, { edit = false } = {}) {
+    const rows = store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind: "yuk" });
+    const { text, keyboard } = fromStep({ profile: driver.profile, scope, rows });
+    await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
 
   // "Siz kimsiz?" — ikki tugma (r:haydovchi / r:yuk_beruvchi)
@@ -219,8 +256,16 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   async function saved(ctx, profile, role) {
     // Mini App boshqa rol bilan saqladi (masalan, formada rolni almashtirib) — avval eski rolning sozlamalarini saqlab qo'yamiz
     if (store.getDriver(ctx.chat.id)?.role !== role) store.switchRole(ctx.chat.id, role);
+    // Haydovchi formasida yo'nalish yo'q (u «📋 Mos yuklar» da tanlanadi) — eskisi qoladi
+    if (role === "haydovchi") profile = withRoute(profile, store.getDriver(ctx.chat.id)?.profile);
     const driver = store.saveDriver(ctx.chat.id, { role, profile, draft: null, active: true });
     const t = ROLE_TEXT[role];
+    // Yangi haydovchi: yo'nalish tanlanmaguncha yuk yuborilmaydi — darhol so'raymiz (raqam — yo'nalishdan keyin)
+    if (role === "haydovchi" && !routeChosen(profile)) {
+      await ctx.reply(`✅ Saqlandi.\n\n${describeProfile(profile, scope, role)}\n\nEndi qayerdan qayerga yuk kerakligini tanlang 👇`, menu(driver));
+      await askRoute(ctx, driver);
+      return;
+    }
     const count = matching(driver).length;
     const extra = count ? `\n\nOxirgi 24 soatda sizga mos ${count} ta ${t.one} bor — «${matchesLabel(driver)}» ni bosing.` : "";
     await ctx.reply(`✅ Saqlandi. Endi mos ${t.many} shu yerga keladi.\n\n${describeProfile(profile, scope, role)}${extra}`, menu(driver));
@@ -228,7 +273,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     if (shouldAskPhone(driver)) await askPhone(ctx, driver);
   }
 
-  // Raqam so'rash: bir martalik klaviatura «📱 Raqamni ulashish» / «⏭ Keyinroq» (yoki raqami bo'lsa — «O'zgartirmaslik»).
+  // Raqam so'rash: bir martalik klaviatura «📱 Raqam ulashish» / «⏭ Keyinroq» (yoki raqami bo'lsa — «O'zgartirmaslik»).
   // Qachon so'ralgani yoziladi — bot o'zi boshqa so'ramaydi (faqat /raqam bilan foydalanuvchining o'zi).
   async function askPhone(ctx, driver) {
     store.saveDriver(ctx.chat.id, { phoneAskedAt: Date.now() });
@@ -269,7 +314,8 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     await ctx.reply(active ? "▶️ Yuk yuborish yoqildi." : `⏸ Yuk yuborish to'xtatildi. Qayta yoqish: «${MENU.resume}»`, menu(updated));
   }
 
-  // «📋 Mos yuklar» (haydovchi) yoki «🚚 Bo'sh mashinalar» (yuk beruvchi) — eski menyu tugmasi bosilsa ham hozirgi rol bo'yicha
+  // «📋 Mos yuklar» (haydovchi) yoki «🚚 Bo'sh mashinalar» (yuk beruvchi) — eski menyu tugmasi bosilsa ham hozirgi rol bo'yicha.
+  // Haydovchidan avval yo'nalish so'raladi (route.js), yuk beruvchiga — darhol ro'yxat
   async function showMatches(ctx) {
     const driver = rememberUser(ctx);
     const role = roleOf(driver);
@@ -279,6 +325,14 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
       await ctx.reply(`Avval ${t.setup} kiriting: «${settingsLabel(driver)}».`, menu(driver));
       return;
     }
+    if (role === "haydovchi") return askRoute(ctx, driver);
+    await listMatches(ctx, driver);
+  }
+
+  // Oxirgi 24 soatdagi mos e'lonlar (eng yangi LOADS_SHOWN tasi)
+  async function listMatches(ctx, driver) {
+    const role = roleOf(driver);
+    const t = ROLE_TEXT[role];
     const found = matching(driver);
     if (!found.length) {
       await ctx.reply(`Oxirgi 24 soatda sizga mos ${t.one} chiqmadi. Yangisi chiqishi bilan shu yerga yuboraman.`, menu(driver));
@@ -357,8 +411,10 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
 
   // --- Telefon raqami (ixtiyoriy) ---
   privateChat.command("raqam", (ctx) => askPhone(ctx, rememberUser(ctx)));
+  // Eski menyudagi «📱 Raqamim» (2026-11-07 da bir necha daqiqa bor edi). Hozirgi «📱 Raqam ulashish» — kontakt (pastda)
+  privateChat.hears(MENU.myPhone, (ctx) => askPhone(ctx, rememberUser(ctx)));
 
-  // «📱 Raqamni ulashish» bosildi (yoki Mini App'dagi requestContact): Telegram kontakt yuboradi.
+  // «📱 Raqam ulashish» bosildi (menyuda yoki /raqam da, yoki Mini App'dagi requestContact): Telegram kontakt yuboradi.
   // Faqat O'Z kontaktini saqlaymiz — ilova menyusidan birovning kontaktini ham yuborish mumkin.
   privateChat.on("message:contact", async (ctx) => {
     const driver = rememberUser(ctx);
@@ -414,7 +470,8 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   privateChat.hears([MENU.settings, MENU.register], openSettings);
   privateChat.hears(MENU.pause, (ctx) => setActive(ctx, false));
   privateChat.hears(MENU.resume, (ctx) => setActive(ctx, true));
-  privateChat.hears(MENU.apps, showApps);
+  privateChat.hears(MENU.apps, showApps); // eski menyudagi tugma (endi menyuda raqam tugmasi)
+  privateChat.command("ilovalar", showApps);
   privateChat.hears(MENU.role, (ctx) => askRole(ctx, rememberUser(ctx)));
   privateChat.hears(MENU.help, showHelp);
 
@@ -463,9 +520,39 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
       return;
     }
     store.deleteDriver(ctx.chat.id);
-    shownUrl.delete(ctx.chat.id);
     await ctx.editMessageText("✅ Hamma ma'lumotingiz o'chirildi. Endi sizga hech narsa yuborilmaydi.").catch(() => {});
     await ctx.reply("Qaytadan boshlash — /start", { reply_markup: { remove_keyboard: true } });
+  });
+
+  // «📋 Mos yuklar»: mr:f:<qayerdan> → «Qayerga?», mr:t:<qayerdan>:<qayerga> → saqlash va ro'yxat,
+  // mr:last — oxirgi yo'nalish bilan ro'yxat, mr:back — «Qayerdan?» ga qaytish
+  bot.callbackQuery(/^mr:(?:f:(.+)|t:([^:]+):(.+)|last|back)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (ctx.chat?.type !== "private") return;
+    const driver = store.getDriver(ctx.chat.id);
+    if (roleOf(driver) !== "haydovchi" || !driver.profile) {
+      await ctx.editMessageText("Bu tugma eskirgan.").catch(() => {});
+      return showMatches(ctx);
+    }
+    const [, from, routeFrom, routeTo] = ctx.match;
+    const data = ctx.callbackQuery.data;
+    if (data === "mr:back") return askRoute(ctx, driver, { edit: true });
+    if (data === "mr:last") {
+      await ctx.editMessageText(chosenText(driver.profile), { parse_mode: "HTML" }).catch(() => {});
+      return listMatches(ctx, driver);
+    }
+    if (from != null) {
+      if (!validArea(driver.profile, scope, from)) return askRoute(ctx, driver, { edit: true });
+      const rows = store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind: "yuk" });
+      const { text, keyboard } = toStep({ profile: driver.profile, scope, rows, from });
+      return render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, true);
+    }
+    if (!validArea(driver.profile, scope, routeFrom) || !validArea(driver.profile, scope, routeTo)) return askRoute(ctx, driver, { edit: true });
+    const updated = store.saveDriver(ctx.chat.id, { profile: applyRoute(driver.profile, routeFrom, routeTo) });
+    await ctx.editMessageText(chosenText(updated.profile), { parse_mode: "HTML" }).catch(() => {});
+    await listMatches(ctx, updated);
+    // Birinchi marta sozlagach — raqamni bir marta so'raymiz (ixtiyoriy)
+    if (shouldAskPhone(updated)) await askPhone(ctx, updated);
   });
 
   // Chatdagi savol-javob (Mini App bo'lmasa)
@@ -539,18 +626,18 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     }
   }
 
-  // Yuk bilan birga pastki menyu ham yangilanadi — faqat Mini App manzili haydovchida turganidan farq qilsa
-  // (tunnel qayta yoqildi yoki bot qayta ishga tushdi). Aks holda eski tugma o'chgan manzilni ochardi.
-  function freshMenu(chatId) {
-    if (shownUrl.has(chatId) && shownUrl.get(chatId) === (appUrl() ?? null)) return {};
-    const driver = store.getDriver(chatId);
-    return driver ? menu(driver) : {};
-  }
-
   // kind — "yuk" (haydovchiga) yoki "mashina" (yuk beruvchiga)
+  // Har bir yuk xabari pastki menyu bilan boradi (Azimjon, 2026-11-07: «bot ochilganida menyu ochiq bo'lsin»). Menyu
+  // yig'iladigan (menu.js), Telegram esa yopilgan menyuni yangi menyuli xabar kelguncha yopiq saqlaydi — bot chat
+  // ochilganini bilmaydi, shuning uchun yangi yuk kelganda menyu yana ochiq turadi. Manzil va token ham doim yangi.
   async function deliver(chatId, load, post, kind = "yuk") {
+    const driver = store.getDriver(chatId);
     try {
-      await bot.api.sendMessage(chatId, directText(load, post, kind), { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...freshMenu(chatId) });
+      await bot.api.sendMessage(chatId, directText(load, post, kind), {
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...(driver ? menu(driver) : {}),
+      });
       return true;
     } catch (error) {
       // 403 — foydalanuvchi botni bloklagan yoki o'chirgan: unga boshqa yubormaymiz

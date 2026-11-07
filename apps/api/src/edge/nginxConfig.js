@@ -35,7 +35,10 @@ http {
     sendfile on;
     keepalive_timeout 65;
 
-    access_log logs/access.log combined buffer=32k flush=10s;
+    # So'rov logi: manzilning ?... qismi va Referer YOZILMAYDI — botning menyu tugmasi manzilida foydalanuvchining
+    # kirish tokeni (?t=) bor (apps/bot menu.js). Shuning uchun $request emas, $uri (yo'lning o'zi)
+    log_format yuk '$remote_addr [$time_local] "$request_method $uri $server_protocol" $status $body_bytes_sent "$http_user_agent"';
+    access_log logs/access.log yuk buffer=32k flush=10s;
 
     client_body_temp_path temp/client_body;
     proxy_temp_path temp/proxy;

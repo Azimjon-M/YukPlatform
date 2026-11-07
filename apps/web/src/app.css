@@ -616,3 +616,336 @@ select:focus-visible {
 .user-actions:empty {
   display: none;
 }
+
+/* --- Ro'yxatdan o'tish qadamlari (Steps.jsx) --- */
+.steps {
+  margin: 0 0 6px;
+  padding: 12px 8px 10px;
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.steps ol {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps li {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Qadamlar orasidagi chiziq: o'tilgan qismi rangli */
+.steps li + li::before {
+  content: "";
+  position: absolute;
+  top: 13px;
+  right: calc(50% + 17px);
+  left: calc(-50% + 17px);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line);
+}
+
+.steps li.done + li::before {
+  background: var(--accent);
+}
+
+.steps button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hint);
+  font: inherit;
+  cursor: pointer;
+}
+
+.steps button:disabled {
+  cursor: default;
+}
+
+.steps .dot {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: var(--card);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.steps .name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.steps li.on button {
+  color: var(--text);
+}
+
+.steps li.on .dot {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.steps li.on .name {
+  font-weight: 600;
+}
+
+.steps li.done .dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.step-nav {
+  display: flex;
+  gap: 10px;
+}
+
+.step-nav .save {
+  flex: 1;
+}
+
+.step-nav .back {
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* «✅ Tekshiring» — oxirgi qadamdagi tanlanganlar; qatorni bosib, o'sha qadamga qaytiladi */
+.summary-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.summary-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 2px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+button.summary-row {
+  cursor: pointer;
+}
+
+.summary-row .icon {
+  flex-shrink: 0;
+  width: 24px;
+  font-size: 18px;
+  text-align: center;
+}
+
+.summary-row .text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.summary-row small {
+  color: var(--hint);
+  font-size: 12px;
+}
+
+.summary-row .edit {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 13px;
+}
+
+/* --- Saytga kirish (LoginPage.jsx) --- */
+.login-card .lead {
+  margin: 0 0 18px;
+}
+
+.login-steps {
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.login-steps li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 6px 0;
+  font-size: 15px;
+}
+
+.login-steps b {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 16%, var(--card));
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.login-card .primary.wide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 48px;
+  text-decoration: none;
+}
+
+.login-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 14px;
+  color: var(--hint);
+  font-size: 13px;
+}
+
+.login-or::before,
+.login-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+/* «📋 Yuklar»: haydovchining yo'nalishi (tepada) va uni tanlash (RoutePicker.jsx) */
+.route-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  font-size: 15px;
+}
+
+.route-bar span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.route-bar .link {
+  flex-shrink: 0;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+fieldset.plain {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+fieldset.plain:disabled {
+  opacity: 0.6;
+}
+
+.route-from {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.route-from .link {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.route-any {
+  margin-top: 8px;
+}
+
+.route-foot {
+  margin-top: 12px;
+}
+
+.route-foot .link {
+  padding: 0;
+  font-size: 14px;
+}
+
+/* Sozlamalar ostidagi «👤 Hisob» (AccountCard.jsx): chiqish va hisobni o'chirish */
+.account-who {
+  margin: 0 0 10px;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.secondary,
+.danger {
+  flex: 1 1 160px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.danger {
+  border-color: color-mix(in srgb, var(--error) 50%, transparent);
+  color: var(--error);
+}
+
+/* «Hisobdan chiqdingiz» ekranidagi tugmalar */
+.notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.notice-actions .secondary {
+  flex: 0 1 auto;
+}

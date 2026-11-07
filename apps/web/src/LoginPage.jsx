@@ -1,4 +1,5 @@
-// Saytga kirish (oddiy brauzerda). Telegram ichida bu sahifa chiqmaydi — u yerda kirish o'zi bo'ladi.
+// Saytga kirish (oddiy brauzerda). Telegram ichida bu sahifa HECH QACHON chiqmaydi (App.jsx): u yerda kirish o'zi bo'ladi
+// (initData yoki bot tugmasidagi ?t= token), bo'lmasa — sozlamalar botga sendData bilan saqlanadi.
 // «Telegram bilan kirish» vidjeti faqat BotFather'da /setdomain bilan ko'rsatilgan domenda ishlaydi (README).
 import { useEffect, useRef, useState } from "react";
 import { login } from "./api.js";
@@ -46,20 +47,33 @@ export function LoginPage({ config, onLogin }) {
     <div className="login">
       <div className="login-card">
         <h1>🚛 Yuk Ekspert</h1>
-        <p>Katta yuk guruhlaridan faqat sizning mashinangiz va yo'nalishingizga mos yuklar — bir joyda, xaritada, bosib qo'ng'iroq qilasiz.</p>
+        <p className="lead">Katta yuk guruhlaridagi e'lonlardan faqat sizning mashinangiz va yo'nalishingizga moslari — bir joyda, xaritada, bosib qo'ng'iroq qilasiz.</p>
         {config === null ? (
           <Spinner />
         ) : bot ? (
           <>
-            <p className="muted small">Kirish uchun Telegram akkauntingizni tasdiqlang (parol kerak emas):</p>
+            {/* Asosiy yo'l — bot: Telegram ichida kirish o'zi bo'ladi, domen sozlamasiga bog'liq emas */}
+            <ol className="login-steps">
+              <li>
+                <b>1</b>
+                <span>Botni oching va kim ekaningizni tanlang: haydovchi yoki yuk beruvchi</span>
+              </li>
+              <li>
+                <b>2</b>
+                <span>Pastdagi «🚚 Ro'yxatdan o'tish» tugmasi — 1 daqiqalik forma</span>
+              </li>
+              <li>
+                <b>3</b>
+                <span>Mos e'lonlar botga shaxsiy xabar bo'lib keladi</span>
+              </li>
+            </ol>
+            <a className="primary wide" href={`https://t.me/${bot}?start=web`} target="_blank" rel="noopener noreferrer">
+              📲 Telegram'da ochish
+            </a>
+            <div className="login-or">yoki shu saytga kiring</div>
             {busy ? <Spinner label="Kirilyapti..." /> : <TelegramLoginButton botUsername={bot} onAuth={auth} />}
-            <p className="muted small">
-              Yoki Telegram ichida oching:{" "}
-              <a href={`https://t.me/${bot}`} target="_blank" rel="noopener noreferrer">
-                @{bot}
-              </a>{" "}
-              → pastki menyu.
-            </p>
+            {/* Vidjet faqat BotFather'da /setdomain bilan ko'rsatilgan manzilda ishlaydi, tunnel manzili esa o'zgarib turadi */}
+            <p className="muted small">Kirish tugmasi o'rniga xato chiqsa («Bot domain invalid») — yuqoridagi tugma bilan Telegram'da oching.</p>
           </>
         ) : (
           <p className="muted">Kirish hozircha ishlamayapti: bot hali bir marta ham ishga tushirilmagan. Birozdan keyin urinib ko'ring.</p>

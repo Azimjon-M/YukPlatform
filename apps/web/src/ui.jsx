@@ -12,7 +12,8 @@ export function Section({ id, title, hint, error, children }) {
   );
 }
 
-// Tanlov tugmalari: selected(id) — tanlanganmi, onPick(id) — bosilganda
+// Tanlov tugmalari: selected(id) — tanlanganmi, onPick(id) — bosilganda.
+// Har tanlov: { id, label, sub? (o'ngda, qisqa: "20–40 tonna"), note? (nom ostida, uzunroq izoh) }
 export function Chips({ options, selected, onPick, layout = "wrap" }) {
   return (
     <div className={`chips ${layout}`}>
@@ -29,7 +30,14 @@ export function Chips({ options, selected, onPick, layout = "wrap" }) {
               onPick(o.id);
             }}
           >
-            <span>{o.label}</span>
+            {o.note ? (
+              <span className="chip-main">
+                <span>{o.label}</span>
+                <small className="note">{o.note}</small>
+              </span>
+            ) : (
+              <span>{o.label}</span>
+            )}
             {o.sub && <small>{o.sub}</small>}
           </button>
         );

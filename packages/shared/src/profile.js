@@ -1,18 +1,24 @@
 // Haydovchi profili — bot (chatdagi savol-javob), Mini App (forma) va match.js uchun bitta qoidalar.
 // Mini App'dan kelgan ma'lumotga ishonib bo'lmaydi: sanitizeProfile har bir maydonni ro'yxat va chegaradan o'tkazadi.
-// Profil ko'rinishi: { vehicle: { truckClass, bodyType, capacityKg, body, loadingSides }, fromAreas, toAreas,
-//                      domestic, international, mode }
+// Profil ko'rinishi: { vehicle: { truckClass, bodyType, capacityKg, body, bodyGuess, loadingSides }, fromAreas, toAreas,
+//                      domestic, international, routeAt, mode }
+// Yo'nalish (fromAreas / toAreas) ro'yxatdan o'tishda so'ralmaydi (Azimjon, 2026-11-07: haydovchi har kuni boshqa joyda) —
+// botda «📋 Mos yuklar» bosilganda tanlanadi (routeAt — qachon). Forma saqlaganda eski yo'nalish withRoute bilan qoladi.
 import { COUNTRIES, REGIONS, REGION_IDS } from "./regions.js";
 import { DEFAULT_ROUTE_SCOPE, scopeCountries, validRouteScope } from "./scope.js";
-import { BODY_TYPE_IDS, LOADING_SIDE_IDS, TRUCK_CLASS_IDS } from "./vehicles.js";
+import { BODY_TYPE_IDS, LOADING_SIDE_IDS, TRUCK_CLASS_IDS, bodyId, needsBodyType } from "./vehicles.js";
 
-// Sig'im tugmalari, tonna (do'stimiz aytgan odatdagi qiymatlar)
+// Sig'im tugmalari, tonna (do'stimiz va Azimjon aytgan odatdagi qiymatlar; 1 t dan kami formada kg bo'lib yoziladi)
 export const CAPACITY_OPTIONS = {
+  katta_fura: [20, 25, 30, 35, 40],
+  kamaz: [20, 25, 30, 35, 40],
   fura: [20, 22, 24, 25, 26],
   mini_fura: [9, 10, 12, 15],
-  isuzu: [5, 6, 7, 8, 9],
+  katta_isuzu: [6, 7, 8, 9, 10],
+  isuzu: [3, 4, 5],
   kichik: [1, 1.5, 2, 2.5, 3],
-  labo: [0.5, 0.7],
+  labo: [0.3, 0.5, 0.7],
+  yengil_avto: [0.2, 0.3, 0.4, 0.5],
 };
 
 export const INTL_OPTIONS = {
@@ -56,7 +62,9 @@ export const MODE_OPTIONS = {
   all: "Hamma yuklar",
 };
 
-export const SIDE_LABELS = { ust: "Ustidan", orqa: "Orqadan", yon: "Yonidan", chap: "Chapdan", ong: "O'ngdan" };
+export const SIDE_LABELS = { ust: "Ustidan", orqa: "Orqasidan", ong: "O'ngdan", chap: "Chapdan", yon: "Yonidan" };
+// Formadagi yuklash tomonlari (Azimjon, 2026-11-07): «Yonidan» yo'q — haydovchi o'zi o'ng yoki chapni tanlaydi
+export const FORM_SIDES = ["ust", "orqa", "ong", "chap"];
 
 // Ruxsat etilgan chegaralar (bundan tashqarisi — yozishda xato)
 export const CAPACITY_LIMITS_KG = [100, 60_000];
@@ -77,13 +85,27 @@ export function intlOption(profile) {
 
 export function emptyProfile() {
   return {
-    vehicle: { truckClass: null, bodyType: null, capacityKg: null, body: null, loadingSides: [] },
+    vehicle: { truckClass: null, bodyType: null, capacityKg: null, body: null, bodyGuess: false, loadingSides: [] },
     fromAreas: [],
     toAreas: [],
     domestic: true,
     international: false,
+    routeAt: null,
     mode: "own",
   };
+}
+
+// Haydovchi yo'nalishni tanlaganmi («📋 Mos yuklar» da). Tanlamaguncha bot unga yuk yubormaydi — aks holda butun
+// O'zbekistondagi yuklar keladi. 2026-11-07 gacha yo'nalish formada edi: shunday profilda routeAt yo'q, joylar bor.
+export const routeChosen = (profile) =>
+  profile?.routeAt != null || Boolean(profile?.fromAreas?.length) || Boolean(profile?.toAreas?.length);
+
+// Forma (web yoki chatdagi savol-javob) yo'nalishni so'ramaydi — saqlaganda eskisi qoladi.
+// Xalqaro yuklar o'chirilsa, yo'nalishdagi xorijiy joylar tashlanadi.
+export function withRoute(next, prev) {
+  if (!next) return next;
+  const areas = (list) => (next.international ? [...(list ?? [])] : (list ?? []).filter((a) => REGION_IDS.includes(a) && a !== "xorij"));
+  return { ...next, fromAreas: areas(prev?.fromAreas), toAreas: areas(prev?.toAreas), routeAt: prev?.routeAt ?? null };
 }
 
 const inRange = (value, [min, max]) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
@@ -107,17 +129,19 @@ export function sanitizeBody(body) {
 export function sanitizeProfile(input, { scope } = {}) {
   if (!input || typeof input !== "object") return { error: "Ma'lumot kelmadi" };
   const v = input.vehicle && typeof input.vehicle === "object" ? input.vehicle : {};
-  if (!TRUCK_CLASS_IDS.includes(v.truckClass)) return { error: "Mashina turini tanlang" };
+  if (!TRUCK_CLASS_IDS.includes(v.truckClass)) return { error: "Transport turini tanlang" };
+  const hasBody = needsBodyType(v.truckClass); // yengil mashinada kuzov yo'q
 
-  // "Boshqa" kuzov — match.js uchun "aytilmagan" (null)
-  const bodyType = v.bodyType == null || v.bodyType === "boshqa" ? null : v.bodyType;
+  // "Boshqa" kuzov — match.js uchun "aytilmagan" (null); eski kodlar (bort, tral...) — yangisiga
+  const raw = bodyId(v.bodyType);
+  const bodyType = !hasBody || raw == null || raw === "boshqa" ? null : raw;
   if (bodyType !== null && !BODY_TYPE_IDS.includes(bodyType)) return { error: "Kuzov turi noto'g'ri" };
 
   const capacityKg = Math.round(Number(v.capacityKg));
-  if (!inRange(capacityKg, CAPACITY_LIMITS_KG)) return { error: "Necha tonna yuk ko'tarishini kiriting" };
+  if (!inRange(capacityKg, CAPACITY_LIMITS_KG)) return { error: "Qancha yuk ko'tarishini kiriting" };
 
   let body = null;
-  if (v.body != null) {
+  if (v.body != null && hasBody) {
     body = sanitizeBody(v.body);
     if (!body) return { error: "Kuzov o'lchami noto'g'ri (uzunligi 1–20, eni 1–3.2, balandligi 0.5–4.5 m)" };
   }
@@ -130,12 +154,20 @@ export function sanitizeProfile(input, { scope } = {}) {
 
   return {
     profile: {
-      vehicle: { truckClass: v.truckClass, bodyType, capacityKg, body, loadingSides: pick(v.loadingSides, new Set(LOADING_SIDE_IDS)) },
+      vehicle: {
+        truckClass: v.truckClass,
+        bodyType,
+        capacityKg,
+        body,
+        bodyGuess: Boolean(body) && v.bodyGuess === true, // «Bilmayman» — odatdagi o'lcham olindi
+        loadingSides: hasBody ? pick(v.loadingSides, new Set(LOADING_SIDE_IDS)) : [],
+      },
       fromAreas: pick(input.fromAreas, areas),
       toAreas: pick(input.toAreas, areas),
       domestic,
       international,
-      mode: input.mode === "all" ? "all" : "own",
+      routeAt: Number.isFinite(input.routeAt) && input.routeAt > 0 ? input.routeAt : null,
+      mode: "own", // «Qaysi yuklarni yuboraylik» savoli olib tashlandi — faqat mashinaga mos (match.js)
     },
   };
 }
@@ -165,7 +197,7 @@ export function sanitizeShipperProfile(input, { scope } = {}) {
       domestic,
       international,
       truckClasses: pick(input.truckClasses, new Set(TRUCK_CLASS_IDS)),
-      bodyTypes: pick(input.bodyTypes, bodies),
+      bodyTypes: pick(Array.isArray(input.bodyTypes) ? input.bodyTypes.map(bodyId) : [], bodies),
     },
   };
 }

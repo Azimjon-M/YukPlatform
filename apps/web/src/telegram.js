@@ -1,15 +1,21 @@
-// Telegram Mini App bilan aloqa (telegram-web-app.js). Oddiy brauzerda ochilsa, tg bo'sh — ilova sayt bo'lib ishlaydi.
+// Telegram Mini App bilan aloqa (telegram-web-app.js). Oddiy brauzerda ochilsa, ilova sayt bo'lib ishlaydi.
 import { useEffect } from "react";
 
+// Kutubxona oddiy brauzerda ham Telegram.WebApp ni yaratadi (platform "unknown", initData bo'sh)
 const tg = window.Telegram?.WebApp ?? null;
 
-export const inTelegram = Boolean(tg?.initData);
-// Imzolangan ma'lumot: server uni bot tokeni bilan tekshirib, haydovchini taniydi (apps/api telegramAuth.js)
+// Imzolangan ma'lumot: server uni bot tokeni bilan tekshirib, foydalanuvchini taniydi (apps/api telegramAuth.js).
+// Inline tugma, chap pastdagi menyu tugmasi yoki t.me havolasidan ochilganda keladi.
 export const initData = tg?.initData ?? "";
-// sendData faqat botning pastki menyusidagi tugmadan ochilganda ishlaydi.
-// Menyu tugmasi yoki havoladan ochilsa, Telegram query_id beradi — u holda botga yuborib bo'lmaydi
-// (server bilan aloqa bo'lsa, sozlamalar server orqali saqlanadi — bu cheklov u yerda yo'q).
-export const canSendData = inTelegram && !tg.initDataUnsafe?.query_id;
+// Telegram ichidami. Botning PASTKI MENYU (reply keyboard) tugmasidan ochilganda Telegram initData'ni BO'SH beradi
+// (core.telegram.org/bots/webapps: "empty if the Mini App was launched from a keyboard button") — lekin platformani
+// (android / ios / tdesktop / weba ...) baribir aytadi. Shuning uchun faqat initData'ga qarab bo'lmaydi.
+export const inTelegram = Boolean(tg) && (Boolean(initData) || (tg.platform ?? "unknown") !== "unknown");
+// Pastki menyu tugmasidan ochilgan: kimligini bot tugma manziliga qo'ygan token (?t=) aytadi (api.js),
+// sozlamalar esa serverga ham, sendData bilan botga ham ketadi (bot chatda «✅ Saqlandi» deb, menyuni yangilaydi).
+// sendData faqat shu holatda ishlaydi — inline tugma / havoladan ochilsa, Telegram uni rad etadi.
+export const fromKeyboard = inTelegram && !initData;
+export const canSendData = fromKeyboard;
 const atLeast = (version) => Boolean(tg?.isVersionAtLeast?.(version));
 
 // Yorug' / qorong'i: Telegram mavzusidan, brauzerda — tizim sozlamasidan (xarita rasmlari shunga qarab)
@@ -75,6 +81,20 @@ export function openLink(url, event) {
   else tg.openLink(url);
 }
 
+// Telegram'ning tepadagi «← Orqaga» tugmasi (ro'yxatdan o'tishning oldingi qadamiga). visible=false — yashiriladi
+export function useBackButton(onBack, visible = true) {
+  useEffect(() => {
+    if (!inTelegram || !atLeast("6.1") || !visible) return undefined;
+    const button = tg.BackButton;
+    button.onClick(onBack);
+    button.show();
+    return () => {
+      button.offClick(onBack);
+      button.hide();
+    };
+  }, [onBack, visible]);
+}
+
 // Telegram'ning pastdagi katta tugmasi (MainButton). visible=false — yashiriladi
 export function useMainButton(text, onClick, visible = true) {
   useEffect(() => {
@@ -87,4 +107,11 @@ export function useMainButton(text, onClick, visible = true) {
       button.hide();
     };
   }, [text, onClick, visible]);
+}
+
+// Mini App'ni yopish (Telegram ichida). Saytda hech narsa qilmaydi → false
+export function closeApp() {
+  if (!inTelegram) return false;
+  tg.close();
+  return true;
 }

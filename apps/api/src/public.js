@@ -9,6 +9,11 @@
 //   PUT  /pub/me/role          { role } — haydovchi | yuk_beruvchi (har rolning sozlamalari saqlanadi, qaytganda tiklanadi)
 //   PUT  /pub/me/profile       { profile, role? } — sozlamalarni saqlash (bot ham shu qoidalar bilan tekshiradi)
 //   PATCH /pub/me              { active } — pauza / davom
+//   POST /pub/me/logout        hisobdan chiqish: rol va sozlamalar yashiriladi, bot yubormaydi (qayta kirsa — tiklanadi)
+//   DELETE /pub/me             hisobni o'chirish (botdagi /ochirish → «Hammasini o'chirish» bilan bir xil)
+//   GET  /pub/me/route         ?from&hours — haydovchining yo'nalish tanlovi: joylar va har biridagi mos yuklar soni
+//                              (from yo'q — «Qayerdan?» qadami, bor — «Qayerga?», "*" = hamma joydan)
+//   PUT  /pub/me/route         { from, to } — yo'nalishni saqlash ("*" = istalgan); botdagi «📋 Mos yuklar» bilan bir xil
 //   GET  /pub/loads            ?view=mine|all&from&to&hours&limit&offset — yuklar (haydovchiga), eng yangisi birinchi
 //   GET  /pub/trucks           xuddi shunday — bo'sh mashinalar (yuk beruvchiga)
 //   --- faqat adminlar (Mini App'dagi «🛠 Boshqaruv»), boshqalarga 403 ---
@@ -19,7 +24,21 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
 import { pacificDay } from "@yuk/parser";
-import { KIND_MATCHERS, KIND_ROLE, isAdmin, parseAdminIds, roleOf, routeInScope, sameArea, sanitizeProfileFor, validRole } from "@yuk/shared";
+import {
+  KIND_MATCHERS,
+  KIND_ROLE,
+  applyRoute,
+  isAdmin,
+  parseAdminIds,
+  roleOf,
+  routeCounts,
+  routeInScope,
+  sameArea,
+  sanitizeProfileFor,
+  validRole,
+  validRouteArea,
+  withRoute,
+} from "@yuk/shared";
 import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -52,7 +71,7 @@ const clientIp = (req) =>
 
 // Sozlamalar to'ldirilmagan bo'lsa nima deymiz (rolga qarab)
 const NEED_PROFILE = {
-  haydovchi: "Avval sozlamalarda mashina va yo'nalishni kiriting",
+  haydovchi: "Avval sozlamalarda transportingizni kiriting",
   yuk_beruvchi: "Avval sozlamalarda yo'nalishingizni kiriting",
 };
 const NEED_ROLE = "Avval kim ekaningizni tanlang: haydovchi yoki yuk beruvchi";
@@ -65,8 +84,17 @@ function atArea(load, side, area) {
 
 const text = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 60) : null);
 
-// scope — yo'nalish doirasi (.env dagi ROUTE_SCOPE): undan tashqaridagi eski yuklar ko'rsatilmaydi
-export function createPublicApp({ store, env = process.env, sessions, scope, webDist = null, now = () => Date.now() }) {
+// Web'dan hisobdan chiqilganda bot chatiga yoziladigan xabar (pastki menyu ham olib tashlanadi — eski tugmalar eskirdi)
+export const SIGNED_OUT_TEXT =
+  "🚪 Hisobdan chiqdingiz. Endi bot sizga yuk yubormaydi.\n" +
+  "Qaytib kirish — /start: rolingizni tanlasangiz, sozlamalaringiz va yo'nalishingiz tiklanadi.";
+
+// Hisob web'dan o'chirilganda bot chatiga yoziladigan xabar (pastki menyu ham olib tashlanadi)
+export const DELETED_TEXT = "✅ Hisobingiz ilovadan o'chirildi: sozlamalar, yo'nalish va telefon raqamingiz. Endi sizga hech narsa yuborilmaydi.\nQaytadan boshlash — /start";
+
+// scope — yo'nalish doirasi (.env dagi ROUTE_SCOPE): undan tashqaridagi eski yuklar ko'rsatilmaydi.
+// notify(chatId, text, extra) — bot nomidan xabar (botMessage.js); null — yuborilmaydi (testlarda soxtasi beriladi)
+export function createPublicApp({ store, env = process.env, sessions, scope, webDist = null, notify = null, now = () => Date.now() }) {
   const app = express();
   app.disable("x-powered-by");
   const botToken = env.BOT_TOKEN?.trim() || null;
@@ -96,7 +124,7 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     res.set({
       "access-control-allow-origin": "*",
       "access-control-allow-headers": "authorization, content-type, ngrok-skip-browser-warning",
-      "access-control-allow-methods": "GET, POST, PUT, PATCH, OPTIONS",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "access-control-max-age": "600",
       "cache-control": "no-store",
     });
@@ -157,7 +185,10 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     const result = sanitizeProfileFor(role, req.body?.profile, { scope });
     if (result.error) throw httpError(400, result.error);
     if (roleOf(req.driver) !== role) store.switchRole(req.driver.chatId, role);
-    res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile: result.profile, draft: null, active: true })));
+    // Haydovchi formasida yo'nalish yo'q (u botdagi «📋 Mos yuklar» da tanlanadi) — eskisi qoladi
+    const before = store.getDriver(req.driver.chatId)?.profile;
+    const profile = role === "haydovchi" ? withRoute(result.profile, before) : result.profile;
+    res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile, draft: null, active: true })));
   });
 
   pub.patch("/me", (req, res) => {
@@ -167,6 +198,53 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     if (active && !role) throw httpError(409, NEED_ROLE, "no_role");
     if (active && !req.driver.profile) throw httpError(409, NEED_PROFILE[role], "no_profile");
     res.json(meOf(store.saveDriver(req.driver.chatId, { active })));
+  });
+
+  // Hisobdan chiqish. Faqat tokenni o'chirish yetmaydi: Telegram'da bot odamni baribir taniydi va Mini App o'zi kiradi
+  // (2026-11-07 da shunday bo'lgan — «chiqmadi»). Shuning uchun serverda: store.signOut — rol va sozlamalar yashiriladi,
+  // yuborish to'xtaydi, bot uni yangi foydalanuvchidek ko'radi. Qayta kirib rolni tanlasa — sozlamalari tiklanadi.
+  pub.post("/me/logout", (req, res) => {
+    const { chatId } = req.driver;
+    const user = store.signOut(chatId);
+    void notify?.(chatId, SIGNED_OUT_TEXT, { reply_markup: { remove_keyboard: true } }); // xatoni o'zi yutadi
+    res.json(meOf(user));
+  });
+
+  // Hisobni o'chirish: drivers jadvalidagi qator butunlay (rol, ikkala rolning sozlamalari, yo'nalish, telefon, admin belgisi).
+  // Boshqa jadvallarda unga bog'liq narsa yo'q. Tokenlar o'z-o'zidan ishlamay qoladi (qator yo'q → 401).
+  // Keyin botga kirsa yoki ilovaga qayta kirsa — yangi, bo'sh hisob ochiladi (rol tanlashdan boshlanadi).
+  pub.delete("/me", (req, res) => {
+    const { chatId } = req.driver;
+    store.deleteDriver(chatId);
+    // Javobni kutmaymiz: chatdagi pastki menyu eskirdi — bot nomidan «o'chirildi» deb yozib, menyuni olib tashlaymiz
+    void notify?.(chatId, DELETED_TEXT, { reply_markup: { remove_keyboard: true } }); // xatoni o'zi yutadi
+    res.json({ deleted: true });
+  });
+
+  // Yo'nalish — faqat sozlamalarini to'ldirgan haydovchiga (yuk beruvchining yo'nalishi sozlamalarida)
+  const driverProfile = (driver) => {
+    const role = roleOf(driver);
+    if (!role) throw httpError(409, NEED_ROLE, "no_role");
+    if (role !== "haydovchi") throw httpError(409, "Yo'nalish tanlash — haydovchilar uchun", "role");
+    if (!driver.profile) throw httpError(409, NEED_PROFILE.haydovchi, "no_profile");
+    return driver.profile;
+  };
+
+  // Tugmalardagi son — tanlangan muddatda (6/24/72 soat) mashinasiga sig'adigan yuklar, doiradan tashqaridagilarsiz
+  pub.get("/me/route", (req, res) => {
+    const profile = driverProfile(req.driver);
+    const hours = clamp(Number(req.query.hours) || 24, 1, MAX_HOURS);
+    const from = text(req.query.from);
+    if (from && !validRouteArea(profile, scope, from)) throw httpError(400, "Bunday joy tanlab bo'lmaydi");
+    const rows = store.recentLoads({ sinceMs: hours * HOUR, limit: 5000, kind: "yuk" }).filter(({ load }) => routeInScope(load, scope));
+    res.json({ hours, from, ...routeCounts({ profile, scope, rows, from }) });
+  });
+
+  pub.put("/me/route", (req, res) => {
+    const profile = driverProfile(req.driver);
+    const { from, to } = req.body ?? {};
+    if (!validRouteArea(profile, scope, from) || !validRouteArea(profile, scope, to)) throw httpError(400, "Bunday joy tanlab bo'lmaydi");
+    res.json(meOf(store.saveDriver(req.driver.chatId, { profile: applyRoute(profile, from, to, now()) })));
   });
 
   // kind "yuk" — yuklar (haydovchiga), "mashina" — bo'sh mashinalar (yuk beruvchiga).
@@ -264,6 +342,9 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
         hasProfile: Boolean(u.profile),
         registering: u.registering,
         active: u.active,
+        // Hisobdan chiqqan: role null (bot yubormaydi), lekin qaysi roldan chiqqani ko'rsatiladi
+        signedOut: !u.role && u.signedOutAt != null,
+        signedOutRole: u.role ? null : u.signedOutRole,
         updatedAt: u.updatedAt,
       }));
     res.json({ total: items.length, items: items.slice(0, 200) });

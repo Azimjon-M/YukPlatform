@@ -4,20 +4,22 @@
 // Haydovchi (ro'yxatdan o'tganda kiritadi):
 // {
 //   vehicle: {
-//     truckClass: "isuzu",                 // TRUCK_CLASS_IDS
-//     bodyType: "tent",                    // BODY_TYPE_IDS
+//     truckClass: "isuzu",                 // TRUCK_CLASS_IDS (katta_isuzu ham "isuzu" yuklarini oladi — truckFamily)
+//     bodyType: "tent",                    // BODY_TYPE_IDS (ref izotermik yukni ham oladi — BODY_ACCEPTS)
 //     capacityKg: 5000,                    // necha kg ko'taradi
 //     body: { lengthM: 4.85, widthM: 2.15, heightM: 1.95 }, // kuzov ichki o'lchami → kub va palet hisoblanadi
 //     loadingSides: ["orqa", "ust"],       // LOADING_SIDE_IDS; chap/o'ng — mashinaga ORQASIDAN qaraganda
 //   },
-//   mode: "own",              // "own" — faqat mashinamga mos yuklar; "all" — hammasini ko'rish (mashina tekshirilmaydi)
+//   mode: "own",              // eski maydon: "all" (hammasini ko'rish) 2026-11-07 dan e'tiborsiz — faqat mashinaga mos yuk
 //   domestic: true,           // O'zbekiston ichidagi yuklar
 //   international: false,     // xalqaro yuklar — alohida rejim
 //   fromAreas: ["toshkent"],  // qayerdan yuk olaman: viloyat kodi, "xorij" (istalgan xorijiy joy) yoki davlat nomi ("Rossiya")
 //   toAreas: [],              // qayerga (masalan, qaytish yuki uchun uy viloyati); bo'sh — istalgan joyga
+//                             // (ikkalasi ham botdagi «📋 Mos yuklar» da tanlanadi, formada emas)
 // }
 import { sameArea } from "./regions.js";
-import { PALLET, TRUCK_CLASSES } from "./vehicles.js";
+import { BODY_ACCEPTS, PALLET, TRUCK_CLASSES, bodyId, bodyTypeOf, countsPallets, truckClassOf, truckFamily } from "./vehicles.js";
+import { weightText } from "./loadText.js";
 
 const HOME = "O'zbekiston";
 
@@ -34,6 +36,7 @@ export function vehicleVolumeM3(vehicle = {}) {
 const CLEARANCE_M = 0.02;
 export function vehiclePallets(vehicle = {}) {
   if (vehicle.pallets) return vehicle.pallets;
+  if (!countsPallets(vehicle.bodyType)) return null; // samosval, sisterna... — palet qo'yilmaydi
   const b = vehicle.body;
   if (!b?.lengthM || !b?.widthM) return null;
   const fit = (along, across) => Math.floor((b.lengthM - CLEARANCE_M) / along) * Math.floor((b.widthM - CLEARANCE_M) / across);
@@ -60,7 +63,7 @@ export function loadFitsVehicle(load, vehicle = {}) {
 
   const capacityKg = vehicleCapacityKg(vehicle);
   if (load.weightT != null && capacityKg != null && load.weightT * 1000 > capacityKg) {
-    reasons.push(`og'irligi ${load.weightT} t, mashina ${capacityKg / 1000} t ko'taradi`);
+    reasons.push(`og'irligi ${weightText(load.weightT)}, mashina ${weightText(capacityKg / 1000)} ko'taradi`);
   }
 
   const volume = vehicleVolumeM3(vehicle);
@@ -73,13 +76,14 @@ export function loadFitsVehicle(load, vehicle = {}) {
     reasons.push(`${load.pallets} ta palet, kuzovga ${pallets} ta sig'adi`);
   }
 
-  // Isuzu haydovchisi faqat o'ziga mos yukni ko'rishni xohlaydi: sinf yozilgan bo'lsa, aynan shu sinf
-  if (load.truckClass && vehicle.truckClass && load.truckClass !== vehicle.truckClass) {
-    reasons.push(`${load.truckClass} kerak`);
+  // Isuzu haydovchisi faqat o'ziga mos yukni ko'rishni xohlaydi: sinf yozilgan bo'lsa, aynan shu sinf.
+  // AI "katta fura" ni ham "fura" deydi — katta fura haydovchisi fura yuklarini oladi, og'irligini yuqorida tekshirdik
+  if (load.truckClass && vehicle.truckClass && truckFamily(load.truckClass) !== truckFamily(vehicle.truckClass)) {
+    reasons.push(`${truckClassOf(load.truckClass)?.name ?? load.truckClass} kerak`);
   }
 
-  if (load.bodyType && vehicle.bodyType && load.bodyType !== vehicle.bodyType) {
-    reasons.push(`${load.bodyType} kuzov kerak`);
+  if (!bodyFits(load.bodyType, vehicle.bodyType)) {
+    reasons.push(`${bodyTypeOf(load.bodyType)?.name ?? load.bodyType} kuzov kerak`);
   }
 
   // Yuklash tomoni: e'londagi tomonlardan BIRORTASI mashinada bo'lsa yetadi
@@ -92,6 +96,14 @@ export function loadFitsVehicle(load, vehicle = {}) {
   }
 
   return { ok: reasons.length === 0, reasons };
+}
+
+// Yukka kerak kuzov (yoki aytilmagan) shu mashinada bormi. Eski kodlar (bort → plashatka) yangisiga o'giriladi
+export function bodyFits(need, has) {
+  const a = bodyId(need);
+  const b = bodyId(has);
+  if (!a || !b || a === "boshqa" || b === "boshqa") return true;
+  return a === b || (BODY_ACCEPTS[b] ?? []).includes(a);
 }
 
 // Joy haydovchi tanlagan hududlardan biriga tushadimi.
@@ -112,10 +124,11 @@ export function routeMatches(load, driver = {}) {
   return { ok: reasons.length === 0, reasons };
 }
 
-// Yuk haydovchiga yuboriladimi. "all" rejimida mashina tekshirilmaydi, yo'nalish esa doim tekshiriladi.
+// Yuk haydovchiga yuboriladimi: yo'nalish va mashina doim tekshiriladi. Eski «hammasini ko'rish» (mode "all") rejimi
+// olib tashlandi (Azimjon, 2026-11-07: «faqat transportiga mos yukni jo'natish kerak») — bazadagi eski profillarda ham
 export function matchLoad(load, driver = {}) {
   const route = routeMatches(load, driver);
-  const fit = driver.mode === "all" ? { ok: true, reasons: [] } : loadFitsVehicle(load, driver.vehicle);
+  const fit = loadFitsVehicle(load, driver.vehicle);
   const reasons = [...route.reasons, ...fit.reasons];
   return { ok: reasons.length === 0, reasons };
 }
@@ -141,11 +154,12 @@ export function matchTruck(truck, shipper = {}) {
   if (known("from") && !inAreas(truck.fromRegion, truck.fromCountry, shipper.fromAreas)) reasons.push("boshqa joyda");
   if (known("to") && !inAreas(truck.toRegion, truck.toCountry, shipper.toAreas)) reasons.push("boshqa tomonga boradi");
 
-  if (truck.truckClass && shipper.truckClasses?.length && !shipper.truckClasses.includes(truck.truckClass)) {
-    reasons.push(`${truck.truckClass} kerak emas`);
+  // Yuk beruvchi «Katta fura» ni tanlagan bo'lsa — AI "fura" degan bo'sh mashinalar ham (sinf oilasi bo'yicha)
+  if (truck.truckClass && shipper.truckClasses?.length && !shipper.truckClasses.some((id) => truckFamily(id) === truckFamily(truck.truckClass))) {
+    reasons.push(`${truckClassOf(truck.truckClass)?.name ?? truck.truckClass} kerak emas`);
   }
-  if (truck.bodyType && shipper.bodyTypes?.length && !shipper.bodyTypes.includes(truck.bodyType)) {
-    reasons.push(`${truck.bodyType} kuzov kerak emas`);
+  if (truck.bodyType && shipper.bodyTypes?.length && !shipper.bodyTypes.some((id) => bodyFits(id, truck.bodyType))) {
+    reasons.push(`${bodyTypeOf(truck.bodyType)?.name ?? truck.bodyType} kuzov kerak emas`);
   }
   return { ok: reasons.length === 0, reasons };
 }
