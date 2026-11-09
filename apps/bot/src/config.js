@@ -58,7 +58,15 @@ export function readConfig(env = process.env) {
   // bot o'z kanalining postlarini (va muhokama guruhidagi nusxalarini) yangi e'lon deb navbatga olmasin.
   const channelLoads = readFlag(env.CHANNEL_LOADS);
 
-  return { token, channel, channelLoads, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope, maxPostAgeMs };
+  const ruleParser = ruleParserOn(env);
+
+  return { token, channel, channelLoads, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope, maxPostAgeMs, ruleParser };
+}
+
+// AI'siz qoidaviy parser (pipeline.js ruleParse). Standart — YOQIQ (Azimjon, 2026-11-09: «Ha, ulab qo'y»);
+// RULE_PARSER=0 (yoki yo'q / off / false) — hamma e'lon avvalgidek AI'ga
+export function ruleParserOn(env = process.env) {
+  return !/^(0|yo'q|yoq|no|false|off)$/i.test(env.RULE_PARSER?.trim() ?? "");
 }
 
 // "1", "ha", "true", "on" — yoqilgan; bo'sh va boshqa hamma narsa — o'chiq

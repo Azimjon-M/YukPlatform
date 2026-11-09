@@ -91,7 +91,7 @@ test("haydovchi: qoralama, profil, faol/pauza", () => {
   assert.deepEqual(store.stats().drivers, { total: 1, active: 0 });
 });
 
-test("telefon raqami (ixtiyoriy): saqlash, o'chirish, so'ralgan vaqt; foydalanuvchini butunlay o'chirish", () => {
+test("telefon raqami (ixtiyoriy): saqlash, o'chirish, so'ralgan vaqt; hisobni o'chirish va butunlay o'chirish", () => {
   const clock = fakeClock(5_000);
   const store = openStore({ file: ":memory:", now: clock.now });
   let user = store.saveDriver(42, { name: "Ali", role: "haydovchi", profile: { fromAreas: [] }, active: true });
@@ -107,9 +107,156 @@ test("telefon raqami (ixtiyoriy): saqlash, o'chirish, so'ralgan vaqt; foydalanuv
   user = store.saveDriver(42, { phone: null });
   assert.deepEqual([user.phone, user.phoneAt, user.phoneAskedAt], [null, null, 4_000]);
 
+  // Hisobni o'chirish — qator qoladi (Azimjon: «Hammasi saqlansin»), ikkinchi marta — false
   assert.equal(store.deleteDriver(42), true);
-  assert.equal(store.getDriver(42), null);
+  assert.notEqual(store.getDriver(42), null);
   assert.equal(store.deleteDriver(42), false);
+  // Butunlay o'chirish — faqat boshqaruv markazidan
+  assert.equal(store.purgeDriver(42), true);
+  assert.equal(store.getDriver(42), null);
+  assert.equal(store.purgeDriver(42), false);
+});
+
+test("hisobni o'chirish: qator va ma'lumot qoladi (snapshot), yuborish to'xtaydi; qaytsa — boshidan, «necha marta» qoladi", () => {
+  const clock = fakeClock(10_000);
+  const store = openStore({ file: ":memory:", now: clock.now });
+  const truck = { vehicle: { truckClass: "fura" }, fromAreas: ["toshkent"], toAreas: [], routeAt: 9_000 };
+  const cargo = { fromAreas: ["samarqand"], truckClasses: ["fura"] };
+  store.saveDriver(42, { name: "Ali", role: "yuk_beruvchi", profile: cargo, active: true });
+  store.switchRole(42, "haydovchi");
+  store.saveDriver(42, { profile: truck, phone: "+998901234567", isAdmin: true });
+  assert.equal(store.activeUsers("haydovchi").length, 1);
+
+  clock.advance(1_000);
+  assert.equal(store.deleteDriver(42, { via: "web" }), true);
+  const user = store.getDriver(42);
+  assert.deepEqual(
+    [user.role, user.profile, user.phone, user.isAdmin, user.active, user.deletedAt, user.deletedVia, user.deletedCount],
+    [null, null, null, false, false, 11_000, "web", 1],
+    "foydalanuvchi uchun hisob yopildi",
+  );
+  assert.equal(store.activeUsers("haydovchi").length, 0, "yuk yuborilmaydi");
+
+  // Boshqaruv markazida — hammasi ko'rinadi
+  const row = store.listDrivers().find((d) => d.chatId === 42);
+  assert.equal(row.name, "Ali");
+  assert.deepEqual(row.deletedSnapshot.profile, truck);
+  assert.deepEqual(row.deletedSnapshot.profiles, { yuk_beruvchi: cargo });
+  assert.equal(row.deletedSnapshot.phone, "+998901234567");
+  assert.equal(row.deletedSnapshot.role, "haydovchi");
+  assert.equal(row.deletedSnapshot.isAdmin, true);
+  const deletedEvent = store.driverDetails(42).events[0];
+  assert.equal(deletedEvent.type, "deleted");
+  assert.equal(deletedEvent.detail.via, "web");
+  assert.equal(deletedEvent.detail.phone, "+998901234567");
+
+  // Qaytdi: belgi olinadi, ma'lumot tiklanmaydi (boshidan boshlaydi), «1 marta o'chirgan» qoladi
+  clock.advance(1_000);
+  assert.equal(store.comeBack(42, "bot"), true);
+  assert.equal(store.comeBack(42, "bot"), false, "o'chirilmagan — hech narsa");
+  const back = store.getDriver(42);
+  assert.deepEqual([back.deletedAt, back.deletedCount, back.returnedAt, back.role, back.profile], [null, 1, 12_000, null, null]);
+  assert.equal(store.listDrivers()[0].deletedSnapshot, null);
+
+  // Ikkinchi marta o'chirsa — 2
+  store.saveDriver(42, { role: "haydovchi" });
+  store.deleteDriver(42, { via: "bot" });
+  assert.equal(store.getDriver(42).deletedCount, 2);
+  assert.deepEqual(
+    store.driverDetails(42).events.slice(0, 3).map((e) => e.type),
+    ["deleted", "role", "returned"],
+  );
+});
+
+test("tarix (user_events): rol, ro'yxatdan o'tish, yo'nalish, pauza, bloklash, raqam, admin, chiqish", () => {
+  const clock = fakeClock(1_000);
+  const store = openStore({ file: ":memory:", now: clock.now });
+  const types = () => store.driverDetails(42).events.map((e) => e.type).reverse();
+  store.saveDriver(42, { name: "Ali" });
+  store.saveDriver(42, { name: "Ali" }); // o'zgarish yo'q — voqea yo'q
+  store.switchRole(42, "haydovchi");
+  const truck = { vehicle: { truckClass: "fura" }, fromAreas: [], toAreas: [] };
+  store.saveDriver(42, { profile: truck });
+  store.saveDriver(42, { profile: { ...truck, vehicle: { truckClass: "isuzu" } } });
+  store.saveDriver(42, { profile: { ...truck, vehicle: { truckClass: "isuzu" }, fromAreas: ["toshkent"], routeAt: 2_000 } });
+  store.saveDriver(42, { active: false });
+  store.saveDriver(42, { active: true, why: "admin" });
+  store.saveDriver(42, { active: false, why: "blocked" });
+  store.saveDriver(42, { phone: "+998901234567" });
+  store.saveDriver(42, { phone: null });
+  store.saveDriver(42, { isAdmin: true });
+  store.signOut(42);
+  assert.deepEqual(types(), [
+    "joined",
+    "role",
+    "registered",
+    "settings",
+    "route",
+    "paused",
+    "resumed",
+    "blocked",
+    "phone",
+    "phone_removed",
+    "admin",
+    "signout",
+  ]);
+  const events = store.driverDetails(42).events;
+  assert.deepEqual(events.find((e) => e.type === "resumed").detail, { by: "admin" });
+  assert.deepEqual(events.find((e) => e.type === "route").detail, { fromAreas: ["toshkent"], toAreas: [] });
+  assert.deepEqual(events.find((e) => e.type === "role").detail, { from: null, to: "haydovchi", restored: false });
+  assert.equal(store.driverDetails(999), null);
+  // Jonli belgi: yangi voqea — drivers o'zgaradi
+  const before = store.changeMarks().drivers;
+  store.logEvent(42, "returned", { via: "bot" });
+  assert.notEqual(store.changeMarks().drivers, before);
+});
+
+test("pauza: kim va qachon (o'zi / 48 soat kirmagan / bloklagan); yoqilsa — tozalanadi; «24 soat» ogohlantirishi", () => {
+  const clock = fakeClock(1_000);
+  const store = openStore({ file: ":memory:", now: clock.now });
+  store.saveDriver(42, { name: "Ali", role: "haydovchi", profile: { fromAreas: [] }, active: true });
+  let user = store.getDriver(42);
+  assert.deepEqual([user.pausedAt, user.pausedBy, user.idleWarnedAt], [null, null, null]);
+
+  clock.advance(1_000);
+  store.markIdleWarned(42);
+  assert.equal(store.getDriver(42).idleWarnedAt, 2_000);
+  assert.equal(store.getDriver(42).updatedAt, 1_000, "ogohlantirish sozlama emas — updated_at o'zgarmaydi");
+
+  clock.advance(1_000);
+  user = store.saveDriver(42, { active: false, why: "idle" });
+  assert.deepEqual([user.active, user.pausedAt, user.pausedBy], [false, 3_000, "idle"]);
+  store.saveDriver(42, { active: false, why: "blocked" });
+  assert.equal(store.getDriver(42).pausedBy, "idle", "holat o'zgarmasa — sababi ham o'zgarmaydi");
+  user = store.saveDriver(42, { active: true });
+  assert.deepEqual([user.pausedAt, user.pausedBy], [null, null]);
+  user = store.saveDriver(42, { active: false });
+  assert.equal(user.pausedBy, "user", "o'zi ⏸ bosgan");
+
+  const row = store.listDrivers()[0];
+  assert.deepEqual([row.pausedBy, row.idleWarnedAt], ["user", 2_000]);
+  assert.deepEqual(
+    store.driverDetails(42).events.slice(0, 4).map((e) => [e.type, e.detail]),
+    [["paused", null], ["resumed", null], ["paused", { by: "idle" }], ["idle_warned", null]],
+  );
+});
+
+test("batafsil: ikkala rolning sozlamalari, yuborilgan yuklar (yo'nalish, xato, e'lon havolasi)", () => {
+  const clock = fakeClock(1_000);
+  const store = openStore({ file: ":memory:", now: clock.now });
+  store.saveDriver(7, { name: "Vali", role: "haydovchi", profile: { fromAreas: [] }, active: true });
+  store.switchRole(7, "yuk_beruvchi");
+  const post = store.addPost({ source: "@a", messageId: 1, link: "https://t.me/a/1", text: "Samarqanddan Toshkentga 20 t", postedAt: 5 });
+  const loadId = store.addLoad({ postId: post.id, key: "k", load: { fromCity: "Samarqand" }, kind: "mashina" });
+  store.addDelivery({ loadId, chatId: 7, ok: true });
+  clock.advance(1_000);
+  store.addDelivery({ loadId, chatId: 7, ok: false, error: "Forbidden: bot was blocked by the user" });
+  const details = store.driverDetails(7);
+  assert.deepEqual(details.profiles, { haydovchi: { fromAreas: [] } });
+  assert.deepEqual(details.deliveries, [
+    { ok: false, error: "Forbidden: bot was blocked by the user", at: 2_000, load: { fromCity: "Samarqand" }, kind: "mashina", link: "https://t.me/a/1" },
+    { ok: true, error: null, at: 1_000, load: { fromCity: "Samarqand" }, kind: "mashina", link: "https://t.me/a/1" },
+  ]);
 });
 
 test("switchRole: har rolning sozlamalari alohida saqlanadi, qaytganda tiklanadi", () => {
@@ -235,6 +382,78 @@ test("eski baza: ustunlardan oldin hisobdan chiqqanlar migratsiyada «chiqqan» 
   }
 });
 
+test("oxirgi faollik: bot/web, 15 s da bir martadan tez yozilmaydi, updated_at o'zgarmaydi", () => {
+  const clock = fakeClock();
+  const store = openStore({ file: ":memory:", now: clock.now });
+  store.touchDriver(5, "bot"); // yo'q foydalanuvchi — hech narsa
+  assert.equal(store.getDriver(5), null);
+  const created = store.saveDriver(5, { name: "Ali" });
+  clock.advance(1000);
+  store.touchDriver(5, "bot");
+  const seen = store.getDriver(5);
+  assert.deepEqual([seen.seenAt, seen.seenVia, seen.updatedAt], [clock.now(), "bot", created.updatedAt]);
+  clock.advance(5000);
+  store.touchDriver(5, "bot");
+  assert.equal(store.getDriver(5).seenAt, seen.seenAt, "15 s o'tmagan — yozilmaydi");
+  store.touchDriver(5, "web");
+  assert.deepEqual([store.getDriver(5).seenAt, store.getDriver(5).seenVia], [clock.now(), "web"], "web'ga o'tdi — darrov");
+  clock.advance(16_000);
+  store.touchDriver(5, "web");
+  assert.equal(store.getDriver(5).seenAt, clock.now());
+  assert.equal(store.listDrivers()[0].seenVia, "web");
+});
+
+test("olgan yuklari: bugun (Toshkent vaqti) / jami, oxirgisi yo'nalishi bilan, oxirgi xato; butunlay o'chirilsa — o'chadi", () => {
+  // 2026-11-09 00:30 Toshkent = 2026-11-08 19:30 UTC — «bugun» shu kun 00:00 Toshkent'dan
+  const clock = fakeClock(Date.UTC(2026, 10, 8, 19, 30));
+  const store = openStore({ file: ":memory:", now: clock.now });
+  store.saveDriver(7, { name: "Vali", role: "haydovchi", profile: { vehicle: {} }, active: true });
+  store.saveDriver(8, { name: "Ali" });
+  const post = store.addPost({ source: "@a", messageId: 1, text: "Samarqanddan Toshkentga 5 t", postedAt: clock.now() });
+  const yesterday = store.addLoad({ postId: post.id, key: "a", load: { fromRegion: "andijon", toRegion: "namangan" } });
+  const today = store.addLoad({ postId: post.id, key: "b", load: { fromCity: "Samarqand", fromRegion: "samarqand", toRegion: "toshkent_sh" } });
+
+  clock.advance(-60 * 60 * 1000); // 23:30 kecha
+  store.addDelivery({ loadId: yesterday, chatId: 7, ok: true });
+  clock.advance(60 * 60 * 1000 + 60_000); // 00:31 bugun
+  store.addDelivery({ loadId: today, chatId: 7, ok: true });
+  const lastAt = clock.now();
+  clock.advance(1000);
+  store.addDelivery({ loadId: today, chatId: 7, ok: false, error: "Forbidden: bot was blocked by the user" });
+
+  const [vali] = store.listDrivers().filter((d) => d.chatId === 7);
+  assert.deepEqual(vali.deliveries, {
+    today: 1,
+    total: 2,
+    lastAt,
+    lastLoad: { fromCity: "Samarqand", fromRegion: "samarqand", toRegion: "toshkent_sh" },
+    failed: 1,
+    lastError: "Forbidden: bot was blocked by the user",
+    lastErrorAt: clock.now(),
+  });
+  assert.deepEqual(store.listDrivers().find((d) => d.chatId === 8).deliveries, {
+    today: 0, total: 0, lastAt: null, lastLoad: null, failed: 0, lastError: null, lastErrorAt: null,
+  });
+
+  // Jonli belgilar: yangi yuborish — drivers va loads o'zgaradi, posts — yo'q
+  const before = store.changeMarks();
+  store.addDelivery({ loadId: today, chatId: 8, ok: true });
+  const after = store.changeMarks();
+  assert.deepEqual(
+    Object.keys(after).filter((k) => after[k] !== before[k]),
+    ["drivers", "loads"],
+  );
+  store.saveDriver(8, { active: true });
+  assert.notEqual(store.changeMarks().drivers, after.drivers);
+
+  // Hisobini o'chirsa — yuborilganlar ro'yxati qoladi; butunlay o'chirilsa (purge) — o'chadi
+  assert.equal(store.deleteDriver(7), true);
+  assert.equal(store.listDrivers().find((d) => d.chatId === 7).deliveries.total, 2, "hisobini o'chirsa ham qoladi");
+  assert.equal(store.purgeDriver(7), true);
+  store.saveDriver(7, { name: "Vali" });
+  assert.equal(store.listDrivers().find((d) => d.chatId === 7).deliveries.total, 0, "butunlay o'chirilganda yuborilganlar ro'yxati ham o'chdi");
+});
+
 test("collector kursori", () => {
   const store = openStore({ file: ":memory:" });
   assert.equal(store.getCursor("@a"), null);
@@ -255,4 +474,18 @@ test("oxirgi yuklar: eng yangisi birinchi, muddatdan eskisi tushmaydi", () => {
   assert.deepEqual(all[0].post, { source: "@a", link: "https://t.me/a/1", postedAt: 5 });
   assert.deepEqual(store.recentLoads({ sinceMs: 5_000 }).map((r) => r.load.fromCity), ["Andijon"]);
   assert.equal(store.recentLoads({ sinceMs: 60_000, limit: 1 }).length, 1);
+});
+
+test("takeNewPostsAfter: id'dan keyingi yangi e'lonlar; finishPost kim tushunganini yozadi", () => {
+  const store = openStore({ file: ":memory:" });
+  for (let i = 1; i <= 3; i++) store.addPost({ source: "@g", messageId: i, text: `e'lon matni ${i} ${"x".repeat(20)}`, postedAt: Date.now() });
+  const all = store.takeNewPostsAfter(0);
+  assert.deepEqual(all.map((p) => p.messageId), [1, 2, 3]);
+  assert.deepEqual(store.takeNewPostsAfter(all[1].id).map((p) => p.messageId), [3]);
+  store.finishPost(all[0].id, "done", null, "rules");
+  store.finishPost(all[1].id, "failed", "xato");
+  assert.deepEqual(store.takeNewPostsAfter(0).map((p) => p.messageId), [3], "tugaganlari olinmaydi");
+  const byId = Object.fromEntries(store.listPosts().items.map((p) => [p.messageId, p.parsedBy]));
+  assert.deepEqual(byId, { 1: "rules", 2: null, 3: null });
+  store.close();
 });

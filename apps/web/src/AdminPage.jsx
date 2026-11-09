@@ -1,5 +1,6 @@
 // 🛠 Boshqaruv — faqat adminlarga (Azimjon: "botda telegram webi orqali ochib ishlaydigan bo'lsin").
-// Ko'rsatkichlar, AI ulanishlari holati, foydalanuvchilar (yoqish / to'xtatish, rolni almashtirish).
+// Ko'rsatkichlar, AI ulanishlari holati, foydalanuvchilar (rolni almashtirish). Faol / pauza — faqat foydalanuvchining
+// o'zi (Azimjon, 2026-11-09), bu yerda faqat ko'rinadi; 48 soat botga kirmasa bot o'zi pauza qiladi.
 // Server har bir so'rovda admin ekanini tekshiradi (apps/api public.js /pub/admin). Admin qilish va obuna —
 // faqat kompyuterdagi boshqaruv markazidan (localhost:3000), bu yerdan emas.
 import { useCallback, useEffect, useState } from "react";
@@ -15,6 +16,8 @@ const ROLE_FILTERS = [
   { id: "yuk_beruvchi", label: "Yuk beruvchi" },
   { id: "none", label: "Rolsiz" },
 ];
+// Kim pauza qilgan (store paused_by)
+const PAUSED = { user: "pauzada (o'zi)", idle: "💤 avto-pauza (48 soat kirmagan)", blocked: "⛔ botni bloklagan", admin: "pauzada" };
 // AI ulanishi nega dam olyapti (parser pool.js pauseFor)
 const REASONS = { minute: "daqiqalik limit", daily: "kunlik limit", busy: "Google band", key: "kalit xatosi", model: "model ishlamayapti" };
 
@@ -81,12 +84,15 @@ function UserRow({ user, now, onChanged }) {
   // Hisobdan chiqqan: rol bo'sh (bot yubormaydi), sozlamalari saqlangan — qaysi roldan chiqqanini ko'rsatamiz
   const role = ROLES[user.role ?? (user.signedOut ? user.signedOutRole : null)];
   const otherRole = user.role === "haydovchi" ? "yuk_beruvchi" : user.role === "yuk_beruvchi" ? "haydovchi" : null;
-  const status = user.signedOut
+  // Hisobini o'chirgan — qator qoladi (to'liq ma'lumot — boshqaruv markazida); qaytgan bo'lsa — necha marta o'chirgani
+  const status = user.deleted
+    ? "🗑 hisobini o'chirgan"
+    : user.signedOut
     ? "🚪 hisobdan chiqqan"
     : user.hasProfile
       ? user.active
         ? "faol"
-        : "pauzada"
+        : (PAUSED[user.pausedBy] ?? "pauzada")
       : user.registering
         ? "ro'yxatdan o'tyapti"
         : "sozlamalar yo'q";
@@ -122,13 +128,9 @@ function UserRow({ user, now, onChanged }) {
       <p className="muted small">
         {user.username ? `@${user.username}` : `id ${user.chatId}`} · {role ? `${role.icon} ${role.name}` : "rol tanlanmagan"} · {status} ·{" "}
         {agoText(user.updatedAt, now)}
+        {!user.deleted && user.deletedCount > 0 && ` · ${user.deletedCount} marta o'chirib, qaytgan`}
       </p>
       <div className="user-actions">
-        {user.hasProfile && (
-          <button type="button" className={`pill${user.active ? "" : " paused"}`} disabled={busy} onClick={() => change({ active: !user.active })}>
-            {user.active ? "⏸ To'xtatish" : "▶️ Yoqish"}
-          </button>
-        )}
         {otherRole && (
           <button type="button" className="pill ghost" disabled={busy} onClick={switchRole}>
             {ROLES[otherRole].icon} {ROLES[otherRole].name} qilish
@@ -192,7 +194,15 @@ export function AdminPage({ onAuthLost }) {
       ...s,
       items: s.items.map((u) =>
         u.chatId === updated.chatId
-          ? { ...u, role: updated.role, active: updated.active, hasProfile: Boolean(updated.profile), registering: false, signedOut: false }
+          ? {
+              ...u,
+              role: updated.role,
+              active: updated.active,
+              pausedBy: updated.active ? null : u.pausedBy,
+              hasProfile: Boolean(updated.profile),
+              registering: false,
+              signedOut: false,
+            }
           : u,
       ),
     }));

@@ -2,10 +2,12 @@
 // nginx va tunnel — tashqi dasturlar (.exe); ularni src/edge/ dagi kichik Node dasturi ishga tushiradi va to'xtatadi.
 // To'xtatish: avval "stop" xabari (dastur o'zi yumshoq tugaydi), 8 s ichida tugamasa — majburan.
 // Kutilmaganda to'xtasa — 10 s dan keyin o'zi qayta ishga tushadi (10 daqiqada 5 martagacha).
+// ensure() (npm start dagi AUTOSTART): terminalda ishlayotgan nusxa bo'lsa — kutadi, u to'xtashi bilan o'zi yoqadi.
+// Shunda bot hech qachon «hech kim yoqmagan» holatda qolib ketmaydi (2026-11-09: eski PID tufayli bot yoqilmay qoldi).
 import { fork } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readRunLock } from "@yuk/store";
+import { BEAT_MS, readRunLock, removeRunLock } from "@yuk/store";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const NODE_FLAGS = ["--env-file-if-exists=../../.env", "--disable-warning=ExperimentalWarning"];
@@ -31,14 +33,17 @@ export class ProcessError extends Error {
 export function createProcessManager({
   definitions = PROCESSES,
   readLock = readRunLock,
+  removeLock = removeRunLock,
   restartDelayMs = 10_000,
   stopTimeoutMs = 8_000,
+  watchMs = 5_000,
+  staleGraceMs = 2 * BEAT_MS,
   onLine = null,
 } = {}) {
   const items = new Map(
     Object.entries(definitions).map(([name, def]) => [
       name,
-      { name, def, child: null, status: "stopped", pid: null, startedAt: null, exitCode: null, crashes: [], lines: [], seq: 0, want: false, timer: null, partial: {} },
+      { name, def, child: null, status: "stopped", pid: null, startedAt: null, exitCode: null, crashes: [], lines: [], seq: 0, want: false, timer: null, partial: {}, staleSince: null },
     ]),
   );
 
@@ -96,6 +101,7 @@ export function createProcessManager({
     }
     push(item, "system", `${restartDelayMs / 1000} s dan keyin qayta ishga tushadi`);
     item.timer = setTimeout(() => {
+      item.timer = null;
       if (!item.want || item.child) return;
       try {
         start(item.name);
@@ -112,7 +118,12 @@ export function createProcessManager({
     if (lock?.alive) {
       throw new ProcessError(409, `${item.def.title} terminalda ishlayapti (PID ${lock.pid}). Avval o'sha oynada Ctrl+C bosing.`);
     }
+    if (lock?.stale) {
+      push(item, "system", `data/run/${name}.json eskirgan: PID ${lock.pid} endi boshqa jarayonniki (fayl yangilanmayapti) — e'tiborsiz`);
+    }
     clearTimeout(item.timer);
+    item.timer = null;
+    item.staleSince = null;
     item.want = true;
     item.partial = {};
     const child = fork(item.def.module, item.def.args, {
@@ -128,6 +139,8 @@ export function createProcessManager({
     child.on("error", (error) => push(item, "system", `xato: ${error.message}`));
     child.on("exit", (code, signal) => {
       for (const stream of ["out", "err"]) if (item.partial[stream]?.trim()) push(item, stream, item.partial[stream]);
+      // Majburan o'ldirilgan bola o'z PID faylini o'chira olmaydi — biz o'chiramiz (faqat u o'shaniki bo'lsa)
+      removeLock(item.name, { pid: child.pid });
       const expected = item.status === "stopping" || !item.want;
       Object.assign(item, { child: null, pid: null, exitCode: code, status: expected ? "stopped" : "crashed" });
       push(item, "system", expected ? "■ to'xtadi" : `✖ kutilmaganda to'xtadi (${code ?? signal})`);
@@ -136,10 +149,54 @@ export function createProcessManager({
     return state(item);
   }
 
+  // AUTOSTART uchun: yoqadi; terminalda ishlayotgan nusxa bo'lsa — xato emas, u to'xtashini kutadi (watch)
+  function ensure(name) {
+    const item = get(name);
+    if (item.child) return state(item);
+    const lock = readLock(name);
+    if (lock?.alive) {
+      item.want = true;
+      push(item, "system", `terminalda ishlayotgan nusxa bor (PID ${lock.pid}) — u to'xtashi bilan shu yerdan yoqiladi`);
+      return state(item);
+    }
+    return start(name);
+  }
+
+  // Har watchMs da: yoqilishi kerak (want), lekin bolamiz yo'q va qayta yoqish taymeri ham kutmayapti —
+  // terminaldagi nusxa to'xtaganmi? To'xtagan bo'lsa — o'zimiz yoqamiz.
+  // PID tirik, fayl esa eskirgan (stale) bo'lsa — yana staleGraceMs kutamiz: kompyuter uyqudan endi uyg'ongan
+  // bo'lsa, ishlayotgan dastur faylni hali yangilashga ulgurmagan bo'lishi mumkin (ikki bot = 409 Conflict).
+  function watch(now = Date.now()) {
+    for (const item of items.values()) {
+      if (!item.want || item.child || item.timer || item.status === "stopping") {
+        item.staleSince = null;
+        continue;
+      }
+      const lock = readLock(item.name);
+      if (lock?.alive) {
+        item.staleSince = null;
+        continue;
+      }
+      if (lock?.stale) {
+        item.staleSince ??= now;
+        if (now - item.staleSince < staleGraceMs) continue;
+      }
+      push(item, "system", "terminaldagi nusxa to'xtadi — endi shu yerdan ishlaydi");
+      try {
+        start(item.name);
+      } catch (error) {
+        push(item, "system", `yoqilmadi: ${error.message}`);
+      }
+    }
+  }
+  const watcher = setInterval(watch, watchMs);
+  watcher.unref();
+
   async function stop(name) {
     const item = get(name);
     item.want = false;
     clearTimeout(item.timer);
+    item.timer = null;
     const child = item.child;
     if (!child) {
       if (item.status === "crashed") item.status = "stopped";
@@ -165,6 +222,8 @@ export function createProcessManager({
     list: () => [...items.values()].map(state),
     get: (name) => state(get(name)),
     start,
+    ensure,
+    watch,
     stop,
     async restart(name) {
       await stop(name);
@@ -176,6 +235,7 @@ export function createProcessManager({
       return { lines: item.lines.filter((line) => line.seq > after), last: item.seq };
     },
     async shutdown() {
+      clearInterval(watcher);
       await Promise.all([...items.keys()].map(stop));
     },
   };

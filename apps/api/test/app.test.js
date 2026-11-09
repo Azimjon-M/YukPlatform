@@ -81,12 +81,18 @@ test("yuklar va navbat: filtr, qayta urinish", async () => {
   assert.equal((await get("/api/posts?status=failed")).body.total, 0);
 });
 
-test("haydovchilar: faollashtirish, ro'yxatdan o'tmaganni yoqib bo'lmaydi", async () => {
-  assert.equal((await get("/api/drivers")).body.items.length, 2);
-  assert.equal((await send("PATCH", "/api/drivers/8", { active: true })).body.active, true);
-  assert.equal((await send("PATCH", "/api/drivers/7", { active: true })).status, 400);
-  assert.equal((await send("PATCH", "/api/drivers/9", { active: true })).status, 404);
-  assert.equal((await send("PATCH", "/api/drivers/8", { active: "ha" })).status, 400);
+test("haydovchilar: faol / pauzani boshqaruv markazidan o'zgartirib bo'lmaydi (faqat foydalanuvchi), admin — mumkin", async () => {
+  const list = (await get("/api/drivers")).body;
+  assert.equal(list.items.length, 2);
+  assert.equal(list.idleSince, null, "bot hali kuzatuvni boshlamagan");
+  const refused = await send("PATCH", "/api/drivers/8", { active: true });
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /faqat foydalanuvchining o'zi/);
+  assert.equal((await send("PATCH", "/api/drivers/8", { active: false, isAdmin: true })).status, 400, "active bo'lsa — hammasi rad");
+  assert.equal((await send("PATCH", "/api/drivers/8", { isAdmin: true })).body.isAdmin, true);
+  assert.equal((await send("PATCH", "/api/drivers/8", {})).status, 400);
+  assert.equal((await send("PATCH", "/api/drivers/9", { isAdmin: true })).status, 404);
+  assert.equal((await send("PATCH", "/api/drivers/8", { isAdmin: "ha" })).status, 400);
 });
 
 test("manbalar: qo'shish, takror, o'chirib-yoqish, o'chirish", async () => {

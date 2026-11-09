@@ -11,7 +11,7 @@ import { Section } from "./ui.jsx";
 const LOGOUT_QUESTION =
   "Hisobdan chiqasizmi? Bot sizga yuk yubormaydi. Ma'lumotlaringiz saqlanadi: qayta kirib rolingizni tanlasangiz, sozlamalaringiz tiklanadi.";
 const DELETE_QUESTION =
-  "Hisobingiz butunlay o'chirilsinmi? Rolingiz, sozlamalaringiz, yo'nalishingiz va telefon raqamingiz o'chadi, bot sizga boshqa yuk yubormaydi. Buni qaytarib bo'lmaydi.";
+  "Hisobingiz o'chirilsinmi? Bot sizga boshqa yuk yubormaydi, qaytsangiz boshidan ro'yxatdan o'tasiz. Ma'lumotlaringiz (raqam, sozlamalar, tarix) xizmat yozuvlarida saqlanib qoladi.";
 
 // me — serverdagi foydalanuvchi; onSignedOut(me) — hisobdan chiqilgach; onDeleted() — hisob o'chirilgach
 export function AccountCard({ me, onSignedOut, onDeleted }) {

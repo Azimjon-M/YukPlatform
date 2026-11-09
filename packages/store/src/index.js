@@ -7,9 +7,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { createAdminQueries } from "./admin.js";
+import { userEvents } from "./history.js";
 import { createAiQueries } from "./ai.js";
 
-export { acquireRunLock, isAlive, readRunLock, RUN_DIR } from "./lock.js";
+export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR } from "./lock.js";
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
 export { createSessions, LINK_PERIOD_S, SESSION_TTL_S } from "./sessions.js";
 export { TUNNEL_URL_KEY, tunnelUrl } from "./tunnel.js";
@@ -102,6 +103,29 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+
+-- Kimga qaysi yuk (yuk beruvchiga — bo'sh mashina) yuborildi (2026-11-09): boshqaruv markazidagi «Olgan yuklari».
+-- ok = 0 — Telegram qabul qilmadi (error: masalan «bot was blocked by the user»). Foydalanuvchi o'chirilsa — uniki ham o'chadi
+CREATE TABLE IF NOT EXISTS deliveries (
+  id INTEGER PRIMARY KEY,
+  load_id INTEGER NOT NULL,
+  chat_id INTEGER NOT NULL,
+  ok INTEGER NOT NULL,
+  error TEXT,
+  sent_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS deliveries_chat ON deliveries (chat_id, sent_at);
+
+-- Foydalanuvchi tarixi (2026-11-09, history.js): botga kelgani, rol, ro'yxatdan o'tgani, yo'nalish, pauza, raqam,
+-- hisobdan chiqqani, hisobini o'chirgani (detail — o'sha paytdagi hamma ma'lumot) va qaytgani. detail — JSON
+CREATE TABLE IF NOT EXISTS user_events (
+  id INTEGER PRIMARY KEY,
+  chat_id INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  detail TEXT,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS user_events_chat ON user_events (chat_id, id);
 `;
 
 // Eski bazaga yangi ustunlar (CREATE TABLE IF NOT EXISTS mavjud jadvalni o'zgartirmaydi)
@@ -110,6 +134,14 @@ function migrate(db) {
   // done_at — e'lon tahlil qilib bo'lingan vaqt (boshqaruv markazida tezlikni ko'rsatish uchun)
   if (!columns.includes("done_at")) db.exec("ALTER TABLE posts ADD COLUMN done_at INTEGER");
   db.exec("CREATE INDEX IF NOT EXISTS posts_done ON posts (done_at)");
+  // via (2026-11-09) — e'lon qanday kelgan: live (a'zo bo'lingan guruhdan Telegram o'zi yubordi) | poll (collector so'rab oldi) | NULL (eski / bot)
+  if (!columns.includes("via")) db.exec("ALTER TABLE posts ADD COLUMN via TEXT");
+  // parsed_by (2026-11-09) — e'lonni kim tushundi: rules (AI'siz qoidaviy parser, @yuk/parser parseByRules) | ai | NULL (eski / xato)
+  if (!columns.includes("parsed_by")) db.exec("ALTER TABLE posts ADD COLUMN parsed_by TEXT");
+  // Manbalar: collector akkaunti guruhga a'zomi (a'zo — jonli), qachon tekshirilgan. NULL — hali tekshirilmagan
+  const sourceColumns = db.prepare("PRAGMA table_info(sources)").all().map((c) => c.name);
+  if (!sourceColumns.includes("joined")) db.exec("ALTER TABLE sources ADD COLUMN joined INTEGER");
+  if (!sourceColumns.includes("checked_at")) db.exec("ALTER TABLE sources ADD COLUMN checked_at INTEGER");
 
   // Rollar (2026-11-06): role — haydovchi | yuk_beruvchi | NULL (hali tanlamagan);
   // plan — obuna (hozircha hammasi "free", pullik obuna keyin); is_admin — faqat boshqaruv markazidan yoqiladi
@@ -135,6 +167,24 @@ function migrate(db) {
   if (addSignedOut) db.exec("ALTER TABLE drivers ADD COLUMN signed_out_at INTEGER");
   if (!users.includes("signed_out_role")) db.exec("ALTER TABLE drivers ADD COLUMN signed_out_role TEXT");
   if (addSignedOut) markEarlySignOuts(db);
+  // Oxirgi faollik (2026-11-09): botga yozgan / tugma bosgan yoki web'ni ishlatgan vaqt; seen_via — "bot" | "web".
+  // updated_at dan farqi: u — sozlama o'zgargan vaqt, bu — shunchaki kirib ko'rgani ham
+  if (!users.includes("seen_at")) db.exec("ALTER TABLE drivers ADD COLUMN seen_at INTEGER");
+  if (!users.includes("seen_via")) db.exec("ALTER TABLE drivers ADD COLUMN seen_via TEXT");
+  // Hisobni o'chirish (2026-11-09, Azimjon: «o'chirsa ham turishi kerak»): qator qoladi, bot uni yangi odamdek ko'radi.
+  // deleted_snapshot — o'chirgan paytdagi rol, sozlamalar, raqam (JSON); deleted_count — necha marta o'chirgan;
+  // returned_at — o'chirgandan keyin oxirgi marta qaytgan vaqti
+  if (!users.includes("deleted_at")) db.exec("ALTER TABLE drivers ADD COLUMN deleted_at INTEGER");
+  if (!users.includes("deleted_via")) db.exec("ALTER TABLE drivers ADD COLUMN deleted_via TEXT");
+  if (!users.includes("deleted_count")) db.exec("ALTER TABLE drivers ADD COLUMN deleted_count INTEGER NOT NULL DEFAULT 0");
+  if (!users.includes("deleted_snapshot")) db.exec("ALTER TABLE drivers ADD COLUMN deleted_snapshot TEXT");
+  if (!users.includes("returned_at")) db.exec("ALTER TABLE drivers ADD COLUMN returned_at INTEGER");
+  // Pauza (2026-11-09): kim va qachon to'xtatdi — paused_by: "user" (o'zi ⏸) | "idle" (48 soat kirmagan, avtomatik) |
+  // "blocked" (botni bloklagan, 403) | "admin" (eski: boshqaruv markazidan — endi bu tugma yo'q). Yoqilsa — tozalanadi.
+  // idle_warned_at — «24 soat kirmadingiz» ogohlantirishi yuborilgan vaqt (@yuk/shared idle.js)
+  if (!users.includes("paused_at")) db.exec("ALTER TABLE drivers ADD COLUMN paused_at INTEGER");
+  if (!users.includes("paused_by")) db.exec("ALTER TABLE drivers ADD COLUMN paused_by TEXT");
+  if (!users.includes("idle_warned_at")) db.exec("ALTER TABLE drivers ADD COLUMN idle_warned_at INTEGER");
 
   // kind — yuk (yuk bor, mashina kerak) | mashina (mashina bo'sh, yuk kerak — yuk beruvchilarga)
   const loads = db.prepare("PRAGMA table_info(loads)").all().map((c) => c.name);
@@ -187,8 +237,38 @@ function driverRow(row) {
     // Hisobdan chiqqan bo'lsa: qachon va qaysi roldan (o'sha rolning sozlamalari — profiles[signedOutRole])
     signedOutAt: row.signed_out_at ?? null,
     signedOutRole: row.signed_out_role ?? null,
+    seenAt: row.seen_at ?? null,
+    seenVia: row.seen_via ?? null,
+    // Hisobini o'chirgan bo'lsa: qachon, qayerdan (bot | web); qaytsa — deletedAt null, returnedAt bor, deletedCount qoladi
+    deletedAt: row.deleted_at ?? null,
+    deletedVia: row.deleted_via ?? null,
+    deletedCount: row.deleted_count ?? 0,
+    returnedAt: row.returned_at ?? null,
+    // Pauza: qachon va kim (user | idle | blocked | admin); idleWarnedAt — «24 soat kirmadingiz» ogohlantirishi
+    pausedAt: row.paused_at ?? null,
+    pausedBy: row.paused_by ?? null,
+    idleWarnedAt: row.idle_warned_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+// touchDriver vaqtni shundan tez-tez yozmaydi (har xabarda bazaga yozish shart emas — «hozir faol» uchun yetarli)
+export const SEEN_EVERY_MS = 15_000;
+
+// Navbatdagi e'lon: bazadagi qator → bot ko'radigan shakl
+function queuedPost(row) {
+  return {
+    id: row.id,
+    source: row.source,
+    messageId: row.message_id,
+    link: row.link,
+    text: row.text,
+    postedAt: row.posted_at,
+    // Navbatga tushgan vaqt. postedAt'dan keyin: collector guruhni har ~1 daqiqada o'qigani uchun
+    // e'lon navbatga o'rtacha 40 s kechikib keladi (2026-11-05 o'lchovi)
+    queuedAt: row.created_at,
+    via: row.via, // live — a'zo bo'lingan guruhdan jonli kelgan (bot uni tezroq AI'ga yuboradi)
   };
 }
 
@@ -203,8 +283,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
   const q = {
     insertPost: db.prepare(
-      `INSERT OR IGNORE INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     recentSameText: db.prepare("SELECT id FROM posts WHERE text_key = ? AND posted_at > ? LIMIT 1"),
     newPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY id LIMIT ?"),
@@ -216,7 +296,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       `SELECT * FROM posts WHERE status = 'new' AND id NOT IN (SELECT value FROM json_each(?))
        ORDER BY posted_at DESC, id DESC LIMIT ?`,
     ),
-    finishPost: db.prepare("UPDATE posts SET status = ?, error = ?, done_at = ? WHERE id = ?"),
+    finishPost: db.prepare("UPDATE posts SET status = ?, error = ?, done_at = ?, parsed_by = COALESCE(?, parsed_by) WHERE id = ?"),
+    newPostsAfter: db.prepare("SELECT * FROM posts WHERE status = 'new' AND id > ? ORDER BY id LIMIT ?"),
     expirePosts: db.prepare(
       `UPDATE posts SET status = 'done', error = ?, done_at = ?
        WHERE status = 'new' AND posted_at < ? AND id NOT IN (SELECT value FROM json_each(?))`,
@@ -259,12 +340,12 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
     // --- E'lonlar navbati ---
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.
-    // → { id, status } yoki null (bu xabar allaqachon bor)
-    addPost({ source, messageId, link = null, text, postedAt = now() }, { dedupeWindowMs } = {}) {
+    // → { id, status } yoki null (bu xabar allaqachon bor). via — live | poll (collector), qolganlari null
+    addPost({ source, messageId, link = null, text, postedAt = now(), via = null }, { dedupeWindowMs } = {}) {
       const key = textKey(text);
       const same = dedupeWindowMs ? q.recentSameText.get(key, postedAt - dedupeWindowMs) : null;
       const status = same ? "duplicate" : "new";
-      const result = q.insertPost.run(source, messageId, link, text, key, postedAt, status, now());
+      const result = q.insertPost.run(source, messageId, link, text, key, postedAt, status, now(), via);
       if (result.changes === 0) return null;
       return { id: Number(result.lastInsertRowid), status };
     },
@@ -276,21 +357,18 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       const rows = exclude.length
         ? (newest ? q.newestPostsExcept : q.newPostsExcept).all(JSON.stringify(exclude), limit)
         : (newest ? q.newestPosts : q.newPosts).all(limit);
-      return rows.map((row) => ({
-        id: row.id,
-        source: row.source,
-        messageId: row.message_id,
-        link: row.link,
-        text: row.text,
-        postedAt: row.posted_at,
-        // Navbatga tushgan vaqt. postedAt'dan keyin: collector guruhni har ~1 daqiqada o'qigani uchun
-        // e'lon navbatga o'rtacha 40 s kechikib keladi (2026-11-05 o'lchovi)
-        queuedAt: row.created_at,
-      }));
+      return rows.map(queuedPost);
     },
 
-    finishPost(id, status, error = null) {
-      q.finishPost.run(status, error, now(), id);
+    // Navbatdagi, id'si afterId dan katta e'lonlar, kelgan tartibida. Bot ularni qoidaviy parserdan o'tkazadi:
+    // har e'lonni bir marta ko'radi (ishonchli bo'lmasa, e'lon navbatda AI'ni kutadi). Hech narsani band qilmaydi
+    takeNewPostsAfter(afterId = 0, limit = 50) {
+      return q.newPostsAfter.all(afterId, limit).map(queuedPost);
+    },
+
+    // parsedBy — e'lonni kim tushundi: "rules" | "ai" (berilmasa — o'zgarmaydi)
+    finishPost(id, status, error = null, parsedBy = null) {
+      q.finishPost.run(status, error, now(), parsedBy, id);
     },
 
     // Navbatda `before` dan oldin JOYLANGAN e'lonlarni AI'siz yopadi: done + izoh (admin «Tayyor» ichida izohi bilan
@@ -337,14 +415,25 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     // Rol berilsa (qayta kirdi) — «hisobdan chiqqan» belgisi tozalanadi.
     // Rolni tekshirish (haydovchi | yuk_beruvchi) va raqamni tozalash (@yuk/shared normalizeContactPhone) chaqiruvchining ishi.
     // phone: null — raqamni o'chiradi (phone_at ham).
+    // why — kim / nega (tarix va paused_by uchun): "blocked" (bot yubora olmadi, 403) | "idle" (48 soat kirmagan —
+    // apps/bot idle.js) | "admin" (boshqaruv markazidan, endi faqat isAdmin). Berilmasa — foydalanuvchining o'zi.
+    // Nima o'zgargan bo'lsa — user_events ga yoziladi (history.js: rol, ro'yxatdan o'tdi, yo'nalish, pauza, raqam...)
     saveDriver(chatId, fields) {
       const time = now();
+      const before = this.getDriver(chatId);
       q.insertDriver.run(chatId, fields.name ?? null, fields.username ?? null, time, time);
       const columns = { name: fields.name, username: fields.username, active: fields.active, role: fields.role, plan: fields.plan };
       if ("profile" in fields) columns.profile = json(fields.profile);
       if ("profiles" in fields) columns.profiles = json(fields.profiles);
       if ("draft" in fields) columns.draft = json(fields.draft);
-      if (typeof columns.active === "boolean") columns.active = columns.active ? 1 : 0;
+      if (typeof columns.active === "boolean") {
+        // Pauza bo'lsa — kim va qachon; yoqilsa — tozalanadi (faqat holat o'zgarganda)
+        if (before && before.active !== columns.active) {
+          columns.paused_at = columns.active ? null : time;
+          columns.paused_by = columns.active ? null : (fields.why ?? "user");
+        }
+        columns.active = columns.active ? 1 : 0;
+      }
       if (typeof fields.isAdmin === "boolean") columns.is_admin = fields.isAdmin ? 1 : 0;
       if ("phone" in fields) {
         columns.phone = fields.phone ?? null;
@@ -358,7 +447,14 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       const set = Object.entries(columns).filter(([, value]) => value !== undefined);
       const sql = `UPDATE drivers SET ${[...set.map(([k]) => `${k} = ?`), "updated_at = ?"].join(", ")} WHERE chat_id = ?`;
       db.prepare(sql).run(...set.map(([, value]) => value), time, chatId);
-      return this.getDriver(chatId);
+      const after = this.getDriver(chatId);
+      for (const event of userEvents(before, after, fields.why ?? null)) this.logEvent(chatId, event.type, event.detail);
+      return after;
+    },
+
+    // Tarixga bitta voqea (history.js; signout / deleted / returned — shu fayldagi funksiyalardan)
+    logEvent(chatId, type, detail = null) {
+      db.prepare("INSERT INTO user_events (chat_id, type, detail, at) VALUES (?, ?, ?, ?)").run(chatId, type, json(detail), now());
     },
 
     // Rolni almashtirish — bot (/rol, «🔄 Rolni almashtirish»), Mini App va admin shu bitta funksiya orqali.
@@ -388,13 +484,87 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       if (user.role && user.profile) profiles[user.role] = user.profile;
       this.saveDriver(chatId, { role: null, profile: null, profiles, draft: null, active: false });
       db.prepare("UPDATE drivers SET signed_out_at = ?, signed_out_role = ? WHERE chat_id = ?").run(now(), user.role ?? null, chatId);
+      this.logEvent(chatId, "signout", { role: user.role ?? null });
       return this.getDriver(chatId);
     },
 
-    // Botdagi /ochirish → «Hammasini o'chirish»: foydalanuvchining yozuvi butunlay o'chadi (ism, rol, sozlamalar, raqam).
-    // Boshqa jadvallarda unga bog'liq narsa yo'q (loads.sent_to — faqat son). → true (o'chirildi) yoki false (yo'q edi)
-    deleteDriver(chatId) {
+    // Hisobni o'chirish: botdagi /ochirish → «Hisobni o'chirish» yoki web Sozlamalar → «🗑 Hisobni o'chirish».
+    // Azimjon (2026-11-09, «Hammasi saqlansin»): qator va hamma ma'lumot qoladi — boshqaruv markazida «🗑 Hisobini o'chirgan».
+    // Foydalanuvchi uchun esa hisob yopiladi: rol, sozlamalar, raqam va admin belgisi tozalanadi (o'sha paytdagisi
+    // deleted_snapshot da va tarixdagi «deleted» voqeasida), yuborish to'xtaydi, web tokenlari ishlamaydi (public.js).
+    // Qaytsa (comeBack) — bot uni yangi odamdek ko'radi, boshidan ro'yxatdan o'tadi; «necha marta o'chirgan» qoladi.
+    // Butunlay o'chirish (odam talab qilsa) — faqat boshqaruv markazidan: purgeDriver. via — "bot" | "web".
+    // → true (o'chirildi) yoki false (yo'q yoki allaqachon o'chirilgan)
+    deleteDriver(chatId, { via = null } = {}) {
+      const user = this.getDriver(chatId);
+      if (!user || user.deletedAt != null) return false;
+      const snapshot = {
+        role: user.role,
+        profile: user.profile,
+        profiles: user.profiles,
+        phone: user.phone,
+        phoneAt: user.phoneAt,
+        isAdmin: user.isAdmin,
+        active: user.active,
+        signedOutAt: user.signedOutAt,
+        signedOutRole: user.signedOutRole,
+      };
+      db.prepare(
+        `UPDATE drivers SET role = NULL, profile = NULL, profiles = NULL, draft = NULL, active = 0, is_admin = 0,
+           phone = NULL, phone_at = NULL, phone_asked_at = NULL, signed_out_at = NULL, signed_out_role = NULL,
+           deleted_at = ?, deleted_via = ?, deleted_count = deleted_count + 1, deleted_snapshot = ?
+         WHERE chat_id = ?`,
+      ).run(now(), via, json(snapshot), chatId);
+      this.logEvent(chatId, "deleted", { via, ...snapshot });
+      return true;
+    },
+
+    // O'chirgan odam qaytdi (botga yozdi yoki ilovaga qayta kirdi): «o'chirilgan» belgisi olinadi, qaytgan vaqti yoziladi.
+    // Ma'lumotlari tiklanmaydi — u hisobini o'chirgan, boshidan boshlaydi. → true (qaytdi) yoki false (o'chirilmagan edi)
+    comeBack(chatId, via = null) {
+      const changed = db
+        .prepare("UPDATE drivers SET deleted_at = NULL, deleted_snapshot = NULL, returned_at = ? WHERE chat_id = ? AND deleted_at IS NOT NULL")
+        .run(now(), chatId).changes;
+      if (changed) this.logEvent(chatId, "returned", { via });
+      return changed > 0;
+    },
+
+    // Butunlay o'chirish — faqat boshqaruv markazidan (odam shaxsiy ma'lumotini o'chirishni talab qilsa):
+    // foydalanuvchi, unga yuborilganlar ro'yxati va tarixi. Qaytarib bo'lmaydi. → true (bor edi) yoki false
+    purgeDriver(chatId) {
+      db.prepare("DELETE FROM deliveries WHERE chat_id = ?").run(chatId);
+      db.prepare("DELETE FROM user_events WHERE chat_id = ?").run(chatId);
       return db.prepare("DELETE FROM drivers WHERE chat_id = ?").run(chatId).changes > 0;
+    },
+
+    // Oxirgi faollik: bot (har xabar / tugmadan keyin) va web (har so'rovda) chaqiradi. Faqat bor foydalanuvchiga,
+    // updated_at o'zgarmaydi; SEEN_EVERY_MS dan tez-tez yozilmaydi (bot ↔ web almashsa — darrov)
+    touchDriver(chatId, via = "bot") {
+      const time = now();
+      db.prepare("UPDATE drivers SET seen_at = ?, seen_via = ? WHERE chat_id = ? AND (seen_at IS NULL OR seen_at <= ? OR seen_via IS NOT ?)").run(
+        time,
+        via,
+        chatId,
+        time - SEEN_EVERY_MS,
+        via,
+      );
+    },
+
+    // «24 soat kirmadingiz» ogohlantirishi yuborildi (apps/bot idle.js). updated_at o'zgarmaydi — bu sozlama emas
+    markIdleWarned(chatId) {
+      db.prepare("UPDATE drivers SET idle_warned_at = ? WHERE chat_id = ?").run(now(), chatId);
+      this.logEvent(chatId, "idle_warned");
+    },
+
+    // Bot har bir shaxsiy yuk xabaridan keyin yozadi (pipeline): ok — Telegram qabul qildimi, error — nega yo'q
+    addDelivery({ loadId, chatId, ok, error = null }) {
+      db.prepare("INSERT INTO deliveries (load_id, chat_id, ok, error, sent_at) VALUES (?, ?, ?, ?, ?)").run(
+        loadId,
+        chatId,
+        ok ? 1 : 0,
+        ok ? null : String(error ?? "xato").slice(0, 200),
+        now(),
+      );
     },
 
     // Profili bor va yoqilgan foydalanuvchilar: role = "haydovchi" (yuk oladi) yoki "yuk_beruvchi" (mashina oladi)

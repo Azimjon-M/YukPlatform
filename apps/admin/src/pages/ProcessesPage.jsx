@@ -1,9 +1,10 @@
-// Jarayonlar: bot, collector, nginx va tunnel loglari jonli (har 2 s), holati va boshqarish tugmalari.
+// Jarayonlar: bot, collector, nginx va tunnel loglari jonli (yangi qator chiqishi bilan; zaxira — har 2 s), holati va boshqarish tugmalari.
 // Loglar API xotirasida (oxirgi 1000 qator) — faqat shu server ishga tushirgan jarayonlarniki.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { get } from "../api.js";
 import { formatNumber, formatTime } from "../format.js";
 import { useApi } from "../hooks.js";
+import { subscribeLive } from "../live.js";
 import { emptyLog, isNearBottom, mergeLogs } from "../logs.js";
 import { ProcessCard } from "../ProcessCard.jsx";
 import { Async, Button, ErrorBox, PageHeader, Tabs, useTitle } from "../ui.jsx";
@@ -24,7 +25,25 @@ function LogViewer({ name, status }) {
   useEffect(() => {
     let alive = true;
     let timer = null;
+    let busy = false; // jonli xabar so'rov ketayotganda kelsa — tugagach yana bir marta
+    let again = false;
     async function tick() {
+      if (busy) {
+        again = true;
+        return;
+      }
+      busy = true;
+      try {
+        await read();
+      } finally {
+        busy = false;
+      }
+      if (again && alive) {
+        again = false;
+        tick();
+      }
+    }
+    async function read() {
       clearTimeout(timer);
       try {
         const response = await get(`/api/processes/${encodeURIComponent(name)}/logs`, { after: logRef.current.last });
@@ -34,7 +53,7 @@ function LogViewer({ name, status }) {
           // Server qayta ishga tushgan — boshidan o'qiymiz
           logRef.current = emptyLog();
           setLog(logRef.current);
-          return tick();
+          return read();
         }
         logRef.current = merged;
         if (merged.added) {
@@ -50,9 +69,12 @@ function LogViewer({ name, status }) {
     const onVisibility = () => (document.hidden ? clearTimeout(timer) : tick());
     tick();
     document.addEventListener("visibilitychange", onVisibility);
+    // Jonli: yangi log qatori chiqishi bilan (har 2 s kutmasdan)
+    const unsubscribe = subscribeLive(["logs"], () => !document.hidden && tick());
     return () => {
       alive = false;
       clearTimeout(timer);
+      unsubscribe();
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [name]);
@@ -84,7 +106,7 @@ function LogViewer({ name, status }) {
           Faqat xato va tizim xabarlari
         </label>
         <span className="muted small">
-          {formatNumber(log.lines.length)} qator · har 2 s yangilanadi{follow ? "" : " · aylantirish to'xtatilgan"}
+          {formatNumber(log.lines.length)} qator · jonli{follow ? "" : " · aylantirish to'xtatilgan"}
         </span>
       </div>
       {error && <ErrorBox error={error} />}
@@ -117,7 +139,7 @@ function LogViewer({ name, status }) {
 
 export function ProcessesPage() {
   useTitle("Jarayonlar");
-  const state = useApi(() => get("/api/processes"), [], { interval: POLL_MS });
+  const state = useApi(() => get("/api/processes"), [], { interval: POLL_MS, live: ["processes"] });
   const [selected, setSelected] = useState("bot");
 
   return (

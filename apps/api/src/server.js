@@ -93,8 +93,11 @@ const server = app.listen(PORT, HOST, (error) => {
   log(`Boshqaruv markazi: http://localhost:${PORT}/admin  (to'xtatish: Ctrl+C)`);
   for (const name of autostart) {
     try {
-      processes.start(name);
-      log(`${name}: ishga tushirildi`);
+      // ensure: terminalda ishlayotgan nusxa bo'lsa — kutadi va u yopilishi bilan o'zi yoqadi (processes.js watch)
+      const state = processes.ensure(name);
+      log(state.status === "external"
+        ? `${name}: terminalda ishlayotgan nusxa bor (PID ${state.pid}) — u yopilsa, shu yerdan o'zi yoqiladi`
+        : `${name}: ishga tushirildi`);
     } catch (error) {
       log(`${name}: ${error.message}`);
     }
@@ -108,6 +111,7 @@ async function shutdown() {
   closing = true;
   log("To'xtatilyapti: bot, collector, nginx va tunnel yumshoq to'xtatiladi...");
   await processes.shutdown();
+  app.locals.live.close();
   server.close();
   publicServer.close();
   store.close();

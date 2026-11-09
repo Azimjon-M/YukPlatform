@@ -139,6 +139,7 @@ export function createParserPool({
   attempts = 1,
   batchSize,
   batchWaitMs,
+  liveWaitMs,
 } = {}) {
   const settings = resolveSettings({});
   const slots = new Map(); // id → { id, label, fingerprint, provider, parser, busy, removed, state }
@@ -303,6 +304,7 @@ export function createParserPool({
   return {
     batchSize: batchSize ?? settings.batchSize,
     batchWaitMs: batchWaitMs ?? settings.batchWaitMs,
+    liveWaitMs: liveWaitMs ?? settings.liveWaitMs,
 
     // Bo'sh va dam olmayotgan ulanish: avval sog'lomlari, ular ichida eng uzoq ishlatilmagani (yuk teng taqsimlanadi).
     // «Muammoli» ulanish faqat sog'lomi bo'sh bo'lmasa beriladi. Hech biri bo'lmasa — null
@@ -350,5 +352,6 @@ export function poolFromParser(parser) {
     makeParser: () => parser,
     batchSize: parser.batchSize,
     batchWaitMs: parser.batchWaitMs,
+    liveWaitMs: parser.liveWaitMs,
   });
 }

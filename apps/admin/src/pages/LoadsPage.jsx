@@ -137,7 +137,11 @@ export function LoadsPage() {
   const [page, setPage] = useState({ key, offset: 0 });
   const offset = page.key === key ? page.offset : 0;
 
-  const state = useApi(() => get("/api/loads", { ...filters, q: query, limit: LIMIT, offset }), [key, offset]);
+  const state = useApi(() => get("/api/loads", { ...filters, q: query, limit: LIMIT, offset }), [key, offset], {
+    // Jonli — faqat birinchi sahifada (keyingisida yangi yuk qo'shilsa ro'yxat siljib ketardi)
+    live: offset === 0 ? ["loads"] : null,
+    liveGapMs: 2000,
+  });
   const set = (name) => (value) => setFilters((f) => ({ ...f, [name]: value }));
   const dirty = q || Object.values(filters).some(Boolean);
 

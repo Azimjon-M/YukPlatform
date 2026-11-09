@@ -10,6 +10,7 @@
   "scripts": {
     "parse": "node --env-file-if-exists=../../.env src/cli.js",
     "eval": "node src/eval.js",
+    "rules": "node --disable-warning=ExperimentalWarning src/shadow.js",
     "test": "node --test"
   },
   "dependencies": {

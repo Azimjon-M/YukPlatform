@@ -4,7 +4,7 @@ import { useState } from "react";
 import { aiTotals } from "../aiStatus.js";
 import { get, post } from "../api.js";
 import { durationMin, formatNumber, formatTime } from "../format.js";
-import { useApi } from "../hooks.js";
+import { useApi, useLiveStatus } from "../hooks.js";
 import { HourlyChart } from "../HourlyChart.jsx";
 import { configChecklist, throughput } from "../metrics.js";
 import { Link } from "../navigation.jsx";
@@ -72,7 +72,7 @@ function Throughput({ metrics }) {
 
 // AI ulanishlari soni GET /api/ai dan (kalitlar endi AI sahifasida); ololmasa — .env dagi belgilar
 function ConfigList({ config, processes }) {
-  const ai = useApi(() => get("/api/ai"), [], { interval: 30_000 });
+  const ai = useApi(() => get("/api/ai"), [], { interval: 30_000, live: ["ai"], liveGapMs: 3000 });
   const botRunning = processes.some((p) => p.name === "bot" && (p.status === "running" || p.status === "external"));
   const totals = ai.data ? aiTotals(ai.data.keys, { botRunning }) : null;
   return (
@@ -93,11 +93,16 @@ function ConfigList({ config, processes }) {
 export function OverviewPage() {
   useTitle("Bosh sahifa");
   const overview = useOverview();
+  const live = useLiveStatus() === "live";
   return (
     <>
       <PageHeader
         title="Bosh sahifa"
-        subtitle={overview.updatedAt ? `Har 10 soniyada yangilanadi · oxirgisi ${formatTime(overview.updatedAt, { seconds: true })}` : "Tizim holati bir qarashda"}
+        subtitle={
+          overview.updatedAt
+            ? `${live ? "Jonli — o'zgarish bo'lishi bilan yangilanadi" : "Har 10 soniyada yangilanadi"} · oxirgisi ${formatTime(overview.updatedAt, { seconds: true })}`
+            : "Tizim holati bir qarashda"
+        }
         actions={
           <Button onClick={overview.reload} busy={overview.loading && overview.data != null}>
             Yangilash
@@ -153,6 +158,13 @@ export function OverviewPage() {
                   <strong>{formatNumber(metrics.lastHour.loads)}</strong>
                 </div>
               </div>
+              {metrics.parsedBy && metrics.parsedBy.rules + metrics.parsedBy.ai > 0 && (
+                <p className="muted small">
+                  ⚡ Oxirgi {metrics.hours} soatda {formatNumber(metrics.parsedBy.rules)} ta e'lon AI'siz (qoidalar bilan) tushunildi —{" "}
+                  {Math.round((metrics.parsedBy.rules / (metrics.parsedBy.rules + metrics.parsedBy.ai)) * 100)}%, AI'da{" "}
+                  {formatNumber(metrics.parsedBy.ai)} ta
+                </p>
+              )}
               <Throughput metrics={metrics} />
             </Card>
 

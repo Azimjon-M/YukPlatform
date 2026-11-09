@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "@yuk/store";
-import { createWorker, processPost } from "../src/pipeline.js";
+import { createWorker, processPost, ruleParse } from "../src/pipeline.js";
 
 const LOAD = {
   fromCity: "Toshkent", fromRegion: "toshkent_sh", fromCountry: "O'zbekiston",
@@ -48,6 +48,18 @@ test("yuk kanalga va faqat mos, faol haydovchiga boradi", async () => {
   assert.deepEqual(delivered, [1], "Isuzu (5 t) va pauzadagi haydovchiga bormaydi");
   assert.equal(store.takeNewPosts().length, 0);
   assert.equal(store.stats().loads24h.sent, 1);
+  // Kimga yuborilgani yoziladi (boshqaruv markazi «Olgan yuklari»)
+  assert.equal(store.listDrivers().find((d) => d.chatId === 1).deliveries.total, 1);
+});
+
+test("yetmagan xabar (botni bloklagan) — xato bilan yoziladi, sanalmaydi", async () => {
+  const { store, deps, add } = setup([{ ok: true, postType: "yuk_bor", loads: [LOAD] }]);
+  deps.deliver = async () => ({ ok: false, error: "Forbidden: bot was blocked by the user" });
+  add(1);
+  const result = await processPost(store.takeNewPosts()[0], deps);
+  assert.equal(result.sent, 0);
+  const d = store.listDrivers().find((u) => u.chatId === 1).deliveries;
+  assert.deepEqual([d.total, d.failed, d.lastError], [0, 1, "Forbidden: bot was blocked by the user"]);
 });
 
 test("yo'nalishini «📋 Mos yuklar» da tanlamagan haydovchiga yuk bormaydi; «Hamma joy» tanlagan — oladi", async () => {
@@ -365,6 +377,28 @@ test("worker: guruh to'lmagan va e'lonlar yangi bo'lsa yig'ilishini kutadi (limi
   assert.equal(await createWorker(full.deps, { batch: 2, log: () => {} }).runOnce({ fillWaitMs: 60_000 }), 2);
 });
 
+// 2026-11-09: a'zo bo'lingan guruhdan jonli kelgan e'lon 90 s emas, 30 s kutadi — aks holda jonli rejim foydasiz
+test("worker: jonli kelgan e'lon (via=live) qisqaroq kutadi, so'rab olingani — avvalgidek", async () => {
+  const wait = { fillWaitMs: 90_000, liveWaitMs: 30_000 };
+  // Faqat so'rab olingan e'lon: 31 s da hali kutadi
+  const polled = setup([]);
+  polled.deps.parser = batchParser([], [yuk(LOAD)]).parser;
+  polled.add(1);
+  let clock = Date.now() + 31_000;
+  assert.equal(await createWorker(polled.deps, { batch: 5, log: () => {}, now: () => clock }).runOnce(wait), 0, "so'rab olingan — 90 s kutadi");
+
+  // Yoniga jonli e'lon qo'shildi: uning 30 s i o'tishi bilan ikkalasi birga ketadi
+  const { store, deps } = setup([]);
+  deps.parser = batchParser([[yuk(LOAD), yuk(BUXORO)]]).parser;
+  store.addPost({ source: "@g", messageId: 1, text: "Toshkentdan Samarqandga 20 t tent kerak" });
+  store.addPost({ source: "@g", messageId: 2, text: "Buxorodan Navoiyga 10 t ref kerak", via: "live" });
+  clock = Date.now() + 20_000;
+  const worker = createWorker(deps, { batch: 5, log: () => {}, now: () => clock });
+  assert.equal(await worker.runOnce(wait), 0, "jonli e'lonning ham 30 s i hali o'tmagan");
+  clock += 11_000;
+  assert.equal(await worker.runOnce(wait), 2, "jonlining 30 s i o'tdi — eskisi ham birga ketadi");
+});
+
 test("worker: joylanganiga 3 soatdan oshgan e'lon AI'ga bormaydi, «Eskirgan» deb yopiladi", async () => {
   const { store, deps, published, add } = setup([]);
   const { parser, calls } = batchParser([], [yuk(LOAD)]);
@@ -555,4 +589,63 @@ test("xato: bitta e'lon 3 ta ulanishda xato bersa — 'failed' (cheksiz aylanmay
   assert.deepEqual([state.a.calls.length, state.b.calls.length, state.c.calls.length], [1, 1, 1]);
   const [post] = store.listPosts({ status: "failed" }).items;
   assert.match(post.error, /3 ta AI ulanishida xato: 500 server xatosi/);
+});
+
+// --- AI'siz qoidaviy parser (deps.rules) ---
+const parsedBy = (store) => Object.fromEntries(store.listPosts().items.map((p) => [p.messageId, p.parsedBy]));
+
+test("qoidaviy parser: ishonchli e'lon AI'siz yuboriladi, qolgani AI'ga", async () => {
+  // AI faqat bitta javob beradi — ikkinchi e'lon uchun
+  const { store, deps, delivered, add } = setup([{ ok: true, postType: "yuk_bor", loads: [{ ...LOAD, weightT: 5, truckClass: "isuzu" }] }]);
+  let aiCalls = 0;
+  const parse = deps.parser.parse;
+  deps.parser.parse = (...args) => (aiCalls++, parse(...args));
+  deps.rules = (text) => (text.startsWith("oddiy") ? { ok: true, postType: "yuk_bor", loads: [LOAD] } : null);
+  add(1, "oddiy e'lon: Toshkentdan Samarqandga 20 tonna tent fura kerak");
+  add(2, "murakkab e'lon, qoidalar tushunmaydi va AI'ga qoladi");
+  const logs = [];
+  const worker = createWorker(deps, { log: (m) => logs.push(m) });
+  assert.equal(await worker.runOnce(), 2);
+  assert.equal(aiCalls, 1, "AI faqat ikkinchi e'lonni ko'rdi");
+  assert.deepEqual(delivered, [1, 2]);
+  assert.deepEqual(parsedBy(store), { 1: "rules", 2: "ai" });
+  assert.ok(logs.some((m) => /#\d+ @g: 1\/1 yangi yuk, 1 ta haydovchiga ⚡ AI'siz/.test(m)));
+});
+
+test("qoidaviy parser: AI ulanishi yo'q (limit tugagan) bo'lsa ham oddiy e'lon ketadi", async () => {
+  const { store, deps, delivered, add } = setup([]);
+  deps.pool = { size: () => 0, acquire: () => null, nextReadyIn: () => null, batchSize: 10 };
+  deps.rules = (text) => (text.startsWith("oddiy") ? { ok: true, postType: "yuk_bor", loads: [LOAD] } : null);
+  add(1, "oddiy e'lon: Toshkentdan Samarqandga 20 tonna tent fura kerak");
+  add(2, "murakkab e'lon, qoidalar tushunmaydi va AI'ga qoladi");
+  const worker = createWorker(deps, { log: () => {} });
+  assert.equal(await worker.runOnce(), 1);
+  assert.deepEqual(delivered, [1]);
+  assert.equal(store.takeNewPosts().length, 1, "murakkab e'lon AI'ni kutyapti");
+  // Har e'lon bir marta tekshiriladi: ikkinchi aylanishda qoidalar uni qayta ko'rmaydi
+  let checked = 0;
+  const rules = deps.rules;
+  deps.rules = (text) => (checked++, rules(text));
+  assert.equal(await worker.runOnce(), 0);
+  assert.equal(checked, 0);
+});
+
+test("qoidaviy parser: eskirgan e'lon AI'siz ham yuborilmaydi", async () => {
+  const { store, deps, delivered, add } = setup([]);
+  deps.pool = { size: () => 0, acquire: () => null, nextReadyIn: () => null, batchSize: 10 };
+  deps.rules = () => ({ ok: true, postType: "yuk_bor", loads: [LOAD] });
+  add(1, "oddiy e'lon: Toshkentdan Samarqandga 20 tonna tent fura kerak", Date.now() - 4 * 3_600_000);
+  const worker = createWorker(deps, { log: () => {}, maxAgeMs: 3 * 3_600_000 });
+  await worker.runOnce();
+  assert.deepEqual(delivered, []);
+  assert.match(store.listPosts().items[0].error, /Eskirgan/);
+});
+
+test("ruleParse: haqiqiy qoidaviy parser — ishonchli bo'lsa natija, aks holda null", () => {
+  const result = ruleParse("Toshkentdan Samarqandga 20 tonna tent fura kerak +998900000001");
+  assert.equal(result.ok, true);
+  assert.equal(result.postType, "yuk_bor");
+  assert.equal(result.loads[0].toCity, "Samarqand");
+  assert.deepEqual(result.loads[0].phones, ["+998900000001"]);
+  assert.equal(ruleParse("Hasanboydan Toshkentga 20 tonna yuk bor +998900000001"), null, "noma'lum joy — AI'ga");
 });

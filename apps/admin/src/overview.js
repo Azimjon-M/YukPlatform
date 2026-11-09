@@ -1,4 +1,4 @@
-// Umumiy holat (GET /api/overview) — butun ilova uchun bitta: har 10 soniyada yangilanadi.
+// Umumiy holat (GET /api/overview) — butun ilova uchun bitta: jonli (App.jsx, live.js), zaxira — har 10 soniyada.
 // Bosh sahifa, navbat tablari, menyudagi raqam va AI sahifasi shundan oladi.
 import { createContext, useContext } from "react";
 

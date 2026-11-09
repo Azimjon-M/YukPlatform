@@ -21,20 +21,29 @@ const ROWS = [
 ];
 const flat = (keyboard) => keyboard.flat();
 
-test("«Qayerdan?»: har joyda mos yuklar soni (sig'maydigani sanalmaydi), «🔁» — faqat tanlangan bo'lsa", () => {
+test("«Qayerdan?»: har joyda mos yuklar soni (sig'maydigani sanalmaydi), hozirgi tanlov ✅, «🔁» yo'q", () => {
   const { text, keyboard } = fromStep({ profile: DRIVER, scope: "qoshni", rows: ROWS });
   assert.match(text, /Qayerdan yuk olasiz/);
+  assert.doesNotMatch(text, /Hozirgi yo'nalish/);
   const buttons = flat(keyboard);
   assert.ok(buttons.length > 0 && buttons.every((b) => Buffer.byteLength(b.data) <= 64));
   assert.equal(buttons.find((b) => b.data === "mr:f:andijon").text, "Andijon vil. (2)");
   assert.equal(buttons.find((b) => b.data === "mr:f:navoiy").text, "Navoiy vil.", "yuk yo'q — son yozilmaydi");
   assert.equal(buttons.at(-1).text, "🌐 Hamma joydan (2)", "Qozog'iston yuki — faqat O'zbekiston haydovchisiga emas");
-  assert.ok(!buttons.some((b) => b.data === "mr:last"));
+  assert.ok(!buttons.some((b) => b.text.startsWith("✅")));
 
+  // Ikkinchi marta: «🔁 Andijon → istalgan joy» tugmasi YO'Q (uni «Andijon» deb bosib, «Qayerga?» so'ralmay qolardi) —
+  // har bir joy «Qayerga?» ga olib boradi, hozirgisi ✅ bilan, yo'nalish matnda
   const chosen = applyRoute(DRIVER, "andijon", ANY, 123);
   assert.deepEqual([chosen.fromAreas, chosen.toAreas, chosen.routeAt], [["andijon"], [], 123]);
-  const again = flat(fromStep({ profile: chosen, scope: "qoshni", rows: ROWS }).keyboard);
-  assert.deepEqual(again[0], { text: "🔁 Andijon vil. → istalgan joy", data: "mr:last" });
+  const step = fromStep({ profile: chosen, scope: "qoshni", rows: ROWS });
+  assert.match(step.text, /Hozirgi yo'nalish: <b>Andijon vil\. → istalgan joy<\/b>/);
+  const again = flat(step.keyboard);
+  assert.ok(again.every((b) => b.data.startsWith("mr:f:")), "hamma tugma — «Qayerdan» tanlovi");
+  assert.equal(again.find((b) => b.data === "mr:f:andijon").text, "✅ Andijon vil. (2)");
+  assert.deepEqual(again.filter((b) => b.text.startsWith("✅")).length, 1);
+  const anyFrom = flat(fromStep({ profile: applyRoute(DRIVER, ANY, "toshkent_sh", 1), scope: "qoshni", rows: ROWS }).keyboard);
+  assert.equal(anyFrom.at(-1).text, "✅ 🌐 Hamma joydan (2)");
 
   const intl = flat(fromStep({ profile: { ...DRIVER, international: true }, scope: "qoshni", rows: ROWS }).keyboard);
   assert.equal(intl.find((b) => b.data === "mr:f:Qozog'iston").text, "🌍 Qozog'iston (1)");
@@ -49,7 +58,18 @@ test("«Qayerga?»: tanlangan joydan har joyga sonlar, «Istalgan joyga», «Orq
   assert.equal(buttons.find((b) => b.data === "mr:t:andijon:toshkent_sh").text, "Toshkent shahri (1)");
   assert.equal(buttons.find((b) => b.data === "mr:t:andijon:*").text, "🌐 Istalgan joyga (2)");
   assert.equal(buttons.at(-1).data, "mr:back");
+  assert.ok(!buttons.some((b) => b.text.startsWith("✅")));
   assert.match(toStep({ profile: DRIVER, scope: "qoshni", rows: ROWS, from: ANY }).text, /Qayerdan: <b>hamma joy/);
+
+  // Avvalgi yo'nalish Andijon → istalgan joy: Andijon yana tanlansa «Istalgan joyga» ✅, boshqa joydan — belgisiz
+  const chosen = applyRoute(DRIVER, "andijon", ANY, 7);
+  const same = flat(toStep({ profile: chosen, scope: "qoshni", rows: ROWS, from: "andijon" }).keyboard);
+  assert.equal(same.find((b) => b.data === "mr:t:andijon:*").text, "✅ 🌐 Istalgan joyga (2)");
+  assert.equal(same.filter((b) => b.text.startsWith("✅")).length, 1);
+  const other = flat(toStep({ profile: chosen, scope: "qoshni", rows: ROWS, from: "namangan" }).keyboard);
+  assert.ok(!other.some((b) => b.text.startsWith("✅")));
+  const toCity = flat(toStep({ profile: applyRoute(DRIVER, "andijon", "toshkent_sh", 8), scope: "qoshni", rows: ROWS, from: "andijon" }).keyboard);
+  assert.equal(toCity.find((b) => b.data === "mr:t:andijon:toshkent_sh").text, "✅ Toshkent shahri (1)");
 
   const any = applyRoute(DRIVER, ANY, ANY, 5);
   assert.deepEqual([any.fromAreas, any.toAreas, any.routeAt], [[], [], 5]);

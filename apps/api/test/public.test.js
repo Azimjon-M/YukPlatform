@@ -167,6 +167,14 @@ test("tokensiz yoki buzilgan token bilan — 401", async () => {
   assert.equal((await call("GET", "/pub/me", { token: sessions.issue(999) })).status, 401);
 });
 
+test("web'dagi har so'rov — oxirgi faollik «web» (boshqaruv markazi uchun)", async () => {
+  const { token, me } = await login();
+  assert.equal((await call("GET", "/pub/me", { token })).status, 200);
+  const user = store.getDriver(me.chatId);
+  assert.equal(user.seenVia, "web");
+  assert.ok(Date.now() - user.seenAt < 5000);
+});
+
 test("yuklar: hammasi — faqat doiradagilar, eng yangisi birinchi, telefon bilan; joy filtri", async () => {
   const { token } = await login();
   const all = await call("GET", "/pub/loads?view=all", { token });
@@ -351,9 +359,9 @@ test("hisobdan chiqish: rol va sozlamalar yashiriladi, mos yuklar yo'q, botga xa
   assert.deepEqual(back.body.profile.fromAreas, ["fargona"], "sozlamalar va yo'nalish tiklandi");
 });
 
-test("hisobni o'chirish: qator butunlay o'chadi, token ishlamay qoladi, botga «o'chirildi» va menyu olib tashlanadi", async () => {
-  store.saveDriver(559, { name: "O'chiriladigan", role: "haydovchi", phone: "+998901234567", active: true, profile: { vehicle: { truckClass: "fura" }, fromAreas: [], toAreas: [] } });
-  const token = sessions.issue(559);
+test("hisobni o'chirish: qator qoladi («o'chirgan» belgisi bilan), token ishlamaydi, botga xabar; qayta kirsa — boshidan", async () => {
+  store.saveDriver(590, { name: "O'chiriladigan", role: "haydovchi", phone: "+998901234567", active: true, profile: { vehicle: { truckClass: "fura" }, fromAreas: [], toAreas: [] } });
+  const token = sessions.issue(590);
   assert.equal((await call("OPTIONS", "/pub/me")).headers.get("access-control-allow-methods").includes("DELETE"), true);
   assert.equal((await call("DELETE", "/pub/me")).status, 401, "tokensiz o'chirib bo'lmaydi");
 
@@ -361,10 +369,50 @@ test("hisobni o'chirish: qator butunlay o'chadi, token ishlamay qoladi, botga «
   const deleted = await call("DELETE", "/pub/me", { token });
   assert.equal(deleted.status, 200);
   assert.deepEqual(deleted.body, { deleted: true });
-  assert.equal(store.getDriver(559), null);
+  const row = store.getDriver(590);
+  assert.deepEqual([row.name, row.role, row.profile, row.phone, row.active, row.deletedVia, row.deletedCount], ["O'chiriladigan", null, null, null, false, "web", 1]);
+  assert.equal(store.listDrivers().find((d) => d.chatId === 590).deletedSnapshot.phone, "+998901234567", "boshqaruv markazida qoladi");
   assert.equal(store.getDriver(555)?.chatId, 555, "boshqalar joyida");
   assert.equal((await call("GET", "/pub/me", { token })).status, 401, "eski token endi ishlamaydi");
-  assert.deepEqual(notified.slice(before), [{ chatId: 559, text: DELETED_TEXT, extra: { reply_markup: { remove_keyboard: true } } }]);
+  assert.deepEqual(notified.slice(before), [{ chatId: 590, text: DELETED_TEXT, extra: { reply_markup: { remove_keyboard: true } } }]);
+  assert.doesNotMatch(DELETED_TEXT, /ma'lumot.*o'chirildi/, "ma'lumot o'chdi deb aytmaymiz — u saqlanadi");
+
+  // Qayta kirdi (Mini App): «o'chirgan» belgisi olinadi, boshidan boshlaydi (rol yo'q), «1 marta o'chirgan» qoladi
+  const initData = signWebAppData({ auth_date: nowS - 10, user: { id: 590, first_name: "Qaytgan" } }, BOT_TOKEN);
+  const again = await call("POST", "/pub/auth", { body: { initData } });
+  assert.equal(again.status, 200);
+  assert.equal(again.body.me.role, null);
+  const back = store.getDriver(590);
+  assert.deepEqual([back.deletedAt, back.deletedCount, back.returnedAt != null], [null, 1, true]);
+  assert.deepEqual(store.driverDetails(590).events.slice(0, 2).map((e) => [e.type, e.detail?.via]), [["returned", "web"], ["deleted", "web"]]);
+
+  // Mini App admin ro'yxati: o'chirgan / qaytgan belgisi
+  store.saveDriver(558, { name: "Bosh admin" }); // .env ADMIN_IDS=558
+  const users = (await call("GET", "/pub/admin/users?q=590", { token: sessions.issue(558) })).body.items;
+  assert.deepEqual([users[0].deleted, users[0].deletedCount], [false, 1]);
+});
+
+test("boshqaruv markazi: «Batafsil» (GET /api/drivers/:id) va butunlay o'chirish (DELETE)", async () => {
+  store.saveDriver(591, { name: "Batafsil", role: "haydovchi", profile: { vehicle: { truckClass: "isuzu" }, fromAreas: [], toAreas: [] }, active: true });
+  store.switchRole(591, "yuk_beruvchi");
+  const admin = (method, url) => fetch(`${adminBase}${url}`, { method, headers: { "x-yuk-admin": "1" } });
+  const details = await (await admin("GET", "/api/drivers/591")).json();
+  assert.deepEqual(Object.keys(details.profiles), ["haydovchi"]);
+  assert.deepEqual(details.events.map((e) => e.type).reverse(), ["joined", "role", "registered", "role"]);
+  assert.deepEqual(details.deliveries, []);
+  assert.equal((await admin("GET", "/api/drivers/1")).status, 404);
+  // PATCH (boshqaruv markazidan admin qilish) — tarixda; pauza esa bu yerdan mumkin emas
+  const patchAdmin = (body) =>
+    fetch(`${adminBase}/api/drivers/591`, { method: "PATCH", headers: { "x-yuk-admin": "1", "content-type": "application/json" }, body: JSON.stringify(body) });
+  assert.equal((await patchAdmin({ active: false })).status, 400);
+  assert.equal(store.getDriver(591).active, true);
+  await patchAdmin({ isAdmin: true });
+  assert.deepEqual(store.driverDetails(591).events[0], { type: "admin", detail: { on: true }, at: NOW });
+
+  assert.equal((await fetch(`${adminBase}/api/drivers/591`, { method: "DELETE" })).status, 403, "x-yuk-admin sarlavhasiz — yo'q");
+  assert.equal((await admin("DELETE", "/api/drivers/591")).status, 200);
+  assert.equal(store.getDriver(591), null);
+  assert.equal((await admin("DELETE", "/api/drivers/591")).status, 404);
 });
 
 test("bot xabari: sendMessage so'rovi; xato yoki ok:false — jim false; tokensiz — null", async () => {
@@ -455,12 +503,18 @@ test("admin: oddiy foydalanuvchiga 403; ADMIN_IDS va boshqaruv markazidagi belgi
   store.saveDriver(560, { phone: "+998905550000" });
   assert.equal((await call("GET", "/pub/me", { token: sessions.issue(560) })).body.phone, "+998905550000");
   assert.equal((await call("GET", "/pub/me", { token: helper })).body.phone, null);
-  const paused = await call("PATCH", "/pub/admin/users/560", { token: helper, body: { active: false } });
-  assert.equal(paused.body.phone, undefined);
-  assert.ok(!JSON.stringify(paused.body).includes("5550000"));
+  // Faol / pauza — faqat foydalanuvchining o'zi: admin ham o'zgartira olmaydi (Azimjon, 2026-11-09)
+  assert.equal((await call("PATCH", "/pub/admin/users/560", { token: helper, body: { active: false } })).status, 400);
+  assert.equal(store.getDriver(560).active, true);
+  const same = await call("PATCH", "/pub/admin/users/560", { token: helper, body: {} });
+  assert.equal(same.body.phone, undefined);
+  assert.ok(!JSON.stringify(same.body).includes("5550000"));
+  // Ro'yxatda kim pauza qilgani: 48 soat kirmagani uchun avtomatik
+  store.saveDriver(560, { active: false, why: "idle" });
+  const listed = (await call("GET", "/pub/admin/users?q=560", { token: helper })).body.items[0];
+  assert.deepEqual([listed.active, listed.pausedBy], [false, "idle"]);
 
-  // Pauza, rolni almashtirish (sozlamalari saqlanadi, yangi rolda yo'q); admin qilish bu yerdan bo'lmaydi
-  assert.equal(paused.body.active, false);
+  // Rolni almashtirish (sozlamalari saqlanadi, yangi rolda yo'q); admin qilish bu yerdan bo'lmaydi
   const switched = await call("PATCH", "/pub/admin/users/560", { token: helper, body: { role: "yuk_beruvchi", isAdmin: true, plan: "pro" } });
   assert.equal(switched.status, 200);
   assert.equal(switched.body.role, "yuk_beruvchi");
@@ -468,7 +522,6 @@ test("admin: oddiy foydalanuvchiga 403; ADMIN_IDS va boshqaruv markazidagi belgi
   const after = store.getDriver(560);
   assert.equal(after.isAdmin, false, "Mini App'dan admin qilib bo'lmaydi");
   assert.equal(after.plan, "free", "Mini App'dan obunani o'zgartirib bo'lmaydi");
-  assert.equal((await call("PATCH", "/pub/admin/users/560", { token: helper, body: { active: true } })).status, 409, "sozlamasiz yoqib bo'lmaydi");
   const back = await call("PATCH", "/pub/admin/users/560", { token: helper, body: { role: "haydovchi" } });
   assert.equal(back.body.role, "haydovchi");
   assert.ok(back.body.profile, "haydovchi sozlamalari tiklandi");

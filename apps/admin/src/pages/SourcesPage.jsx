@@ -7,8 +7,33 @@ import { useApi, useNow } from "../hooks.js";
 import { Async, Badge, Button, Card, Empty, ExternalLink, Field, PageHeader, TimeAgo, Toggle, useTitle, useToast } from "../ui.jsx";
 
 const NOTE = "O'zgarish collector'ning keyingi aylanishida kuchga kiradi (1–2 daqiqa).";
-const sourcePath = (name) => `/api/sources/${encodeURIComponent(name)}`;
-const sourceLink = (name) => (name.startsWith("@") ? `https://t.me/${name.slice(1)}` : null);
+
+// Collector akkaunti guruhga a'zo bo'lsa — yangi xabarni Telegram o'zi yuboradi (jonli, ~1 s);
+// a'zo bo'lmasa — collector har ~60 s da o'zi so'raydi. A'zolik har 10 daqiqada tekshiriladi.
+// Katta guruhlardan Telegram update'ni ba'zan umuman yubormaydi (09.11: @TutGruz) — a'zo bo'lsa ham jonli
+// xabar kelmasa, collector uni har 60 s so'raydi. Shuning uchun «Jonli» — faqat 24 soatda jonli xabar kelgan bo'lsa.
+function ModeBadge({ joined, live }) {
+  if (joined == null) return null; // collector hali tekshirmagan
+  if (joined && live > 0) {
+    return (
+      <Badge tone="good" icon="⚡" title="Akkaunt guruhga a'zo, Telegram yangi xabarni o'zi yuboradi (~1 s). Ehtiyot uchun har 3 daqiqada qo'shimcha tekshiriladi">
+        Jonli
+      </Badge>
+    );
+  }
+  if (joined) {
+    return (
+      <Badge icon="👥" title="Akkaunt a'zo, lekin Telegram bu guruhdan jonli xabar yubormayapti (katta guruhlarda bo'ladi) — collector har ~60 s da o'zi so'raydi">
+        A'zo · har 60 s
+      </Badge>
+    );
+  }
+  return (
+    <Badge icon="🔄" title="Akkaunt guruhga a'zo emas: collector har ~60 soniyada o'zi so'raydi. Guruhga qo'shilsangiz, 10 daqiqa ichida jonliga o'tadi">
+      Har 60 s
+    </Badge>
+  );
+}
 
 function AddSource({ onAdded }) {
   const notify = useToast();
@@ -108,7 +133,7 @@ function SourceRow({ source, now, onChanged }) {
       <div className="source-main">
         <div className="source-name">
           {link ? <ExternalLink href={link}>{source.name}</ExternalLink> : <strong>{source.name}</strong>}
-          {!enabled && <Badge icon="■">O'chirilgan</Badge>}
+          {enabled ? <ModeBadge joined={source.joined} live={s.live} /> : <Badge icon="■">O'chirilgan</Badge>}
         </div>
         {source.note && <p className="muted small">{source.note}</p>}
         <dl className="source-stats">
@@ -130,6 +155,13 @@ function SourceRow({ source, now, onChanged }) {
           <div>
             <dt>Oxirgi e'lon</dt>
             <dd>{s.lastPostAt ? <TimeAgo ts={s.lastPostAt} now={now} /> : "—"}</dd>
+          </div>
+          <div>
+            <dt title="Guruhga yozilganidan navbatga tushguncha, o'rtacha">Kechikish</dt>
+            <dd>
+              {s.delaySec == null ? "—" : `~${formatNumber(s.delaySec)} s`}
+              {s.live > 0 && <span className="muted small"> (jonli: {formatNumber(s.live)})</span>}
+            </dd>
           </div>
         </dl>
       </div>
@@ -158,7 +190,7 @@ function SourceRow({ source, now, onChanged }) {
 export function SourcesPage() {
   useTitle("Manbalar");
   const now = useNow(30_000);
-  const state = useApi(() => get("/api/sources"), []);
+  const state = useApi(() => get("/api/sources"), [], { live: ["sources", "posts"], liveGapMs: 5000 });
   const items = state.data?.items ?? [];
 
   return (
@@ -173,6 +205,11 @@ export function SourcesPage() {
         }
       />
       <div className="stack">
+        <p className="muted small">
+          ⚡ Jonli — collector akkaunti guruhga a'zo va Telegram yangi e'lonni o'zi yuboradi (~1 soniya). 🔄 Har 60 s — a'zo emas: collector o'zi
+          so'raydi (o'rtacha ~36 s kechikadi). 👥 A'zo · har 60 s — a'zo, lekin Telegram bu guruhdan jonli xabar yubormayapti (katta guruhlarda
+          bo'ladi). Guruhga qo'shilsangiz, 10 daqiqa ichida o'zi tekshiriladi; bildirishnomani o'chirib, arxivga solib qo'ysangiz ham bo'ladi.
+        </p>
         <AddSource onAdded={state.reload} />
         <Async state={state}>
           {(data) =>

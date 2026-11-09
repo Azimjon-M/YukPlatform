@@ -7,9 +7,10 @@ import { createParser, createParserPool, envSeedEntries, resolveSettings } from 
 import { ROUTE_SCOPES, routeScopeFrom } from "@yuk/shared";
 import { acquireRunLock, createSessions, loadSecret, openStore, tunnelUrl } from "@yuk/store";
 import { createBot } from "./bot.js";
-import { readConfig } from "./config.js";
+import { createIdleWatcher } from "./idle.js";
+import { readConfig, ruleParserOn } from "./config.js";
 import { formatLoad } from "./format.js";
-import { createWorker } from "./pipeline.js";
+import { createWorker, ruleParse } from "./pipeline.js";
 
 const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
 const log = (message) => console.log(`[${time()}] ${message}`);
@@ -117,7 +118,8 @@ async function dryRun() {
     console.log(`   → ${kind === "mashina" ? "yuk beruvchi" : "haydovchi"} ${chatId}`);
     return true;
   };
-  const worker = createWorker({ parser, store, publish, deliver, routeScope: routeScopeFrom() }, { log });
+  const rules = ruleParserOn() ? ruleParse : null;
+  const worker = createWorker({ parser, store, publish, deliver, rules, routeScope: routeScopeFrom() }, { log });
   while ((await worker.runOnce()) > 0);
   const s = store.stats();
   console.log(`\nTayyor. E'lonlar: ${Object.entries(s.posts).map(([k, v]) => `${k} ${v}`).join(", ")}; yangi yuk: ${s.loads24h.total}, bo'sh mashina: ${s.trucks24h.total}`);
@@ -142,11 +144,16 @@ async function main() {
   const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log, appUrl, linkToken });
   await init();
   const { routeScope, maxPostAgeMs } = config;
-  const worker = createWorker({ pool, store, publish, deliver, routeScope }, { log, maxAgeMs: maxPostAgeMs });
+  // Oddiy e'lonlar AI'siz (qoidaviy parser), qolgani AI'ga — pipeline.js createWorker deps.rules
+  const rules = config.ruleParser ? ruleParse : null;
+  const worker = createWorker({ pool, store, publish, deliver, rules, routeScope }, { log, maxAgeMs: maxPostAgeMs });
+  // 24 soat kirmaganga — ogohlantirish, 48 soatda — pauza (idle.js; Azimjon, 2026-11-09)
+  const idle = createIdleWatcher({ store, api: bot.api, log });
 
   const stop = async () => {
     log("To'xtatilyapti...");
     worker.stop();
+    idle.stop();
     await bot.stop();
     store.close();
     process.exit(0);
@@ -165,7 +172,9 @@ async function main() {
     ? `Eski e'lonlar: joylanganiga ${maxPostAgeMs / 3_600_000} soatdan oshgani AI'ga bormaydi (.env: POST_MAX_AGE_HOURS)`
     : "Eski e'lonlar: cheklovsiz, hammasi AI'ga boradi (.env: POST_MAX_AGE_HOURS=0)");
   log(config.miniappUrl ? `Mini App: ${config.miniappUrl}` : "Mini App: tunnel manzili (tunnel o'chiq bo'lsa — sozlamalar chatda savol-javob)");
+  log("Faollik: botga 24 soat kirmaganga ogohlantirish, 48 soatda avtomatik pauza (har 10 daqiqada tekshiriladi)");
   worker.start();
+  idle.start();
   await bot.start({ allowed_updates: ["message", "channel_post", "callback_query"] });
 }
 

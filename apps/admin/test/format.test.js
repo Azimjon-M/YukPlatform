@@ -1,18 +1,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  activeView,
+  activityView,
   areasText,
   cargoText,
+  deliveriesView,
   driverShown,
   durationMin,
+  eventView,
   formatDateTime,
   formatNumber,
   formatTime,
   loadView,
+  pauseInText,
   phoneLinks,
   placeText,
   priceText,
   profileSummary,
+  registrationText,
+  snapshotProfiles,
   timeAgo,
   uptimeText,
   vehicleText,
@@ -163,14 +170,131 @@ test("davomiylik va ishlash vaqti", () => {
 
 test("hisobdan chiqqan foydalanuvchi: oxirgi roli va sozlamalari ko'rinadi", () => {
   const truck = { vehicle: { truckClass: "fura" }, fromAreas: ["samarqand"] };
-  assert.deepEqual(driverShown({ role: null, profile: null, signedOutAt: 5, signedOutRole: "haydovchi", savedProfile: truck }), {
+  const shown = (fields) => driverShown({ deletedAt: null, phone: null, ...fields });
+  assert.deepEqual(shown({ role: null, profile: null, signedOutAt: 5, signedOutRole: "haydovchi", savedProfile: truck }), {
     signedOut: true,
+    deleted: false,
     role: "haydovchi",
     profile: truck,
+    phone: null,
   });
-  assert.deepEqual(driverShown({ role: "haydovchi", profile: truck, signedOutAt: null }), { signedOut: false, role: "haydovchi", profile: truck });
+  assert.deepEqual(shown({ role: "haydovchi", profile: truck, signedOutAt: null, phone: "+998901234567" }), {
+    signedOut: false,
+    deleted: false,
+    role: "haydovchi",
+    profile: truck,
+    phone: "+998901234567",
+  });
   // Hali rol tanlamagan yangi odam — chiqqan emas
-  assert.deepEqual(driverShown({ role: null, profile: null, signedOutAt: null, signedOutRole: null }), { signedOut: false, role: null, profile: null });
+  assert.deepEqual(shown({ role: null, profile: null, signedOutAt: null, signedOutRole: null }), {
+    signedOut: false,
+    deleted: false,
+    role: null,
+    profile: null,
+    phone: null,
+  });
   // Ikkala rol saqlangan, qaysi biridan chiqqani noma'lum (eski yozuv)
-  assert.deepEqual(driverShown({ role: null, profile: null, signedOutAt: 5, signedOutRole: null, savedProfile: null }), { signedOut: true, role: null, profile: null });
+  assert.equal(shown({ role: null, profile: null, signedOutAt: 5, signedOutRole: null, savedProfile: null }).signedOut, true);
+});
+
+test("hisobini o'chirgan: qator qoladi — o'chirgan paytdagi rol, sozlamalar va raqam", () => {
+  const truck = { vehicle: { truckClass: "fura" }, fromAreas: ["samarqand"], routeAt: 1 };
+  const cargo = { fromAreas: [], truckClasses: [] };
+  const deleted = {
+    role: null,
+    profile: null,
+    phone: null,
+    signedOutAt: null,
+    deletedAt: 9,
+    deletedSnapshot: { role: "haydovchi", profile: truck, profiles: { yuk_beruvchi: cargo }, phone: "+998901234567" },
+  };
+  assert.deepEqual(driverShown(deleted), { signedOut: false, deleted: true, role: "haydovchi", profile: truck, phone: "+998901234567" });
+  // Hisobdan chiqib, keyin o'chirgan: profil — saqlanganlardan
+  const afterSignOut = { ...deleted, deletedSnapshot: { role: null, signedOutRole: "yuk_beruvchi", profile: null, profiles: { yuk_beruvchi: cargo } } };
+  assert.deepEqual(driverShown(afterSignOut), { signedOut: false, deleted: true, role: "yuk_beruvchi", profile: cargo, phone: null });
+  assert.match(registrationText(deleted), /Hisobini o'chirgan/);
+});
+
+test("o'chirish paytidagi sozlamalar: asosiy rol birinchi, keyin saqlanganlari", () => {
+  const truck = { vehicle: { truckClass: "fura" } };
+  const cargo = { truckClasses: [] };
+  assert.deepEqual(snapshotProfiles({ role: "haydovchi", profile: truck, profiles: { yuk_beruvchi: cargo, haydovchi: null } }), [
+    { role: "haydovchi", profile: truck },
+    { role: "yuk_beruvchi", profile: cargo },
+  ]);
+  assert.deepEqual(snapshotProfiles({ role: null, signedOutRole: "yuk_beruvchi", profile: null, profiles: { yuk_beruvchi: cargo } }), [
+    { role: "yuk_beruvchi", profile: cargo },
+  ]);
+  assert.deepEqual(snapshotProfiles({ role: "haydovchi", profile: null, profiles: null }), []);
+  assert.deepEqual(snapshotProfiles(null), []);
+});
+
+test("ro'yxatdan o'tish qayergacha yetgan («—» o'rniga)", () => {
+  const base = { deletedAt: null, signedOutAt: null, role: null, profile: null, active: false, draftStep: null };
+  assert.equal(registrationText(base), "Faqat /start bosgan — rol tanlamagan");
+  assert.equal(registrationText({ ...base, role: "haydovchi" }), "Rol tanlagan, lekin transport formasini to'ldirmagan");
+  assert.equal(registrationText({ ...base, role: "haydovchi", draftStep: "capacity" }), "Ro'yxatdan o'tishni boshlagan — «Qancha yuk ko'taradi» qadamida to'xtagan");
+  const truck = { vehicle: { truckClass: "fura" }, fromAreas: [], toAreas: [] };
+  assert.match(registrationText({ ...base, role: "haydovchi", profile: truck, active: true }), /yo'nalish tanlamagan/);
+  assert.equal(registrationText({ ...base, role: "haydovchi", profile: { ...truck, routeAt: 1 }, active: true }), "Ro'yxatdan o'tgan, yuk oladi");
+  assert.equal(registrationText({ ...base, role: "yuk_beruvchi", profile: { truckClasses: [] }, active: false }), "Ro'yxatdan o'tgan, pauzada — o'zi to'xtatgan");
+  assert.equal(registrationText({ ...base, role: "haydovchi", profile: truck, active: false, pausedBy: "idle" }), "Ro'yxatdan o'tgan, pauzada — 48 soat botga kirmagan");
+  assert.match(registrationText({ ...base, signedOutAt: 5 }), /Hisobdan chiqqan/);
+});
+
+test("faol / pauza holati (faqat ko'rsatish): kim pauza qilgan, avtomatik pauzagacha qancha", () => {
+  const since = 100 * HOUR;
+  const base = { active: true, profile: { vehicle: {} }, deletedAt: null, createdAt: 1, seenAt: since + HOUR, idleWarnedAt: null };
+  const fresh = activeView(base, since, since + 2 * HOUR);
+  assert.deepEqual([fresh.label, fresh.tone, fresh.warned, fresh.pauseAt], ["Faol", "good", false, since + 49 * HOUR]);
+  assert.equal(pauseInText(fresh.pauseAt, since + 2 * HOUR), "kirmasa, pauzagacha 1 kun 23 soat");
+  // Bot hali kuzatmagan (idleSince yo'q) — muddat ko'rsatilmaydi
+  assert.equal(activeView(base, null, since).pauseAt, null);
+  const warned = activeView({ ...base, idleWarnedAt: since + 25 * HOUR }, since, since + 26 * HOUR);
+  assert.deepEqual([warned.tone, warned.icon, warned.warned, warned.at], ["warning", "⚠", true, since + 25 * HOUR]);
+  assert.equal(pauseInText(since + 49 * HOUR, since + 50 * HOUR), "bir necha daqiqada pauza bo'ladi");
+  assert.equal(pauseInText(null), null);
+
+  const idle = activeView({ ...base, active: false, pausedBy: "idle", pausedAt: 5 }, since);
+  assert.deepEqual([idle.label, idle.icon, idle.note, idle.at, idle.tone], ["Avto-pauza", "💤", "48 soat botga kirmagan", 5, "warning"]);
+  assert.equal(activeView({ ...base, active: false, pausedBy: "blocked" }).tone, "critical");
+  assert.equal(activeView({ ...base, active: false, pausedBy: "user" }).note, "o'zi to'xtatgan");
+  assert.equal(activeView({ ...base, active: false, pausedBy: null }).label, "Pauza", "eski yozuv — sababi noma'lum");
+});
+
+test("tarix voqealari matni", () => {
+  assert.deepEqual(eventView({ type: "deleted", detail: { via: "web" } }), { icon: "🗑", text: "Hisobini o'chirdi (web'da)" });
+  assert.deepEqual(eventView({ type: "returned", detail: { via: "bot" } }), { icon: "↩️", text: "O'chirgandan keyin qaytdi (botda) — boshidan boshladi" });
+  assert.equal(eventView({ type: "role", detail: { from: null, to: "haydovchi", restored: false } }).text, "Rol tanladi: Haydovchi");
+  assert.equal(eventView({ type: "role", detail: { from: "haydovchi", to: "yuk_beruvchi", restored: true } }).text, "Rolni almashtirdi: Haydovchi → Yuk beruvchi (sozlamalari tiklandi)");
+  assert.equal(eventView({ type: "resumed", detail: { by: "admin" } }).text, "Boshqaruv markazidan yoqildi");
+  assert.equal(eventView({ type: "paused", detail: { by: "idle" } }).icon, "💤");
+  assert.match(eventView({ type: "idle_warned", detail: null }).text, /24 soat kirmagani uchun ogohlantirildi/);
+  assert.equal(eventView({ type: "phone", detail: { phone: "+998901234567" } }).icon, "📱");
+  assert.match(eventView({ type: "route", detail: { fromAreas: ["samarqand"], toAreas: [] } }).text, /^Yo'nalish tanladi: Samarqand/);
+  assert.deepEqual(eventView({ type: "nimadir", detail: null }), { icon: "•", text: "nimadir" });
+});
+
+test("oxirgi faollik: 2 daqiqa ichida — «Hozir», eski yozuvlarda taxminiy vaqt", () => {
+  const now = 10 * HOUR;
+  assert.deepEqual(activityView({ seenAt: now - MIN, seenVia: "web", updatedAt: 1 }, now), { at: now - MIN, exact: true, via: "web'da", online: true });
+  assert.equal(activityView({ seenAt: now - 3 * MIN, seenVia: "bot" }, now).online, false);
+  // seen_at yozilmagan (2026-11-09 dan oldin) — updatedAt, «Hozir» emas (boshqaruv markazidagi o'zgarish ham uni yangilaydi)
+  assert.deepEqual(activityView({ seenAt: null, updatedAt: now - 1000 }, now), { at: now - 1000, exact: false, via: null, online: false });
+});
+
+test("olgan yuklari: yo'nalish, xato sababi, hozir ham yetmayaptimi", () => {
+  const load = { fromCity: "Samarqand", fromRegion: "samarqand", toCity: "Toshkent", toRegion: "toshkent_sh" };
+  const base = { role: "haydovchi", profile: {}, deliveries: { today: 2, total: 9, lastAt: 500, lastLoad: load, failed: 0, lastError: null, lastErrorAt: null } };
+  const ok = deliveriesView(base);
+  assert.deepEqual([ok.noun, ok.today, ok.total, ok.failing], ["yuk", 2, 9, false]);
+  assert.match(ok.lastRoute, /^Samarqand → .*Toshkent/);
+  const blocked = deliveriesView({ ...base, deliveries: { ...base.deliveries, failed: 1, lastError: "Forbidden: bot was blocked by the user", lastErrorAt: 600 } });
+  assert.deepEqual([blocked.error, blocked.failing], ["botni bloklagan", true]);
+  // Xatodan keyin yana yetib borgan — hozir muammo yo'q
+  assert.equal(deliveriesView({ ...base, deliveries: { ...base.deliveries, failed: 1, lastError: "x", lastErrorAt: 400 } }).failing, false);
+  // Yuk beruvchi — bo'sh mashinalar, manzili yo'q mashina — «istalgan joy»
+  const shipper = deliveriesView({ role: "yuk_beruvchi", deliveries: { total: 1, lastAt: 1, lastLoad: { fromCity: "Andijon", fromRegion: "andijon" } } });
+  assert.deepEqual([shipper.noun, shipper.lastRoute], ["mashina", "Andijon → istalgan joy"]);
+  assert.deepEqual([deliveriesView({ role: "haydovchi" }).total, deliveriesView({ role: "haydovchi" }).lastRoute], [0, null]);
 });

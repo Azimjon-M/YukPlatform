@@ -151,6 +151,10 @@ code {
   color: var(--muted);
 }
 
+.text-critical {
+  color: var(--critical-text);
+}
+
 .small {
   font-size: 13px;
 }
@@ -294,6 +298,23 @@ code {
 
 .dot-critical {
   background: var(--critical);
+}
+
+/* Jonli ulanish: nuqta sekin «nafas oladi» (harakatni kamaytirish yoqilgan bo'lsa — qimirlamaydi) */
+.dot.is-live {
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot.is-live {
+    animation: none;
+  }
 }
 
 .main {
@@ -1452,6 +1473,118 @@ input[type="checkbox"] {
   gap: 2px;
 }
 
+/* Keng ekranda ham sig'masa — jadval yon tomonga suriladi (sahifa emas) */
+.drivers-table-card {
+  overflow-x: auto;
+}
+
+/* Hisobini o'chirgan: qator qoladi, lekin xiraroq */
+.drivers-table tr.is-deleted > td {
+  background: color-mix(in srgb, var(--critical) 4%, transparent);
+}
+
+.drivers-table tr.is-deleted > td:not([data-label="Holat"]):not([data-label="Batafsil"]) {
+  opacity: 0.78;
+}
+
+.drivers-table tr.is-open > td {
+  border-bottom-color: transparent;
+}
+
+.details-toggle {
+  white-space: nowrap;
+}
+
+/* «Batafsil» — qator ostidagi akkordeon */
+.details-row > td {
+  background: var(--surface-2);
+  padding: 14px 16px 18px;
+}
+
+.driver-details {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.detail-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.detail-block .detail-block {
+  border: 0;
+  border-top: 1px solid var(--grid);
+  border-radius: 0;
+  padding: 10px 0 0;
+  margin-top: 10px;
+}
+
+.detail-block h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.detail-list {
+  display: grid;
+  grid-template-columns: minmax(110px, max-content) minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+}
+
+.detail-list dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.detail-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.detail-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.detail-feed li {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--grid);
+  align-items: baseline;
+}
+
+.detail-feed li:last-child {
+  border-bottom: 0;
+}
+
+.detail-note {
+  margin-top: 8px;
+}
+
 @media (max-width: 760px) {
   .data-table thead {
     display: none;
@@ -1473,18 +1606,44 @@ input[type="checkbox"] {
     border-bottom: 0;
   }
 
+  /* Yorliq chapda, katakning hamma qatorlari o'ngda (grid bilan ikkinchi qator yorliq ustuniga tushib qolardi) */
   .data-table td {
-    display: grid;
-    grid-template-columns: 100px minmax(0, 1fr);
-    gap: 10px;
-    padding: 6px 0;
+    position: relative;
+    min-height: 2em;
+    padding: 6px 0 6px 110px;
     border: 0;
   }
 
   .data-table td::before {
     content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 7px;
+    width: 100px;
     color: var(--muted);
     font-size: 12.5px;
+  }
+
+  /* Akkordeon telefonda: yorliqsiz, butun eni */
+  .data-table .details-row > td {
+    display: block;
+    padding: 10px 0;
+  }
+
+  .data-table .details-row > td::before {
+    content: none;
+  }
+
+  .detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail-feed li {
+    grid-template-columns: 70px minmax(0, 1fr);
+  }
+
+  .detail-feed li > :nth-child(3) {
+    grid-column: 2;
   }
 }
 

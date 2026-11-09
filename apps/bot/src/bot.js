@@ -24,6 +24,7 @@ import {
   withRoute,
 } from "@yuk/shared";
 import { escapeHtml, formatLoad, formatTruck } from "./format.js";
+import { IDLE_BUTTONS } from "./idle.js";
 import { MENU, PHONE, mainMenu, matchesLabel, phoneKeyboard, settingsLabel } from "./menu.js";
 import { applyRoute, chosenText, fromStep, toStep, validArea } from "./route.js";
 import { applyAction, applyText, describeProfile, newDraft, profileFromDraft, renderStep } from "./wizard.js";
@@ -62,16 +63,24 @@ const PHONE_WHY =
   "saqlanib qoladi va joyidan davom etasiz — qaytadan ro'yxatdan o'tish shart emas. Raqamingiz hech kimga ko'rsatilmaydi va " +
   "e'lonlarga qo'shilmaydi. O'chirish — /ochirish";
 
-// /ochirish: nimani saqlaymiz (inline tugmalar: del:phone | del:all | del:no)
+// Hisob o'chirilgach (bot /ochirish; web'dagi o'chirishda — apps/api public.js DELETED_TEXT, ma'nosi bir xil)
+const ACCOUNT_DELETED_TEXT = "✅ Hisobingiz o'chirildi. Endi sizga hech narsa yuborilmaydi.";
+
+// /ochirish: nimani saqlaymiz (inline tugmalar: del:phone | del:all | del:no).
+// Hisobni o'chirganda ma'lumot bizda qoladi (Azimjon, 2026-11-09: «Hammasi saqlansin») — matn buni ochiq aytadi,
+// «hamma ma'lumotingiz o'chirildi» deb aldamaymiz. «Faqat raqamni o'chirish» esa raqamni haqiqatan o'chiradi.
 function storedDataText(driver) {
   return [
     "🗂 <b>Siz haqingizda nimani saqlaymiz</b>",
     "• Telegram'dagi ismingiz va username",
     "• rolingiz va sozlamalaringiz (mashina, yo'nalish)",
     `• telefon raqamingiz — ${driver.phone ? escapeHtml(formatContactPhone(driver.phone)) : "ulashmagansiz"}`,
-    "Sizga yuborilgan yuklar ro'yxati saqlanmaydi.",
+    "• sizga yuborilgan yuklar va botdagi harakatlaringiz tarixi (qachon kirgansiz, qaysi yo'nalishni tanlagansiz)",
     "",
-    "Nimani o'chiramiz?",
+    "«🗑 Hisobni o'chirish» — bot sizga boshqa hech narsa yubormaydi, qaytsangiz boshidan ro'yxatdan o'tasiz. " +
+      "Yuqoridagi ma'lumotlar xizmat yozuvlarida saqlanib qoladi.",
+    "",
+    "Nima qilamiz?",
   ].join("\n");
 }
 
@@ -163,6 +172,28 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   const bot = new Bot(token, botInfo ? { botInfo } : undefined);
   // Telegram "juda tez" (429) desa, aytilgan vaqtcha kutib qayta yuboradi
   bot.api.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 60 }));
+
+  // Oxirgi faollik (boshqaruv markazida «🟢 Hozir botda»): shaxsiy chatdagi har xabar yoki tugmadan KEYIN —
+  // yangi foydalanuvchining yozuvi handler ichida yaratiladi, /ochirish dan keyin esa yozadigan joy qolmaydi
+  // Hisobini o'chirgan odam yana yozsa yoki tugma bossa — qaytdi (store.comeBack: «o'chirilgan» belgisi olinadi, qaytgan
+  // vaqti tarixga yoziladi; bot uni yangi odamdek ko'radi). /ochirish tugmalarining o'zi (del:...) qaytish emas.
+  bot.use(async (ctx, next) => {
+    const personal = ctx.chat?.type === "private" && ctx.from && (ctx.message || ctx.callbackQuery);
+    if (personal && !/^del:/.test(ctx.callbackQuery?.data ?? "")) {
+      try {
+        store.comeBack?.(ctx.from.id, "bot");
+      } catch (error) {
+        log(`Qaytish yozilmadi: ${error.message}`);
+      }
+    }
+    await next();
+    if (!personal) return;
+    try {
+      store.touchDriver?.(ctx.from.id, "bot");
+    } catch (error) {
+      log(`Oxirgi faollik yozilmadi: ${error.message}`);
+    }
+  });
 
   const isChannel = (chat) =>
     config.channel && (chat.id === config.channelId || (chat.username && `@${chat.username}`.toLowerCase() === config.channel.toLowerCase()));
@@ -446,7 +477,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     const driver = rememberUser(ctx);
     const keyboard = new InlineKeyboard();
     if (driver.phone) keyboard.text("📱 Faqat raqamni o'chirish", "del:phone").row();
-    keyboard.text("🗑 Hammasini o'chirish", "del:all").row().text("Bekor qilish", "del:no");
+    keyboard.text("🗑 Hisobni o'chirish", "del:all").row().text("Bekor qilish", "del:no");
     await ctx.reply(storedDataText(driver), { parse_mode: "HTML", reply_markup: keyboard });
   });
 
@@ -519,13 +550,25 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
       await ctx.reply("Xohlasangiz, keyin yana ulashasiz — /raqam", menu(updated));
       return;
     }
-    store.deleteDriver(ctx.chat.id);
-    await ctx.editMessageText("✅ Hamma ma'lumotingiz o'chirildi. Endi sizga hech narsa yuborilmaydi.").catch(() => {});
+    store.deleteDriver(ctx.chat.id, { via: "bot" });
+    await ctx.editMessageText(ACCOUNT_DELETED_TEXT).catch(() => {});
     await ctx.reply("Qaytadan boshlash — /start", { reply_markup: { remove_keyboard: true } });
   });
 
+  // Avtomatik pauza xabarlaridagi tugmalar (idle.js). Bosishning o'zi — faollik (yuqoridagi middleware touchDriver):
+  // «✅ Ha, davom etsin» — 48 soatlik soat qaytadan boshlanadi; «▶️ Davom ettirish» — pauzadan chiqaradi
+  bot.callbackQuery([IDLE_BUTTONS.ok, IDLE_BUTTONS.resume], async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    const driver = rememberUser(ctx);
+    await ctx.answerCallbackQuery(ctx.callbackQuery.data === IDLE_BUTTONS.ok ? { text: "✅ Rahmat!" } : undefined);
+    await ctx.editMessageReplyMarkup().catch(() => {}); // tugma qayta bosilmasin
+    if (driver.profile && driver.active === false) return setActive(ctx, true);
+    const t = ROLE_TEXT[roleOf(driver)] ?? ROLE_TEXT.haydovchi;
+    await ctx.reply(`✅ Yaxshi, ${t.many} kelishda davom etadi.`, menu(driver));
+  });
+
   // «📋 Mos yuklar»: mr:f:<qayerdan> → «Qayerga?», mr:t:<qayerdan>:<qayerga> → saqlash va ro'yxat,
-  // mr:last — oxirgi yo'nalish bilan ro'yxat, mr:back — «Qayerdan?» ga qaytish
+  // mr:back — «Qayerdan?» ga qaytish, mr:last — oxirgi yo'nalish bilan ro'yxat (endi chiqarilmaydi, chatdagi eski tugmalar uchun)
   bot.callbackQuery(/^mr:(?:f:(.+)|t:([^:]+):(.+)|last|back)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     if (ctx.chat?.type !== "private") return;
@@ -630,6 +673,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   // Har bir yuk xabari pastki menyu bilan boradi (Azimjon, 2026-11-07: «bot ochilganida menyu ochiq bo'lsin»). Menyu
   // yig'iladigan (menu.js), Telegram esa yopilgan menyuni yangi menyuli xabar kelguncha yopiq saqlaydi — bot chat
   // ochilganini bilmaydi, shuning uchun yangi yuk kelganda menyu yana ochiq turadi. Manzil va token ham doim yangi.
+  // → { ok: true } yoki { ok: false, error } — pipeline buni deliveries ga yozadi (boshqaruv markazi «Olgan yuklari»)
   async function deliver(chatId, load, post, kind = "yuk") {
     const driver = store.getDriver(chatId);
     try {
@@ -638,12 +682,13 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
         link_preview_options: { is_disabled: true },
         ...(driver ? menu(driver) : {}),
       });
-      return true;
+      return { ok: true };
     } catch (error) {
+      const reason = error.description ?? error.message;
       // 403 — foydalanuvchi botni bloklagan yoki o'chirgan: unga boshqa yubormaymiz
-      if (error instanceof GrammyError && error.error_code === 403) store.saveDriver(chatId, { active: false });
-      else log(`Foydalanuvchiga yuborilmadi (${chatId}): ${error.description ?? error.message}`);
-      return false;
+      if (error instanceof GrammyError && error.error_code === 403) store.saveDriver(chatId, { active: false, why: "blocked" });
+      else log(`Foydalanuvchiga yuborilmadi (${chatId}): ${reason}`);
+      return { ok: false, error: reason };
     }
   }
 

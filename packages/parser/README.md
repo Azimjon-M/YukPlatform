@@ -150,6 +150,7 @@ zid bo'lishi mumkin (akkaunt bloklanishi mumkin). Xavfsiz yo'l — bitta kalitda
 | `PARSER_EFFORT` | `low` | Faqat Claude: `low` / `medium` / `high` |
 | `PARSER_BATCH` | `10` | Bitta so'rovdagi e'lonlar soni (bot va `npm run parse`). `1` — har e'lon alohida. 1pro uchun 6 dan oshmaydi |
 | `PARSER_BATCH_WAIT` | `90` | Soniya: navbatda batch'dan kam e'lon bo'lsa, bot eng eski e'lon navbatga tushganidan shuncha vaqt o'tguncha yig'ilishini kutadi. `0` — kutmaydi |
+| `PARSER_LIVE_WAIT` | `30` | Xuddi shunday, lekin jonli kelgan e'lon uchun (collector akkaunti a'zo bo'lgan guruhdan, `posts.via = live`). 08.11 oqimida hamma guruh jonli bo'lsa: 90 s → 635 so'rov / navbatda 52 s, 30 s → 1 280 / 21 s, 20 s → 1 590 / 15 s |
 | `PARSER_PARALLEL` | `8` | Bot bir vaqtda nechta AI so'rovi yuboradi (ulanishlar sonidan ko'p bo'lmaydi) |
 
 Bot uchun `PARSER_PROVIDER`, `PARSER_MODEL` va kalit faqat **birinchi marta** o'qiladi (ro'yxatga «.env kaliti» bo'lib qo'shiladi).
@@ -196,6 +197,49 @@ Keyin modellar boshqaruv markazida o'zgartiriladi. `npm run parse` esa avvalgide
 | `src/pool.js` | Bir nechta ulanish (kalit + model): navbat bilan berish, limitga tushganini dam oldirish, bugungi so'rovlarni sanash |
 | `src/cli.js` | Fayldagi e'lonlarni tahlil qilib, hisobot chiqaradi |
 | `src/eval.js` | Natijani `gold.jsonl` bilan solishtiradi |
+| `src/rules/` | AI'siz qoidaviy parser (sinov bosqichi, pastda) |
+| `src/shadow.js` | Qoidaviy parserni bazadagi AI natijalariga solishtiradi |
+
+## AI'siz qoidaviy parser (sinov bosqichi, 2026-11-09)
+
+Oddiy e'lonni ("Нукусдан Янгийўлга 20 тонна тент фура кк") lug'at va qoidalar bilan ~2 ms da tushunadi. **Bot 2026-11-09 dan ishlatadi:** har yangi e'lon avval shundan o'tadi, ishonchli bo'lsa — AI'siz darhol yuboriladi (`posts.parsed_by = 'rules'`, logda «⚡ AI'siz»), aks holda AI'ga. O'chirish: `.env` ga `RULE_PARSER=0`. AI natijalari bilan solishtirish:
+
+```bash
+npm run parse:rules                                    # bazadagi AI natijalari bilan solishtirish + gold
+npm run parse:rules -- --days 1                        # faqat oxirgi kun
+npm run parse:rules -- --examples 10 --diff "mashina turi: AI fura"   # shu farqdagi e'lonlar (telefonlar yashirilgan)
+```
+
+`parseByRules(text)` → `{ confident, reasons, postType, loads, unknown, suspects, numbers }`. `loads` AI natijasi bilan bir xil shaklda (`conformLoad` + `normalizePlaces` + `cargoCategory` + telefonlar).
+
+**Asosiy qoida — ishonch.** E'londagi har bir so'z va son tushunilgandagina `confident: true`. Aks holda `reasons` da nega va e'lon AI'ga ketadi:
+noma'lum joy (-dan/-ga bilan tugagan noma'lum so'z), 2 tadan ko'p noma'lum so'z, tushunilmagan son, noaniq joy (Vodiy, Juma), yo'nalish aniq emas, bir nechta yuk/og'irlik/narx, har xil mashina sinfi sanalgan («isuzi yoki chakman»), mashinaga o'xshagan noma'lum so'z, bo'sh mashina belgisi («shalanda bor», «yuk olamiz»), yuk belgisi yo'q («Ташкент бишкек тент мега» — yuk ham, mashina ham bo'lishi mumkin), savol, «yuk yopildi».
+
+| Fayl | Vazifasi |
+|---|---|
+| `rules/text.js` | `toLatin` (kirill → lotin), `wordKey` (imlo farqlarini bir kalitga: q/k, x/h, qo'sh harf, apostrof), `editDistance` (Damerau) |
+| `rules/places.js` | Joy nomlari indeksi: `@yuk/shared` shaharlari + viloyat/davlat nomlari + ruscha uzoq shaharlar; 6+ harfli so'zda 1–2 imlo xatosi |
+| `rules/numbers.js` | Son + birlik: og'irlik, narx (mln, ming, so'm, $, kilosiga), hajm, palet, o'lcham, soni, sana |
+| `rules/words.js` | Mashina, kuzov, yuklash tomoni, «bo'sh mashina», ma'nosiz so'zlar (salom, kerak, tel...), yuk nomlari, xizmat xabarlari |
+| `rules/index.js` | Qatorlarni so'zlarga ajratish, yo'nalish qo'shimchalari (-dan, -ga, ruscha «из/в»), bloklar, `parseByRules` |
+
+AI ko'rsatmasidagi qoidalar takrorlangan: oraliq og'irlik → kattasi, kuzov yolg'iz sinf emas, sinfsiz 15 t dan og'ir → fura, viloyat yolg'iz → shahar null, so'm reys narxi < 100 000 → ×1000.
+
+**Natija (2026-11-09, botga ulanishdan oldin, sxema v3 dan beri 6 813 ta AI tahlil qilgan e'lon).** Endi qoida hal qilgan e'lonning AI natijasi bo'lmaydi, shuning uchun keyingi o'lchovlar faqat AI'ga ketgan e'lonlarda:
+
+| | |
+|---|---|
+| AI'siz hal bo'lardi | 35.4% (xizmat xabari 8.6%, doiradan tashqari 3.8%, doiradagi yuk 27.5%) |
+| xizmat / doiradan tashqari — AI bilan bir xil | 100% / 100% |
+| doiradagi yuk: AI «mashina_bor» yoki «boshqa» degan | 8 ta (0.4%) |
+| yo'nalish (viloyat) AI bilan bir xil | 98.2% / 98.4% |
+| hamma moslash maydonlari bir xil | 82.8%; AI o'zi qo'shgan sinf/kuzovsiz — 93.6% |
+| tezlik | ~2 ms e'longa |
+| gold (32 e'lon) | 13 tasi ishonchli, hammasi to'g'ri |
+
+Farqlarning eng kattasi — AI'ning o'z qoidasini buzishi: e'londa faqat «Plashatka kerak» bo'lsa ham `truckClass: fura` (96 ta), 5 tonnadan isuzu (16 ta). Qolgan farqlarning ko'rib chiqilganlarida AI ham xato qilgan (Nurota → Zomin, Kitob → Kattaqo'rg'on, «5 kilo» → 5 t). Shuning uchun «AI bilan bir xil» — qoidaning aniqligi emas, faqat yaqin baho.
+
+Ochiq savol (haydovchiga): «Тонар/танар керак 25 т» — AI kamaz deydi, qoida og'irlikdan fura. Tonar fura o'lchamidami?
 
 ## Keyingi qadam
 

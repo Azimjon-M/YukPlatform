@@ -15,6 +15,11 @@ export const DEFAULT_BATCH_SIZE = 10;
 // kutadi. 90 — collector'ning ikki aylanishi (~75 s dan): 2026-11-05 dagi oqimda 60 s → so'rovga 6,3 ta e'lon,
 // 90 s → 8,7 ta (so'rovlar 809 → 580), e'lonning qo'shimcha kutishi ikkalasida ham o'rtacha ~32 s
 export const DEFAULT_BATCH_WAIT_SEC = 90;
+// Jonli kelgan e'lon (collector akkaunti a'zo bo'lgan guruhdan, posts.via = "live") uchun qisqaroq kutish (2026-11-09).
+// 08.11 dagi oqimda (3 267 ta noyob e'lon) hamma guruh jonli bo'lganda: 90 s → 635 so'rov, navbatda o'rtacha 52 s;
+// 30 s → 1 280 so'rov, 21 s; 20 s → 1 590 so'rov, 15 s. 30 — bepul limitga (~1 500 so'rov + 1pro) sig'adigani.
+// So'rab olingan e'lonlar baribir to'da bo'lib keladi (har ~72 s da), ular uchun 90 s qoladi.
+export const DEFAULT_LIVE_WAIT_SEC = 30;
 
 // .env dagi son: bo'sh, "abc" yoki min'dan kichik bo'lsa — standart qiymat
 function numberSetting(value, fallback, min) {
@@ -31,6 +36,7 @@ export function resolveSettings(options = {}) {
     effort: options.effort || process.env.PARSER_EFFORT || DEFAULT_EFFORT,
     batchSize: numberSetting(options.batchSize ?? process.env.PARSER_BATCH, DEFAULT_BATCH_SIZE, 1),
     batchWaitMs: numberSetting(options.batchWaitSec ?? process.env.PARSER_BATCH_WAIT, DEFAULT_BATCH_WAIT_SEC, 0) * 1000,
+    liveWaitMs: numberSetting(options.liveWaitSec ?? process.env.PARSER_LIVE_WAIT, DEFAULT_LIVE_WAIT_SEC, 0) * 1000,
   };
 }
 
@@ -56,7 +62,7 @@ function readPost(answer, phones) {
 // options.onRequest — har bir AI so'rovidan oldin chaqiriladi (bugun nechta so'rov ketganini sanash uchun).
 // options.splitOnError — pastda, mustStop yonida.
 export function createParser(options = {}) {
-  const { provider, model, effort, batchSize: wanted, batchWaitMs } = resolveSettings(options);
+  const { provider, model, effort, batchSize: wanted, batchWaitMs, liveWaitMs } = resolveSettings(options);
   // Provayderning chegarasi (1pro: 6 ta — javob 100 s dan oshmasin). Aniq berilgan batchSize (CLI --batch) — o'zgarmaydi
   const batchSize = options.batchSize == null && provider.maxBatch ? Math.min(wanted, provider.maxBatch) : wanted;
   const client = options.client ?? provider.createClient({ apiKey: options.apiKey, attempts: options.attempts });
@@ -142,5 +148,5 @@ export function createParser(options = {}) {
     }));
   }
 
-  return { provider, model, effort, batchSize, batchWaitMs, client, parse, parseBatch };
+  return { provider, model, effort, batchSize, batchWaitMs, liveWaitMs, client, parse, parseBatch };
 }

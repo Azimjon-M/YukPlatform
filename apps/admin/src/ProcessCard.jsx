@@ -66,7 +66,10 @@ export function ProcessCard({ proc, onChanged }) {
       </dl>
 
       {proc.status === "external" && (
-        <p className="process-note">Terminalda ishga tushirilgan — bu yerdan boshqarib bo'lmaydi. To'xtatish uchun o'sha oynada Ctrl+C bosing.</p>
+        <p className="process-note">
+          Terminalda ishga tushirilgan — bu yerdan boshqarib bo'lmaydi. To'xtatish uchun o'sha oynada Ctrl+C bosing.
+          {proc.autoRestart && " U yopilsa, shu yerdan o'zi yoqiladi."}
+        </p>
       )}
       {proc.status === "crashed" && proc.autoRestart && <p className="process-note">10 soniyadan keyin o'zi qayta ishga tushadi.</p>}
       {proc.exitCode != null && proc.status !== "running" && proc.status !== "external" && (

@@ -598,7 +598,7 @@ export function AiPage() {
   useTitle("AI kalitlari");
   const now = useNow(10_000);
   const overview = useOverview();
-  const state = useApi(() => get("/api/ai"), [], { interval: 10_000 });
+  const state = useApi(() => get("/api/ai"), [], { interval: 10_000, live: ["ai"], liveGapMs: 2000 });
   const bot = overview.data?.processes?.find((p) => p.name === "bot") ?? null;
   const botRunning = bot?.status === "running" || bot?.status === "external";
 

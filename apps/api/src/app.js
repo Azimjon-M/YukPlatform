@@ -6,6 +6,7 @@ import path from "node:path";
 import express from "express";
 import { tunnelUrl } from "@yuk/store";
 import { createAiTools } from "./ai.js";
+import { createLive, processMarks } from "./live.js";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 
@@ -64,8 +65,11 @@ const validLabel = (value) => (value == null || String(value).trim() === "" ? nu
 
 // ai — @yuk/parser bilan ishlaydigan yordamchilar (ai.js); secret — kalitlarni shifrlash kaliti (data/secret.key)
 // sessions — haydovchilar web'i tokenlari (telegramAuth.js), publicUrl — o'sha web manzili (server.js beradi)
-export function createApp({ store, processes, env = process.env, adminDist = null, ai = createAiTools(), secret = null, sessions = null, publicUrl = null }) {
+// live — jonli yangilanish (live.js); berilmasa shu yerda yaratiladi (bazadan + jarayonlardan belgilar)
+export function createApp({ store, processes, env = process.env, adminDist = null, ai = createAiTools(), secret = null, sessions = null, publicUrl = null, live = null }) {
   const app = express();
+  const changes = live ?? createLive({ marks: () => ({ ...store.changeMarks(), ...processMarks(processes) }) });
+  app.locals.live = changes; // server.js to'xtaganda ochiq ulanishlarni yopadi
   app.disable("x-powered-by");
   app.use(express.json({ limit: "100kb" }));
 
@@ -79,6 +83,9 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
     if (req.method !== "GET" && req.get("x-yuk-admin") !== "1") return next(httpError(403, "So'rov boshqaruv markazidan kelmadi"));
     next();
   });
+
+  // Jonli yangilanish: ochiq sahifaga «drivers o'zgardi» kabi xabarlar (SSE, live.js). Ma'lumotning o'zi — oddiy GET'larda
+  api.get("/live", (req, res) => changes.handler(req, res));
 
   api.get("/overview", (req, res) => {
     res.json({ metrics: store.metrics(), processes: processes.list(), config: configInfo(env, { publicUrl, tunnel: tunnelUrl(store) }) });
@@ -97,21 +104,35 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
   api.post("/posts/:id/retry", (req, res) => res.json({ retried: store.retryFailed(Number(req.params.id)) }));
 
   // --- Haydovchilar ---
-  api.get("/drivers", (req, res) => res.json({ items: store.listDrivers() }));
+  // idleSince — avtomatik pauza soati qachondan (bot idle.js birinchi tekshiruvi): sahifa «qachon pauza bo'ladi» ni
+  // @yuk/shared idleState bilan hisoblaydi
+  api.get("/drivers", (req, res) => res.json({ items: store.listDrivers(), idleSince: Number(store.getSetting("idle_since")) || null }));
 
-  // { active } — yuborishni yoqish/to'xtatish; { isAdmin } — Mini App'dagi «🛠 Boshqaruv» huquqi.
-  // Admin belgisi FAQAT shu yerdan (localhost) qo'yiladi — internetdagi ilova serveri buni qila olmaydi.
+  // «Batafsil» (akkordeon): saqlangan sozlamalar (ikkala rol), tarix, oxirgi yuborilgan yuklar
+  api.get("/drivers/:chatId", (req, res) => {
+    const details = store.driverDetails(Number(req.params.chatId));
+    if (!details) throw httpError(404, "Haydovchi topilmadi");
+    res.json(details);
+  });
+
+  // Butunlay o'chirish — odam shaxsiy ma'lumotini o'chirishni talab qilsa (o'zi botda o'chirsa ham ma'lumot qoladi):
+  // foydalanuvchi, unga yuborilganlar ro'yxati va tarixi. Qaytarib bo'lmaydi
+  api.delete("/drivers/:chatId", (req, res) => {
+    if (!store.purgeDriver(Number(req.params.chatId))) throw httpError(404, "Haydovchi topilmadi");
+    res.json({ ok: true });
+  });
+
+  // { isAdmin } — Mini App'dagi «🛠 Boshqaruv» huquqi. Admin belgisi FAQAT shu yerdan (localhost) qo'yiladi —
+  // internetdagi ilova serveri buni qila olmaydi. Faol / pauza — bu yerdan emas (Azimjon, 2026-11-09: «buni faqat
+  // foydalanuvchi hal qiladi»): o'zi botda ⏸ / ▶️, yoki 48 soat kirmasa bot o'zi pauza qiladi (apps/bot idle.js).
   api.patch("/drivers/:chatId", (req, res) => {
     const chatId = Number(req.params.chatId);
     const body = req.body ?? {};
     const driver = store.getDriver(chatId);
     if (!driver) throw httpError(404, "Haydovchi topilmadi");
-    const fields = {};
-    if ("active" in body) fields.active = bool(body.active, "active");
-    if ("isAdmin" in body) fields.isAdmin = bool(body.isAdmin, "isAdmin");
-    if (!Object.keys(fields).length) throw httpError(400, "active yoki isAdmin kerak");
-    if (fields.active && !driver.profile) throw httpError(400, "Haydovchi hali ro'yxatdan o'tmagan");
-    res.json(store.saveDriver(chatId, fields));
+    if ("active" in body) throw httpError(400, "Faol / pauzani faqat foydalanuvchining o'zi o'zgartiradi (botda ⏸ Pauza / ▶️ Davom ettirish)");
+    if (!("isAdmin" in body)) throw httpError(400, "isAdmin kerak");
+    res.json(store.saveDriver(chatId, { isAdmin: bool(body.isAdmin, "isAdmin"), why: "admin" })); // tarixda: «boshqaruv markazidan»
   });
 
   // Haydovchilar web'ini shu haydovchi nomidan ochish (sinash uchun, Telegram'ga kirmasdan).
@@ -126,7 +147,7 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
   // --- Manbalar (collector kuzatadigan guruhlar; o'zgarish keyingi aylanishda kuchga kiradi) ---
   api.get("/sources", (req, res) => {
     const stats = store.sourceStats();
-    const empty = { posts: 0, duplicates: 0, loads: 0, lastPostAt: null };
+    const empty = { posts: 0, duplicates: 0, loads: 0, lastPostAt: null, live: 0, delaySec: null };
     res.json({ items: store.listSources().map((s) => ({ ...s, stats: stats[s.name] ?? empty })) });
   });
 

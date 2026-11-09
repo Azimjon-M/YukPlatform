@@ -134,3 +134,160 @@ test("qo'riqchi: o'qish ishlab tursa yoki guruh bo'lmasa, to'xtamaydi", async ()
   });
   assert.ok(rounds > 4);
 });
+
+// --- Jonli rejim (2026-11-09): a'zo bo'lingan guruh xabarini Telegram o'zi yuboradi ---
+
+// Soxta o'quvchi: a'zolik ro'yxati + listen() orqali «Telegram yuborgan» xabarni qo'lda chaqiramiz
+function liveReader(messagesBySource, joinedValues) {
+  const reader = {
+    polls: [],
+    membershipCalls: 0,
+    emit: null,
+    stopped: false,
+    async latestId(source) {
+      return messagesBySource[source.value].at(-1)?.id ?? 0;
+    },
+    async since(source, minId) {
+      reader.polls.push(source.value);
+      return messagesBySource[source.value].filter((m) => m.id > minId);
+    },
+    async membership(list) {
+      reader.membershipCalls++;
+      return new Map(list.map((s) => [s.value, joinedValues.has(s.value)]));
+    },
+    async listen(onMessage) {
+      reader.emit = onMessage;
+      return () => (reader.stopped = true);
+    },
+  };
+  return reader;
+}
+
+test("jonli: a'zo guruh xabari darhol navbatga, zaxira tekshiruv takrorlamaydi va tushib qolganini topadi", async (t) => {
+  const store = openStore({ file: ":memory:" });
+  store.addSource("@azo");
+  store.addSource("@begona");
+  const AZO = { kind: "username", value: "azo" };
+  const BEGONA = { kind: "username", value: "begona" };
+  const messages = { azo: [{ id: 1, text: long("eski"), date: 1 }], begona: [{ id: 1, text: long("eski b"), date: 1 }] };
+  const reader = liveReader(messages, new Set(["azo"]));
+  const logs = [];
+  let time = 1_000_000;
+  const controller = new AbortController();
+  t.after(() => controller.abort()); // test yiqilsa ham aylanish to'xtasin (aks holda jarayon osilib qoladi)
+  const done = runLive({
+    sources: () => [AZO, BEGONA],
+    reader,
+    store,
+    intervalMs: 10, // haqiqiy 10 ms; «soat» esa time orqali qo'lda suriladi
+    joinedIntervalMs: 180_000,
+    gapMs: 0,
+    log: (m) => logs.push(m),
+    signal: controller.signal,
+    now: () => time,
+  });
+  await until(() => store.getCursor("@begona") != null && store.getCursor("@azo") != null);
+  assert.equal(store.listSources().find((s) => s.name === "@azo").joined, true, "a'zolik bazaga yozildi");
+  assert.equal(store.listSources().find((s) => s.name === "@begona").joined, false);
+  assert.ok(logs.some((l) => l.includes("A'zo (jonli tinglanadi): @azo")));
+
+  // Telegram yuborgan jonli xabar — darhol navbatda, via=live
+  time += 5_000;
+  const fresh = { id: 2, text: long("jonli yuk"), date: time / 1000 - 1 };
+  messages.azo.push(fresh);
+  reader.emit(AZO, fresh);
+  assert.equal(store.takeNewPosts(10, { newest: true })[0]?.messageId, 2);
+  assert.ok(logs.some((l) => l.includes("@azo: +1 yangi e'lon (jonli, 1 s)")));
+  assert.equal(store.db.prepare("SELECT via FROM posts WHERE message_id = 2").get().via, "live");
+
+  // O'chirilgan / begona chat xabari olinmaydi
+  reader.emit({ kind: "username", value: "boshqa" }, { id: 9, text: long("boshqa"), date: 1 });
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM posts").get().n, 1);
+
+  // Jonli kelmay qolgan xabar (id 3) — zaxira tekshiruvda topiladi; id 2 qayta yozilmaydi
+  messages.azo.push({ id: 3, text: long("tushib qolgan"), date: time / 1000 });
+  time += 180_000;
+  await until(() => reader.polls.includes("azo"), 3000);
+  await until(() => logs.some((l) => l.includes("jonli kelmay qolgan 1 ta e'lon so'rab olindi — endi har 0.01 s")));
+  assert.equal(store.db.prepare("SELECT via FROM posts WHERE message_id = 3").get().via, "poll");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM posts WHERE source = '@azo'").get().n, 2);
+  // Tushib qolgani bor — endi har aylanishda so'raladi (soat surilmasa ham); 3 marta toza chiqsa — yana 3 daqiqada bir
+  const polled = reader.polls.filter((v) => v === "azo").length;
+  await until(() => logs.some((l) => l.includes("@azo: jonli xabarlar to'liq kelyapti — endi har 3 daqiqada")));
+  assert.equal(reader.polls.filter((v) => v === "azo").length, polled + 3);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(reader.polls.filter((v) => v === "azo").length, polled + 3, "soat surilmaguncha boshqa so'ralmaydi");
+  controller.abort();
+  await done;
+  assert.equal(reader.stopped, true, "to'xtaganda tinglash ham to'xtaydi");
+});
+
+test("jonli: guruhga qo'shilsa 10 daqiqa ichida jonliga o'tadi va endi har aylanishda so'ralmaydi", async () => {
+  const store = openStore({ file: ":memory:" });
+  const GROUP = { kind: "username", value: "guruh" };
+  const joinedSet = new Set();
+  const reader = liveReader({ guruh: [{ id: 1, text: long("a"), date: 1 }] }, joinedSet);
+  const logs = [];
+  let time = 0;
+  let rounds = 0;
+  const controller = new AbortController();
+  await runLive({
+    sources: () => {
+      rounds++;
+      time += 60_000;
+      if (rounds === 3) joinedSet.add("guruh"); // shu orada u guruhga qo'shildi
+      if (rounds === 12) reader.emit(GROUP, { id: 2, text: long("jonli"), date: time / 1000 }); // jonli xabar keldi
+      if (rounds > 16) controller.abort();
+      return [GROUP];
+    },
+    reader,
+    store,
+    intervalMs: 0,
+    gapMs: 0,
+    membershipMs: 10 * 60_000,
+    joinedIntervalMs: 3 * 60_000,
+    log: (m) => logs.push(m),
+    signal: controller.signal,
+    now: () => time,
+  });
+  assert.ok(logs.some((l) => l.includes("Jonli guruh yo'q")));
+  assert.ok(logs.some((l) => l.includes("@guruh: akkaunt guruhga qo'shilgan — endi jonli")));
+  assert.equal(reader.membershipCalls, 2, "a'zolik 10 daqiqada bir marta");
+  // 1-aylanish faqat kursorni qo'yadi; 2–11: har daqiqa (10 ta; 11-da a'zoligi bilinadi, lekin jonli xabar hali yo'q);
+  // 12-da jonli xabar keldi — endi 3 daqiqada bir (14)
+  assert.equal(reader.polls.length, 11);
+});
+
+test("jonli tinglash yoqilmasa — hammasi avvalgidek so'rab turiladi", async () => {
+  const store = openStore({ file: ":memory:" });
+  const reader = liveReader({ yuk_guruh: [{ id: 1, text: long("a"), date: 1 }] }, new Set(["yuk_guruh"]));
+  reader.listen = async () => {
+    throw new Error("AUTH_KEY_UNREGISTERED");
+  };
+  const logs = [];
+  let rounds = 0;
+  const controller = new AbortController();
+  await runLive({
+    sources: () => {
+      if (++rounds > 3) controller.abort();
+      return [SOURCE];
+    },
+    reader,
+    store,
+    intervalMs: 0,
+    gapMs: 0,
+    log: (m) => logs.push(m),
+    signal: controller.signal,
+  });
+  assert.match(logs[0], /Jonli tinglash yoqilmadi — AUTH_KEY_UNREGISTERED/);
+  assert.equal(reader.membershipCalls, 0);
+  assert.equal(reader.polls.length, 2, "har aylanishda so'raladi (birinchisi — kursor)");
+});
+
+async function until(check, ms = 2000) {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error("kutish vaqti tugadi");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}

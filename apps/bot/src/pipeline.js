@@ -4,7 +4,7 @@
 // Bir nechta AI ulanishi (kalit + model) bo'lsa, guruhlar parallel tahlil qilinadi.
 // Telegram va AI tashqaridan beriladi (deps), shuning uchun testda soxtasi qo'yiladi.
 import { setTimeout as wait } from "node:timers/promises";
-import { poolFromParser } from "@yuk/parser";
+import { parseByRules, poolFromParser } from "@yuk/parser";
 import {
   DEFAULT_DEDUPE_WINDOW_MS,
   DEFAULT_ROUTE_SCOPE,
@@ -22,8 +22,9 @@ import {
 //   mashina_bor → kind "mashina" → yuk beruvchilarga (matchTruck: yo'nalishi, kerakli mashina turi)
 const POST_KIND = { yuk_bor: "yuk", mashina_bor: "mashina" };
 
-// AI natijasi tayyor bo'lgan bitta e'lon: yo'nalish doirasi → takrorni tashlash → bazaga yozish → kanal → foydalanuvchilar.
-// deps: { store, publish?(load, post) → kanal xabar id | null, deliver(chatId, load, post, kind) → true/false, windowMs,
+// Tahlil natijasi tayyor bo'lgan bitta e'lon: yo'nalish doirasi → takrorni tashlash → bazaga yozish → kanal → foydalanuvchilar.
+// result — AI natijasi yoki qoidaviy parserniki (result.by === "rules"); bazaga kim tushungani yoziladi (posts.parsed_by).
+// deps: { store, publish?(load, post) → kanal xabar id | null, deliver(chatId, load, post, kind) → { ok, error? } | true/false, windowMs,
 //         routeScope — @yuk/shared ROUTE_SCOPES kodi (.env dagi ROUTE_SCOPE; standart "qoshni") }
 export async function handleParsed(post, result, deps) {
   const { store, windowMs = DEFAULT_DEDUPE_WINDOW_MS, routeScope = DEFAULT_ROUTE_SCOPE } = deps;
@@ -31,10 +32,11 @@ export async function handleParsed(post, result, deps) {
     store.finishPost(post.id, "failed", result.error);
     return { status: "failed", error: result.error };
   }
+  const by = result.by ?? "ai";
   // "Yuk bor" — haydovchilarga, "mashina bo'sh" — yuk beruvchilarga. Reklama va boshqasi — hech kimga.
   const kind = POST_KIND[result.postType];
   if (!kind || result.loads.length === 0) {
-    store.finishPost(post.id, "done", result.postType);
+    store.finishPost(post.id, "done", result.postType, by);
     return { status: "skipped", postType: result.postType };
   }
 
@@ -43,7 +45,7 @@ export async function handleParsed(post, result, deps) {
   const loads = result.loads.filter((load) => routeInScope(load, routeScope));
   if (loads.length === 0) {
     const routes = [...new Set(result.loads.map(routeText))];
-    store.finishPost(post.id, "done", `Boshqa yo'nalish: ${routes.slice(0, 3).join(", ")}${routes.length > 3 ? "…" : ""}`);
+    store.finishPost(post.id, "done", `Boshqa yo'nalish: ${routes.slice(0, 3).join(", ")}${routes.length > 3 ? "…" : ""}`, by);
     return { status: "skipped", reason: "route", kind, outOfScope: result.loads.length };
   }
 
@@ -69,13 +71,24 @@ export async function handleParsed(post, result, deps) {
       if (!matches(load, user.profile).ok) continue;
       // Obuna (hozircha hamma bepul va hammaga yuboriladi — roles.js planAllows)
       if (!planAllows(user, { kind })) continue;
-      if (await deps.deliver(user.chatId, load, post, kind)) count++;
+      // deliver → { ok, error } (bot.js) yoki true/false. Har biri yoziladi: boshqaruv markazida kim qancha yuk olgani ko'rinadi
+      const outcome = await deps.deliver(user.chatId, load, post, kind);
+      const ok = outcome === true || outcome?.ok === true;
+      store.addDelivery?.({ loadId: id, chatId: user.chatId, ok, error: ok ? null : (outcome?.error ?? null) });
+      if (ok) count++;
     }
     store.setLoadDelivery(id, { sentTo: count, channelMessageId });
     sent += count;
   }
-  store.finishPost(post.id, "done");
+  store.finishPost(post.id, "done", null, by);
   return { status: "done", kind, loads: loads.length, outOfScope: result.loads.length - loads.length, fresh: fresh.length, sent };
+}
+
+// AI'siz qoidaviy parser (@yuk/parser src/rules): e'lonni to'liq tushunsa — handleParsed uchun natija, aks holda null.
+// 2026-11-09 sinovi (6 813 e'lon): 35% e'lon shu yo'l bilan hal bo'ladi, yo'nalish AI bilan 98% bir xil
+export function ruleParse(text) {
+  const r = parseByRules(text);
+  return r.confident ? { ok: true, postType: r.postType, loads: r.loads } : null;
 }
 
 // Bitta e'lon: AI (alohida so'rov) + handleParsed.
@@ -112,15 +125,22 @@ function formatHours(ms) {
 // uchun so'rov ketadi va batch limitni tejamaydi.
 // Nega joylangan vaqt (postedAt) emas: e'lon navbatga o'rtacha 40 s kechikib tushadi, 60 s lik kutish amalda ~20 s
 // bo'lib qolardi va so'rovga o'rtacha 4–5 ta e'lon ketardi (kunlik bepul limit 21:20 da tugagan).
+// liveWaitMs — jonli kelgan e'lon (via = "live", collector akkaunti a'zo bo'lgan guruhdan ~1 s da) uchun qisqa kutish
+// (standart: PARSER_LIVE_WAIT, 30 s): guruh to'lishini 90 s kutsak, jonli rejimning foydasi yo'qoladi.
+// Guruhdagi har e'lonning o'z muddati bor; birortasiniki o'tsa — guruh ketadi (qolganlari unga qo'shilib ketadi).
 // maxParallel — bir vaqtda nechta AI so'rovi (standart: .env dagi PARSER_PARALLEL yoki 8).
+// deps.rules(text) → natija | null — AI'siz qoidaviy parser (main.js: @yuk/parser parseByRules). Har yangi e'lon avval
+// shundan o'tadi: ishonchli bo'lsa — AI'ni kutmasdan darhol yuborishga ketadi (AI limiti ham tejaladi), null bo'lsa —
+// e'lon navbatda qoladi va AI oladi. deps.rules yo'q bo'lsa (RULE_PARSER=0, testlar) — hammasi AI'da, avvalgidek.
 // maxAgeMs — joylanganiga shundan ko'p vaqt o'tgan e'lon AI'ga bormaydi, "Eskirgan" deb yopiladi (0 — cheklovsiz;
 // bot .env dagi POST_MAX_AGE_HOURS ni beradi, standart 3 soat). Yukni odatda bir soat ichida olib bo'lishadi:
 // kechagi e'lonni "yangi yuk" deb kanalga chiqarish haydovchini chalg'itadi va bepul AI limitini behuda yeydi.
-export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = console.log, now = Date.now, maxParallel, maxAgeMs = 0 } = {}) {
+export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitMs, log = console.log, now = Date.now, maxParallel, maxAgeMs = 0 } = {}) {
   const { store } = deps;
   const pool = deps.pool ?? poolFromParser(deps.parser);
   const size = batch ?? pool.batchSize ?? 10;
   const fillWait = fillWaitMs ?? pool.batchWaitMs ?? 90_000;
+  const liveWait = liveWaitMs ?? pool.liveWaitMs ?? 30_000;
   const parallel = maxParallel ?? (Math.floor(Number(process.env.PARSER_PARALLEL)) || 8);
   const controller = new AbortController();
   const sleep = (ms) => wait(ms, undefined, { signal: controller.signal }).catch(() => {});
@@ -160,14 +180,52 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
     if (count) log(`${count} ta e'lon eskirgan (joylanganiga ${ageText}) — AI'ga yuborilmadi`);
   }
 
+  // Tez yo'l: navbatga yangi tushgan e'lonlar qoidaviy parserdan o'tadi (~2 ms). Ishonchlisi — darhol yuborishga,
+  // qolgani navbatda AI'ni kutadi. ruleCursor — qaysi e'longacha ko'rib bo'lindi (har e'lon bir marta tekshiriladi).
+  // AI hammasi dam olayotganda ham ishlaydi: kunlik limit tugasa ham oddiy yuklar haydovchilarga ketaveradi.
+  let ruleCursor = 0;
+  let ruleCount = 0;
+  function quick() {
+    if (!deps.rules) return 0;
+    let handled = 0;
+    for (;;) {
+      const posts = store.takeNewPostsAfter(ruleCursor, 50);
+      const ready = [];
+      const results = [];
+      for (const post of posts) {
+        ruleCursor = Math.max(ruleCursor, post.id);
+        if (claimed.has(post.id)) continue; // AI allaqachon olgan
+        if (maxAgeMs > 0 && post.postedAt < now() - maxAgeMs) continue; // eskirgan — expire() yopadi
+        let result = null;
+        try {
+          result = deps.rules(post.text);
+        } catch (error) {
+          log(`#${post.id}: qoidaviy parser xatosi — ${error.message} (AI tahlil qiladi)`);
+        }
+        if (!result) continue;
+        claimed.add(post.id);
+        ready.push(post);
+        results.push({ ...result, by: "rules" });
+      }
+      if (ready.length) deliver(ready, results);
+      handled += ready.length;
+      if (posts.length < 50) break;
+    }
+    ruleCount += handled;
+    return handled;
+  }
+
   // Navbatdan bir guruh (eng yangilari, boshqa AI olganlaridan tashqari). Guruh to'lmagan va yangi bo'lsa — [] (kutamiz)
   // lease.batchSize — ulanishning o'z chegarasi (1pro: 6 ta), umumiy o'lchamdan katta bo'lmaydi
-  function take(fill, lease) {
+  function take(fill, lease, live = Math.min(liveWait, fill)) {
     const n = Math.min(size, lease?.batchSize || size);
     const posts = store.takeNewPosts(n, { newest: true, exclude: [...claimed] });
     if (posts.length === 0) return [];
-    const oldest = Math.min(...posts.map((p) => p.queuedAt ?? p.postedAt));
-    if (posts.length < n && fill > 0 && now() - oldest < fill) return [];
+    if (posts.length < n && fill > 0) {
+      // Eng erta tugaydigan muddat: jonli e'lon — navbatga tushganidan live ms, qolganlari — fill ms
+      const due = Math.min(...posts.map((p) => (p.queuedAt ?? p.postedAt) + (p.via === "live" ? Math.min(live, fill) : fill)));
+      if (now() < due) return [];
+    }
     for (const post of posts) claimed.add(post.id);
     return posts;
   }
@@ -236,7 +294,8 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
           if (outcome.status === "done") {
             const other = outcome.outOfScope ? ` (+${outcome.outOfScope} tasi boshqa yo'nalish)` : "";
             const [what, whom] = outcome.kind === "mashina" ? ["bo'sh mashina", "yuk beruvchiga"] : ["yuk", "haydovchiga"];
-            log(`#${post.id} ${post.source}: ${outcome.fresh}/${outcome.loads} yangi ${what}${other}, ${outcome.sent} ta ${whom}`);
+            const fast = result.by === "rules" ? " ⚡ AI'siz" : "";
+            log(`#${post.id} ${post.source}: ${outcome.fresh}/${outcome.loads} yangi ${what}${other}, ${outcome.sent} ta ${whom}${fast}`);
           }
           else if (outcome.status === "failed") log(`#${post.id}: xato — ${outcome.error}`);
         } catch (error) {
@@ -254,14 +313,16 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
 
   // Bitta guruh, ketma-ket (testlar va --dry-run): AI → yuborish. Ulanish limitga tushsa — shu yerda kutadi.
   // → olingan e'lonlar soni (0 — ish yo'q yoki bo'sh ulanish yo'q).
-  async function runOnce({ fillWaitMs: fill = 0 } = {}) {
+  async function runOnce({ fillWaitMs: fill = 0, liveWaitMs: live = fill } = {}) {
     expire();
+    const fast = quick();
+    if (fast) await delivery;
     const lease = pool.acquire();
-    if (!lease) return 0;
-    const posts = take(fill, lease);
+    if (!lease) return fast;
+    const posts = take(fill, lease, live);
     if (posts.length === 0) {
       lease.release();
-      return 0;
+      return fast;
     }
     let outcome = { results: [] };
     try {
@@ -274,7 +335,7 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
       log(`AI vaqtincha ishlamayapti${tag(lease)}: ${lease.describe(outcome.error)} — ${Math.round(outcome.pause.ms / 1000)} s kutamiz`);
       await sleep(outcome.pause.ms);
     }
-    return posts.length;
+    return fast + posts.length;
   }
 
   // Bitta AI ulanishining ishi (parallel): tahlil → natijani yuborish navbatiga.
@@ -306,9 +367,19 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
       };
       const count = pool.size();
       log(count ? `AI: ${count} ta ulanish, bir vaqtda ${Math.min(count, parallel)} tagacha so'rov` : "AI: ulanish yo'q");
+      if (deps.rules) log("Qoidaviy parser yoqiq: oddiy e'lonlar AI'siz, darhol yuboriladi (.env: RULE_PARSER=0 — o'chirish)");
+      // Har 10 daqiqada: nechta e'lon AI'siz tushunildi
+      let reportedAt = now();
+      let reported = 0;
       while (!controller.signal.aborted) {
         // Hamma AI dam olayotgan bo'lsa ham: kechasi to'plangan e'lonlar navbatda "kutib" turmasin
         expire();
+        quick();
+        if (deps.rules && now() - reportedAt >= 10 * 60_000) {
+          if (ruleCount > reported) log(`Qoidaviy parser: oxirgi 10 daqiqada ${ruleCount - reported} ta e'lon AI'siz tushunildi`);
+          reported = ruleCount;
+          reportedAt = now();
+        }
         // Yuborish ortda qolsa yoki hamma yo'lak band — kutamiz (Telegram'dan tezroq tahlil qilishning foydasi yo'q)
         if (lanes.size >= parallel || waiting >= size * 3) {
           await nap(idleMs);
@@ -319,8 +390,10 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, log = con
           const ready = pool.nextReadyIn();
           if (pool.size() === 0) say("none", "AI ulanishi yo'q: boshqaruv markazining «AI» bo'limida kalit qo'shing (yoki .env ga GEMINI_API_KEY)");
           else if (ready > 0 && lanes.size === 0) say("rest", `Hamma AI ulanishlari dam olyapti — eng yaqini ${pauseText(ready, now())}. E'lonlar navbatda kutadi`);
-          // Dam olish uzoq bo'lsa ham 15 s da bir tekshiramiz: yangi kalit qo'shilgan bo'lishi mumkin
-          await nap(ready == null ? idleMs : Math.min(Math.max(ready, 1000), 15_000));
+          // Dam olish uzoq bo'lsa ham 15 s da bir tekshiramiz: yangi kalit qo'shilgan bo'lishi mumkin.
+          // Qoidaviy parser yoqiq bo'lsa — idleMs da bir (yangi e'lonlar AI'siz ham ketishi uchun)
+          const most = deps.rules ? idleMs : 15_000;
+          await nap(ready == null ? idleMs : Math.min(Math.max(ready, 1000), most));
           continue;
         }
         const posts = take(fillWait, lease);

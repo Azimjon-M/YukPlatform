@@ -3,7 +3,8 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-const proxy = { "/api": "http://127.0.0.1:3000" };
+// ADMIN_API — boshqa portdagi sinov serveri (masalan API_PORT=3010 bilan ishga tushirilgan); jonli 3000 ga tegmaslik uchun
+const proxy = { "/api": process.env.ADMIN_API || "http://127.0.0.1:3000" };
 
 export default defineConfig({
   base: "/admin/",

@@ -61,3 +61,53 @@ test("terminalda ishlayotgan nusxa: external, yoqib bo'lmaydi", () => {
   assert.throws(() => m.start("fake"), (e) => e.status === 409 && e.message.includes("4242"));
   assert.throws(() => m.get("yoq"), (e) => e.status === 404);
 });
+
+// 2026-11-09: AUTOSTART paytida bot «terminalda» deb ko'rindi va hech kim uni yoqmadi. ensure — kutib, o'zi yoqadi
+test("ensure: terminaldagi nusxa yopilishi bilan o'zi yoqadi", async () => {
+  let lock = { pid: 4242, alive: true };
+  const m = manager("ok", { readLock: () => lock, watchMs: 20 });
+  const waiting = m.ensure("fake");
+  assert.deepEqual([waiting.status, waiting.pid, waiting.autoRestart], ["external", 4242, true]);
+  await wait(80);
+  assert.equal(m.get("fake").status, "external", "tirik nusxa bor ekan — tegmaydi");
+  lock = null;
+  await until(() => m.get("fake").status === "running");
+  assert.ok(texts(m).some((t) => t.includes("endi shu yerdan ishlaydi")));
+  await m.shutdown();
+});
+
+test("ensure: eskirgan fayl (PID boshqa jarayonniki) — darhol yoqadi; o'chirilgan bo'lsa — kutmaydi", async () => {
+  const m = manager("ok", { readLock: () => ({ pid: 6200, alive: false, stale: true }), watchMs: 20 });
+  assert.equal(m.ensure("fake").status, "running");
+  assert.ok(texts(m).some((t) => t.includes("eskirgan")));
+  await m.stop("fake");
+  await wait(80);
+  assert.equal(m.get("fake").status, "stopped", "qo'lda o'chirilgani o'zi yonmaydi");
+});
+
+test("watch: tirik PID'li eskirgan fayl — uyqudan uyg'onish bo'lishi mumkin, biroz kutadi", () => {
+  let lock = { pid: 4242, alive: true };
+  const m = manager("ok", { readLock: () => lock, watchMs: 60_000, staleGraceMs: 1000 });
+  m.ensure("fake");
+  lock = { pid: 4242, alive: false, stale: true };
+  m.watch(10_000);
+  m.watch(10_500);
+  assert.equal(m.get("fake").status, "stopped");
+  lock = { pid: 4242, alive: true };
+  m.watch(10_900);
+  lock = { pid: 4242, alive: false, stale: true };
+  m.watch(11_200);
+  assert.equal(m.get("fake").status, "stopped", "orada yangilangan — hisob qaytadan");
+  m.watch(12_300);
+  assert.equal(m.get("fake").status, "running");
+  return m.shutdown();
+});
+
+test("majburan to'xtatilgan bolaning PID fayli o'chiriladi", async () => {
+  const removed = [];
+  const m = manager("stubborn", { removeLock: (name, { pid }) => removed.push([name, pid]) });
+  const { pid } = m.start("fake");
+  await until(() => texts(m).includes("ikkinchi qator"));
+  await m.stop("fake");
+  assert.deepEqual(removed, [["fake", pid]]);
+});

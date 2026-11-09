@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ApiError } from "@google/genai";
 import { formatBatch, readBatchAnswer } from "../src/batch.js";
-import { createParser, DEFAULT_BATCH_SIZE, DEFAULT_BATCH_WAIT_SEC, resolveSettings } from "../src/parse.js";
+import { createParser, DEFAULT_BATCH_SIZE, DEFAULT_BATCH_WAIT_SEC, DEFAULT_LIVE_WAIT_SEC, resolveSettings } from "../src/parse.js";
 import { BATCH_SYSTEM_PROMPT, SYSTEM_PROMPT } from "../src/prompt.js";
 import { BATCH_SCHEMA, LOAD_PROPERTIES, POST_SCHEMA } from "../src/schema.js";
 
@@ -106,6 +106,11 @@ test("PARSER_BATCH va PARSER_BATCH_WAIT: .env dan o'qiladi, noto'g'ri qiymatda s
     }
     process.env.PARSER_BATCH_WAIT = "";
     assert.equal(resolveSettings().batchWaitMs, DEFAULT_BATCH_WAIT_SEC * 1000);
+    // Jonli e'lonlar uchun alohida kutish
+    delete process.env.PARSER_LIVE_WAIT;
+    assert.equal(resolveSettings().liveWaitMs, DEFAULT_LIVE_WAIT_SEC * 1000);
+    process.env.PARSER_LIVE_WAIT = "15";
+    assert.equal(resolveSettings().liveWaitMs, 15_000);
   } finally {
     process.env = saved;
   }

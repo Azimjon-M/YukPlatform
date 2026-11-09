@@ -5,7 +5,8 @@ import { existsSync } from "node:fs";
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Api, TelegramClient } from "telegram";
+import { Api, TelegramClient, utils } from "telegram";
+import { NewMessage } from "telegram/events/index.js";
 import { Logger, LogLevel } from "telegram/extensions/Logger.js";
 import { StringSession } from "telegram/sessions/index.js";
 import { authErrorAction } from "./authErrors.js";
@@ -153,9 +154,16 @@ async function resolveEntity(client, source) {
 // Jonli rejim (live.js) uchun o'quvchi. Guruh manzili bir marta aniqlanadi va eslab qolinadi:
 // Telegram manzil bo'yicha qidirishni (resolveUsername) qattiq cheklaydi, har daqiqada so'rash mumkin emas.
 export function createReader(client) {
-  const entities = new Map();
+  const entities = new Map(); // source.value → guruh (Api.Channel / Api.Chat)
+  const byPeer = new Map(); // "-100123…" → source: jonli xabar qaysi manbaga tegishli
+  const freshStats = () => ({ updates: 0, messages: 0, matched: 0, types: {}, bySource: {} });
+  const stats = freshStats();
   async function entityOf(source) {
-    if (!entities.has(source.value)) entities.set(source.value, await resolveEntity(client, source));
+    if (!entities.has(source.value)) {
+      const entity = await resolveEntity(client, source);
+      entities.set(source.value, entity);
+      byPeer.set(utils.getPeerId(entity), source);
+    }
     return entities.get(source.value);
   }
   return {
@@ -170,6 +178,84 @@ export function createReader(client) {
         .filter((m) => m.message)
         .map((m) => ({ id: m.id, text: m.message, date: m.date }))
         .reverse();
+    },
+
+    // Akkaunt qaysi manbalarga a'zo → Map(source.value → true/false).
+    // Hammasi bitta so'rovda (channels.getChannels): guruh ma'lumoti yangidan keladi, a'zo emas bo'lsa — `left`.
+    async membership(sources) {
+      const joined = new Map();
+      const channels = [];
+      for (const source of sources) {
+        try {
+          const entity = await entityOf(source);
+          if (entity instanceof Api.Channel) channels.push([source, entity]);
+          // Oddiy (kichik) guruh faqat a'zo bo'lganlar ro'yxatidan topiladi
+          else joined.set(source.value, entity instanceof Api.Chat && !entity.left);
+        } catch {
+          joined.set(source.value, false); // topilmadi (nomi o'zgargan, yopilgan) — so'rab turish xatoni o'zi yozadi
+        }
+      }
+      if (channels.length) {
+        const ids = channels.map(([, e]) => new Api.InputChannel({ channelId: e.id, accessHash: e.accessHash }));
+        const { chats } = await client.invoke(new Api.channels.GetChannels({ id: ids }));
+        const fresh = new Map(chats.map((chat) => [String(chat.id), chat]));
+        for (const [source, entity] of channels) {
+          const chat = fresh.get(String(entity.id));
+          // ChannelForbidden — guruhdan haydalgan / guruh yopilgan
+          joined.set(source.value, chat instanceof Api.Channel && !chat.left);
+        }
+      }
+      return joined;
+    },
+
+    // A'zo bo'lingan guruhlardagi yangi xabarni Telegram o'zi yuboradi (bildirishnoma o'chiq bo'lsa ham).
+    // onMessage(source, { id, text, date }) — faqat manbalarimizdan (byPeer) kelgan matnli xabarlar.
+    // → stop() (tinglashni to'xtatadi)
+    async listen(onMessage) {
+      const event = new NewMessage({});
+      const handler = (update) => {
+        const message = update.message;
+        if (!message?.message || !message.peerId) return;
+        stats.messages++;
+        let peer;
+        try {
+          peer = utils.getPeerId(message.peerId);
+        } catch {
+          return;
+        }
+        const source = byPeer.get(peer);
+        if (!source) return;
+        stats.matched++;
+        onMessage(source, { id: message.id, text: message.message, date: message.date });
+      };
+      // Tashxis uchun: Telegram umuman nima yuboryapti (turi bo'yicha sanaymiz, mazmuniga qaramaymiz)
+      const raw = (update) => {
+        stats.updates++;
+        const type = update?.className ?? "?";
+        stats.types[type] = (stats.types[type] ?? 0) + 1;
+        // Qaysi manbadan qanday update keldi (masalan, katta guruhda faqat UpdateChannelTooLong bo'lishi mumkin)
+        const channelId = update?.channelId ?? update?.message?.peerId?.channelId;
+        const source = channelId != null ? byPeer.get(`-100${channelId}`) : null;
+        if (source) {
+          const counts = (stats.bySource[source.value] ??= {});
+          counts[type] = (counts[type] ?? 0) + 1;
+        }
+      };
+      client.addEventHandler(handler, event);
+      client.addEventHandler(raw);
+      // Telegram'ga «shu ulanishga update'larni yubor» degan so'rov: bu bo'lmasa, ba'zan update'lar kelmay turadi
+      await client.invoke(new Api.updates.GetState());
+      return () => {
+        client.removeEventHandler(handler, event);
+        client.removeEventHandler(raw);
+      };
+    },
+
+    // Oxirgi so'rovdan beri: nechta update keldi, ulardan nechtasi yangi xabar, nechtasi bizning manbalardan
+    liveStats() {
+      const out = { ...stats, types: { ...stats.types }, bySource: { ...stats.bySource } };
+      Object.assign(stats, freshStats());
+      return out;
     },
   };
 }

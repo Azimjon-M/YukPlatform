@@ -98,4 +98,6 @@ Ro'yxat va tartib — Azimjonniki (2026-11-07). Uning ro'yxatida «Tent» ikki m
 - **Yuklash tomoni**: e'londa "orqadan yoki yonidan" kabi bir nechta tomon yozilsa, birortasi yetadi deb olindi. "Ustidan va orqadan" (ikkalasi ham shart) degan e'lonlar uchraydimi?
 - **Kuzov almashinuvi**: "tent kerak" yukini ref mashina olib keta oladimi? Hozir faqat ref ← izotermik va plashatka ← konteyner ruxsat etilgan.
 - **Odatdagi o'lchamlar**: Katta Isuzu, Mini fura, Kamaz, Kichik, Labo kuzovi (1-bo'limdagi taxminlar) to'g'rimi?
+- **Tonar / shalanda** (2026-11-09, qoidaviy parser sinovidan): "Танар керак 25 тонна" e'lonida AI mashinani kamaz deydi, qoida esa og'irlikdan fura. Tonar (samosval tirkama) va shalanda doim fura o'lchamidami yoki Kamaz/Howo ham bo'ladimi?
+- **"Paravoz"**: e'lonlarda "tent standart paravoz mega" kabi uchraydi, AI 66/85 marta fura degan. Paravoz — tirkamali avtopoyezdmi (2 ta kuzov)? Fura haydovchisiga yuborsa bo'ladimi?
 - **Yo'lakay**: yuklash joyi xaritada ko'rsatiladi (lokatsiya). Buning uchun manzilni koordinataga aylantirish kerak — keyingi bosqich.

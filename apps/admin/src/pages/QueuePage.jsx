@@ -47,6 +47,11 @@ function PostCard({ item, now, onChanged }) {
           {meta.label}
         </Badge>
         <span className="post-source">{item.source}</span>
+        {item.parsedBy === "rules" && (
+          <Badge tone="info" icon="⚡">
+            AI'siz
+          </Badge>
+        )}
         <span className="muted small">#{item.id}</span>
         <span className="muted small post-time">
           <TimeAgo ts={item.postedAt} now={now} />
@@ -92,7 +97,10 @@ export function QueuePage() {
   const [page, setPage] = useState({ key, offset: 0 });
   const offset = page.key === key ? page.offset : 0;
 
-  const state = useApi(() => get("/api/posts", { status, q: query, limit: LIMIT, offset }), [key, offset]);
+  const state = useApi(() => get("/api/posts", { status, q: query, limit: LIMIT, offset }), [key, offset], {
+    live: offset === 0 ? ["posts"] : null, // faqat birinchi sahifada — keyingisi siljimasin
+    liveGapMs: 2000,
+  });
   const counts = tabCounts(overview.data?.metrics?.posts);
   const tabs = POST_TABS.map((t) => ({ ...t, count: overview.data ? counts[t.id] : null }));
 

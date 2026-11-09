@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { get } from "./api.js";
 import { formatNumber, formatTime } from "./format.js";
-import { useApi } from "./hooks.js";
+import { useApi, useLiveStatus } from "./hooks.js";
 import { Icon } from "./icons.jsx";
 import { Link, usePathname } from "./navigation.jsx";
 import { OVERVIEW_INTERVAL_MS, OverviewContext } from "./overview.js";
@@ -44,6 +44,7 @@ function Sidebar({ current, overview }) {
   const waiting = overview.data?.metrics?.queue?.waiting;
   const failed = overview.data?.metrics?.queue?.failed ?? 0;
   const online = overview.data && !overview.error;
+  const live = useLiveStatus();
 
   return (
     <aside className={`sidebar ${open ? "is-open" : ""}`}>
@@ -79,9 +80,17 @@ function Sidebar({ current, overview }) {
           </Link>
         ))}
       </nav>
-      <div className="sidebar-foot" aria-live="polite">
-        <span className={`dot ${online ? "dot-good" : overview.error ? "dot-critical" : "dot-neutral"}`} aria-hidden="true" />
-        {online ? `Server ulangan · ${formatTime(overview.updatedAt, { seconds: true })}` : overview.error ? "Server bilan aloqa yo'q" : "Ulanmoqda…"}
+      {/* Jonli — bot bazaga yozishi bilan sahifa o'zi yangilanadi (live.js); bo'lmasa — eskicha, har 10 s */}
+      <div className="sidebar-foot" title={online && live !== "live" ? "Jonli ulanish yo'q — sahifalar har bir necha soniyada yangilanadi" : undefined}>
+        <span
+          className={`dot ${online ? "dot-good" : overview.error ? "dot-critical" : "dot-neutral"}${online && live === "live" ? " is-live" : ""}`}
+          aria-hidden="true"
+        />
+        {online
+          ? `${live === "live" ? "Jonli" : "Server ulangan"} · ${formatTime(overview.updatedAt, { seconds: true })}`
+          : overview.error
+            ? "Server bilan aloqa yo'q"
+            : "Ulanmoqda…"}
       </div>
     </aside>
   );
@@ -90,7 +99,12 @@ function Sidebar({ current, overview }) {
 export function App() {
   const pathname = usePathname();
   const route = routeFor(pathname);
-  const overview = useApi(() => get("/api/overview"), [], { interval: OVERVIEW_INTERVAL_MS });
+  const overview = useApi(() => get("/api/overview"), [], {
+    interval: OVERVIEW_INTERVAL_MS,
+    // Bosh sahifa va yon panel: hamma narsa shu so'rovda (og'irroq) — jonli, lekin 3 s da bir martadan ko'p emas
+    live: ["posts", "loads", "drivers", "ai", "processes"],
+    liveGapMs: 3000,
+  });
   const Page = route ? PAGES[route.id] : NotFound;
 
   return (

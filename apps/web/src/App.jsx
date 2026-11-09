@@ -246,7 +246,7 @@ export function App() {
             )
           }
         >
-          Ma'lumotlaringiz o'chirildi, bot sizga boshqa hech narsa yubormaydi. Qaytadan boshlash — botda /start
+          Bot sizga boshqa hech narsa yubormaydi. Qaytadan boshlash — botda /start (boshidan ro'yxatdan o'tasiz)
           {inTelegram ? "." : " yoki «Telegram bilan kirish»."}
         </Notice>
       </div>

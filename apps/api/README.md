@@ -49,7 +49,14 @@ Bot va collector bilan bitta baza (`data/yuk.db`) ishlatiladi.
 Bot yoki collector ikki marta ishga tushsa, Telegram xato beradi (bot — 409, collector — bitta sessiya).
 Shuning uchun har biri `data/run/<nom>.json` ga o'z PID'ini yozadi va ikkinchi nusxa ochilmaydi.
 Terminalda `npm run bot` bilan ochilgan bot web'da **«terminalda»** deb ko'rinadi: uni web'dan
-boshqarish uchun avval o'sha oynada `Ctrl+C` bosing.
+boshqarish uchun avval o'sha oynada `Ctrl+C` bosing. `npm start` (AUTOSTART) bunday nusxani kutadi:
+u yopilishi bilan 5 s ichida shu yerdan o'zi yoqadi (`processes.js` `ensure` / `watch`).
+
+**Yurak urishi:** egasi faylning vaqtini (mtime) har 10 s da yangilaydi. PID tirik, lekin fayl 40 s
+yangilanmagan bo'lsa — egasi o'lgan (oyna yopilgan yoki majburan o'ldirilgan), PID esa Windows tomonidan
+boshqa jarayonga berilgan: fayl e'tiborsiz qoladi. 2026-11-09 da aynan shunday bo'lgan: eski botning
+PID'i `npm start` jarayoniga tushib, bot «terminalda ishlayapti» deb ko'rindi va yoqilmadi.
+Boshqaruv markazi o'zi majburan to'xtatgan bolaning faylini o'zi o'chiradi.
 
 Kutilmaganda to'xtagan jarayon 10 s dan keyin o'zi qayta ishga tushadi (10 daqiqada 5 martagacha;
 undan ko'p bo'lsa — to'xtaydi va loglarni ko'rishni so'raydi).
@@ -63,11 +70,14 @@ Kalit va tokenlar javoblarda hech qachon bo'lmaydi — faqat «yozilganmi» (`tr
 
 | So'rov | Nima |
 |---|---|
+| `GET /api/live` | **jonli yangilanish** (Server-Sent Events, `src/live.js`): ochiq sahifaga `event: change` + `{"topics":["drivers"]}` — qaysi bo'lim o'zgargani (`drivers`, `posts`, `loads`, `ai`, `sources`, `processes`, `logs`). Ma'lumotning o'zi yo'q — sahifa o'sha bo'limni oddiy GET bilan qayta so'raydi. Server har soniyada bazadan qisqa belgilar so'raydi (`store.changeMarks()`), taymer faqat kimdir ulanganda ishlaydi |
 | `GET /api/overview` | ko'rsatkichlar (`metrics`), jarayonlar, sozlamalar holati |
 | `GET /api/loads?from&to&truckClass&bodyType&q&hours&limit&offset` | yuklar (eng yangisi birinchi) → `{ total, items }` |
 | `GET /api/posts?status&q&limit&offset` | navbatdagi e'lonlar (`new`, `done`, `failed`, `skipped`, `duplicate`) |
 | `POST /api/posts/:id/retry` · `POST /api/posts/retry-failed` | xatolilarni qayta navbatga |
-| `GET /api/drivers` · `PATCH /api/drivers/:chatId {active?, isAdmin?}` | foydalanuvchilar (rol, obuna), faol / pauza, **admin qilish** (faqat shu yerdan — internetdagi ilova serveri buni qila olmaydi). Hisobdan chiqqanda `role`/`profile` null, lekin `signedOutAt`, `signedOutRole` va `savedProfile` (o'sha rolning sozlamalari) keladi — sahifa oxirgi rol, mashina va yo'nalishni «🚪 Hisobdan chiqqan» bilan ko'rsatadi |
+| `GET /api/drivers` · `PATCH /api/drivers/:chatId {isAdmin}` | foydalanuvchilar (rol, obuna), faol / pauza (faqat ko'rinadi: `active` bilan PATCH → 400, uni foydalanuvchining o'zi o'zgartiradi; `pausedBy` user/idle/blocked/admin, `pausedAt`, `idleWarnedAt`; javobda `idleSince` — bot avtomatik pauza kuzatuvini boshlagan vaqt), **admin qilish** (faqat shu yerdan — internetdagi ilova serveri buni qila olmaydi). Hisobdan chiqqanda `role`/`profile` null, lekin `signedOutAt`, `signedOutRole` va `savedProfile` (o'sha rolning sozlamalari) keladi — sahifa oxirgi rol, mashina va yo'nalishni «🚪 Hisobdan chiqqan» bilan ko'rsatadi. `seenAt`/`seenVia` — oxirgi faollik (botda yoki web'da), `deliveries` — olgan yuklari `{today, total, lastAt, lastLoad, failed, lastError, lastErrorAt}`. Hisobini o'chirgan: `deletedAt`, `deletedVia` (bot/web), `deletedSnapshot` (o'sha paytdagi rol, sozlamalar, raqam), `deletedCount` (qaytsa ham qoladi), `returnedAt`; `draftStep` — botdagi ro'yxatdan o'tish qaysi qadamda to'xtagan. `PATCH` tarixga «admin» deb yoziladi |
+| `GET /api/drivers/:chatId` | «Batafsil» (akkordeon): `{profiles, draft, phoneAskedAt, events: [{type, detail, at}], deliveries: [{ok, error, at, load, kind, link}]}` — ikkala rolning saqlangan sozlamalari, tarix (`user_events`, oxirgi 100) va oxirgi 30 ta yuborilgan |
+| `DELETE /api/drivers/:chatId` | **butunlay o'chirish** (`store.purgeDriver`: qator, tarix, yuborilganlar) — faqat odam shaxsiy ma'lumotini o'chirishni so'rasa; qaytarib bo'lmaydi |
 | `POST /api/drivers/:chatId/web-link` | haydovchilar ilovasini shu haydovchi nomidan ochish havolasi (12 soat; Telegram'siz sinash uchun) |
 | `GET /api/sources` | collector kuzatadigan guruhlar + 24 soatlik statistika |
 | `POST /api/sources {name, note?}` | guruh qo'shish: `@nom`, `nom`, `https://t.me/nom`, `-100…` |
@@ -98,6 +108,7 @@ Bot ro'yxatni har 15 s da qayta o'qiydi — kalit qo'shgandan keyin botni qayta 
 | `src/server.js` | ishga tushirish, port, avtomatik yoqish, `Ctrl+C` |
 | `src/app.js` | Express yo'llari, himoya, web fayllar |
 | `src/processes.js` | bot va collector jarayonlari: yoqish, to'xtatish, loglar, qayta ishga tushirish |
+| `src/live.js` | jonli yangilanish (`GET /api/live`): bazadagi va jarayonlardagi o'zgarishni sezib, ochiq sahifalarga xabar |
 | `src/ai.js` | «AI» bo'limi uchun: kalit bilan modellar ro'yxati, sinov so'rovi |
 | `src/public.js` | ilova serveri (3001): kirish, rol, profil, yuklar va bo'sh mashinalar lentasi, web fayllari |
 | `src/telegramAuth.js` | Telegram imzosini tekshirish (Mini App `initData`, saytdagi vidjet) va sessiya tokeni |
@@ -130,14 +141,14 @@ Kirgandan keyin server o'z tokenini beradi (30 kun). Ilova uni har so'rovda `Aut
 | `PUT /pub/me/profile {profile, role?}` | sozlamalarni saqlash, rolga qarab tekshiruv (bot bilan bir xil) — yuborish yoqiladi. Rol yo'q — 409 `no_role` |
 | `PATCH /pub/me {active}` | pauza / davom |
 | `POST /pub/me/logout` | hisobdan chiqish (`store.signOut`): rol va sozlamalar `profiles` ga yashiriladi, `active=false` — bot yubormaydi va uni yangi odamdek ko'radi («Siz kimsiz?», «🚚 Ro'yxatdan o'tish»); qayta kirib rolni tanlasa (`PUT /pub/me/role` yoki botda) sozlamalari va yo'nalishi tiklanadi. Raqam, ism, admin belgisi qoladi; `signed_out_at` / `signed_out_role` yoziladi (rol tanlansa — tozalanadi). Botga «🚪 Hisobdan chiqdingiz… /start» xabari va pastki menyu olib tashlanadi |
-| `DELETE /pub/me` | hisobni o'chirish — `drivers` qatori butunlay (botdagi /ochirish → «Hammasini o'chirish» bilan bir xil), eski tokenlar 401. Keyin bot nomidan chatga «o'chirildi» xabari va pastki menyu olib tashlanadi (`src/botMessage.js`, Bot API `sendMessage`, xato bo'lsa jim) |
+| `DELETE /pub/me` | hisobni o'chirish (`store.deleteDriver`, botdagi /ochirish → «Hisobni o'chirish» bilan bir xil): foydalanuvchi uchun hisob yopiladi (rol, sozlamalar, raqam tozalanadi, yuborish to'xtaydi), lekin qator va o'sha paytdagi ma'lumot boshqaruv markazida qoladi (Azimjon, 2026-11-09: «Hammasi saqlansin»); eski tokenlar 401 (`deletedAt`). `/pub/auth` bilan qayta kirsa — `store.comeBack` (boshidan boshlaydi, «necha marta o'chirgan» qoladi). Keyin bot nomidan chatga «o'chirildi» xabari va pastki menyu olib tashlanadi (`src/botMessage.js`, Bot API `sendMessage`, xato bo'lsa jim) |
 | `GET /pub/me/route?from&hours` | haydovchining yo'nalish tanlovi: `{ from, hours, areas: [{id, label, count}], any }` — joylar «Qayerda ishlaysiz?» ga qarab, son — mashinasiga sig'adigan yuklar. `from` yo'q — «Qayerdan?» qadami, bor — «Qayerga?» (`*` = hamma joydan). Faqat haydovchiga (409 `no_role` / `role` / `no_profile`), noma'lum joy — 400 |
 | `PUT /pub/me/route {from, to}` | yo'nalishni saqlash (`*` = istalgan) — botdagi «📋 Mos yuklar» bilan bir xil (`fromAreas`/`toAreas`/`routeAt`); bot ham yangi yuklarni shu bo'yicha yuboradi |
 | `GET /pub/loads?view=mine\|all&from&to&hours&limit&offset` | yuklar, e'lon vaqti bo'yicha eng yangisi birinchi; `mine` — bot yuboradigan mos yuklar (faqat haydovchiga, boshqasiga 409 `role`) |
 | `GET /pub/trucks?...` | xuddi shunday — bo'sh mashinalar; `mine` — yuk beruvchiga mos (`matchTruck`) |
 | `GET /pub/admin/overview` | **faqat adminlar** (`ADMIN_IDS` yoki boshqaruv markazidagi belgi; boshqalarga 403 `forbidden`): navbat, yuklar, foydalanuvchilar, AI ulanishlari (kalitsiz) |
 | `GET /pub/admin/users?q&role` | adminlar: foydalanuvchilar (ism, @username, rol, holat, `signedOut` + `signedOutRole`; telefon yo'q), 200 tagacha |
-| `PATCH /pub/admin/users/:id {active?, role?}` | adminlar: yoqish / to'xtatish, rolni almashtirish (sozlamalari saqlanadi, qaytsa tiklanadi). Admin qilish va obuna bu yerdan **mumkin emas** |
+| `PATCH /pub/admin/users/:id {role}` | adminlar: rolni almashtirish (`active` → 400 — faol / pauza faqat foydalanuvchining o'zi; ro'yxatda `pausedBy`) (sozlamalari saqlanadi, qaytsa tiklanadi). Admin qilish va obuna bu yerdan **mumkin emas** |
 
 Kirmagan odamga `config` va `auth` dan boshqa hech narsa berilmaydi (401). Bir manzildan daqiqasiga 240 ta so'rov,
 kirishga 20 ta urinish. Telefon raqamlari faqat kirgan haydovchiga ko'rinadi.

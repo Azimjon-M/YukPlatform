@@ -150,7 +150,10 @@ async function cmdLive() {
   process.on("message", (message) => message === "stop" && controller.abort());
   const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
 
-  console.log(`${sources().length} ta guruh kuzatilyapti, har ${intervalMs / 1000} s. E'lonlarni bot yuboradi (npm run bot). To'xtatish: Ctrl+C`);
+  console.log(
+    `${sources().length} ta guruh kuzatilyapti: akkaunt a'zo bo'lganlari jonli (~1 s), qolganlari har ${intervalMs / 1000} s. ` +
+      "E'lonlarni bot yuboradi (npm run bot). To'xtatish: Ctrl+C",
+  );
   try {
     await runLive({
       sources,

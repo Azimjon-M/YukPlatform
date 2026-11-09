@@ -8,12 +8,16 @@ import {
   LOADING_SIDES,
   PAYMENT_TYPES,
   REGIONS,
+  ROLES,
   TRUCK_CLASSES,
   bodyId,
+  formatContactPhone,
+  idleState,
   intlOption,
   placeKey,
   regionLabel,
   routeChosen,
+  routeLabel,
 } from "@yuk/shared";
 
 const MINUTE = 60 * 1000;
@@ -162,12 +166,192 @@ export function capacityText(capacityKg) {
 // Boshqaruv markazidagi foydalanuvchi qatori. Hisobdan chiqqanda (store.signOut) rol va profil ustunlari bo'shaydi —
 // bot uni yangi odamdek ko'radi va yuk yubormaydi, lekin ma'lumot o'chmagan: oxirgi roli (signedOutRole) va o'sha
 // rolning sozlamalari (savedProfile) ko'rsatiladi, Holat'da «🚪 Hisobdan chiqqan» turadi
+// Hisobini o'chirgan (store.deleteDriver): qator qoladi, o'chirgan paytdagi rol, sozlamalar va raqam — deletedSnapshot da
 export function driverShown(driver) {
-  const signedOut = !driver.role && driver.signedOutAt != null;
+  const deleted = driver.deletedAt != null;
+  const snap = deleted ? (driver.deletedSnapshot ?? {}) : null;
+  const signedOut = !deleted && !driver.role && driver.signedOutAt != null;
+  const role =
+    driver.role ?? (deleted ? (snap.role ?? snap.signedOutRole ?? null) : signedOut ? (driver.signedOutRole ?? null) : null);
+  const saved = deleted ? (snap.profile ?? (role ? snap.profiles?.[role] : null) ?? null) : signedOut ? (driver.savedProfile ?? null) : null;
   return {
     signedOut,
-    role: driver.role ?? (signedOut ? (driver.signedOutRole ?? null) : null),
-    profile: driver.profile ?? (signedOut ? (driver.savedProfile ?? null) : null),
+    deleted,
+    role,
+    profile: driver.profile ?? saved,
+    phone: driver.phone ?? (deleted ? (snap.phone ?? null) : null),
+  };
+}
+
+// O'chirish paytidagi sozlamalar (deletedSnapshot yoki tarixdagi «deleted» voqeasi) → [{ role, profile }], asosiysi birinchi.
+// Qaytgan foydalanuvchi boshidan boshlaydi, lekin admin oldingi mashinasi va yo'nalishini ko'ra oladi
+export function snapshotProfiles(snap) {
+  if (!snap) return [];
+  const main = snap.role ?? snap.signedOutRole ?? null;
+  const list = [];
+  const mainProfile = snap.profile ?? (main ? snap.profiles?.[main] : null);
+  if (main && mainProfile) list.push({ role: main, profile: mainProfile });
+  for (const [role, profile] of Object.entries(snap.profiles ?? {})) if (profile && role !== main) list.push({ role, profile });
+  return list;
+}
+
+// Botdagi savol-javob qadamlari (apps/bot wizard.js STEPS / SHIPPER_STEPS) — «qaysi qadamda to'xtagan»
+const WIZARD_STEPS = {
+  class: "Transport turi",
+  body: "Kuzov",
+  capacity: "Qancha yuk ko'taradi",
+  size: "O'lcham",
+  sides: "Yuklash tomoni",
+  intl: "Qayerda ishlaydi",
+  from: "Qayerdan",
+  to: "Qayerga",
+  classes: "Mashina turlari",
+  bodies: "Kuzovlar",
+};
+
+// Ro'yxatdan o'tish qayergacha yetgan: «—» o'rniga sababini aytamiz (masalan, rol tanlagan, lekin formani to'ldirmagan)
+export function registrationText(driver) {
+  const shown = driverShown(driver);
+  if (shown.deleted) return "Hisobini o'chirgan — bot unga hech narsa yubormaydi";
+  if (shown.signedOut) return "Hisobdan chiqqan — qayta kirib rolni tanlasa, sozlamalari tiklanadi";
+  if (!driver.role) return "Faqat /start bosgan — rol tanlamagan";
+  if (!driver.profile) {
+    const step = WIZARD_STEPS[driver.draftStep];
+    return step ? `Ro'yxatdan o'tishni boshlagan — «${step}» qadamida to'xtagan` : "Rol tanlagan, lekin transport formasini to'ldirmagan";
+  }
+  if (!driver.active) return `Ro'yxatdan o'tgan, pauzada — ${PAUSED_BY[driver.pausedBy]?.note ?? "o'zi to'xtatgan"}`;
+  if (driver.role === "haydovchi" && !routeChosen(driver.profile)) return "Ro'yxatdan o'tgan, lekin yo'nalish tanlamagan — yuk bormaydi";
+  return "Ro'yxatdan o'tgan, yuk oladi";
+}
+
+// Kim pauza qilgan (drivers.paused_by). Faol / pauzani faqat foydalanuvchi o'zi o'zgartiradi (Azimjon, 2026-11-09) —
+// boshqaruv markazi faqat ko'rsatadi
+const PAUSED_BY = {
+  user: { icon: "⏸", label: "Pauza", note: "o'zi to'xtatgan" },
+  idle: { icon: "💤", label: "Avto-pauza", note: "48 soat botga kirmagan" },
+  blocked: { icon: "⛔", label: "Botni bloklagan", note: "Telegram xabarni qabul qilmadi" },
+  admin: { icon: "⏸", label: "Pauza", note: "boshqaruv markazidan (eski)" },
+};
+
+// Faol / pauza holati. Faol bo'lsa — avtomatik pauza qachon (@yuk/shared idleState: 24 soatda ogohlantirish, 48 da pauza).
+// idleSince — bot kuzatuvni boshlagan vaqt (GET /api/drivers); hali yo'q bo'lsa (bot yangi kod bilan ishga tushmagan) —
+// muddat ko'rsatilmaydi. → { active, tone, icon, label, note, at, warned, pauseAt }
+export function activeView(driver, idleSince = null, now = Date.now()) {
+  if (!driver.active) {
+    const by = PAUSED_BY[driver.pausedBy] ?? { icon: "⏸", label: "Pauza", note: null };
+    return { active: false, tone: driver.pausedBy === "blocked" ? "critical" : "warning", ...by, at: driver.pausedAt ?? null, warned: false, pauseAt: null };
+  }
+  const idle = idleSince ? idleState(driver, now, idleSince) : null;
+  const warned = Boolean(idle?.warned);
+  return {
+    active: true,
+    tone: warned ? "warning" : "good",
+    icon: warned ? "⚠" : "●",
+    label: "Faol",
+    note: warned ? "24 soat kirmagan — ogohlantirildi" : null,
+    at: warned ? driver.idleWarnedAt : null,
+    warned,
+    pauseAt: idle?.pauseAt ?? null,
+  };
+}
+
+// «pauzagacha 1 kun 3 soat» / «bir necha daqiqada pauza» (bot har 10 daqiqada tekshiradi)
+export function pauseInText(pauseAt, now = Date.now()) {
+  if (pauseAt == null) return null;
+  const left = pauseAt - now;
+  return left <= 0 ? "bir necha daqiqada pauza bo'ladi" : `kirmasa, pauzagacha ${durationMin(Math.ceil(left / MINUTE))}`;
+}
+
+const VIA_TEXT = { bot: "botda", web: "web'da" };
+const roleName = (id) => (id ? (ROLES[id]?.name ?? id) : null);
+
+// Tarixdagi voqea (store user_events, history.js) → { icon, text }
+export function eventView({ type, detail }) {
+  const d = detail ?? {};
+  const via = VIA_TEXT[d.via] ? ` (${VIA_TEXT[d.via]})` : "";
+  switch (type) {
+    case "joined":
+      return { icon: "👋", text: "Botga birinchi marta kirdi" };
+    case "role":
+      return d.from
+        ? { icon: "🔄", text: `Rolni almashtirdi: ${roleName(d.from)} → ${roleName(d.to)}${d.restored ? " (sozlamalari tiklandi)" : ""}` }
+        : { icon: "🎭", text: `Rol tanladi: ${roleName(d.to)}${d.restored ? " (oldingi sozlamalari tiklandi)" : ""}` };
+    case "registered":
+      return { icon: "✅", text: `Ro'yxatdan o'tdi${d.role ? ` (${roleName(d.role)})` : ""}` };
+    case "settings":
+      return { icon: "⚙️", text: "Sozlamalarini o'zgartirdi" };
+    case "route":
+      return { icon: "🧭", text: `Yo'nalish tanladi: ${routeLabel({ fromAreas: d.fromAreas, toAreas: d.toAreas })}` };
+    case "paused":
+      if (d.by === "idle") return { icon: "💤", text: "48 soat botga kirmagani uchun avtomatik pauza (xabar yuborildi)" };
+      return { icon: "⏸", text: d.by === "admin" ? "Boshqaruv markazidan to'xtatildi" : "Yuborishni to'xtatdi (pauza)" };
+    case "idle_warned":
+      return { icon: "⚠️", text: "24 soat kirmagani uchun ogohlantirildi: «yana 24 soat kirmasangiz — pauza»" };
+    case "resumed":
+      return { icon: "▶️", text: d.by === "admin" ? "Boshqaruv markazidan yoqildi" : "Yuborishni qayta yoqdi" };
+    case "blocked":
+      return { icon: "⛔", text: "Botni bloklagan — yuborish to'xtatildi" };
+    case "phone":
+      return { icon: "📱", text: `Raqamini ulashdi${d.phone ? `: ${formatContactPhone(d.phone)}` : ""}` };
+    case "phone_removed":
+      return { icon: "📵", text: "Raqamini o'chirdi" };
+    case "admin":
+      return { icon: "🛠", text: d.on ? "Admin qilindi" : "Admin huquqi olindi" };
+    case "signout":
+      return { icon: "🚪", text: `Hisobdan chiqdi${d.role ? ` (${roleName(d.role)})` : ""}` };
+    case "deleted":
+      return { icon: "🗑", text: `Hisobini o'chirdi${via}` };
+    case "returned":
+      return { icon: "↩️", text: `O'chirgandan keyin qaytdi${via} — boshidan boshladi` };
+    default:
+      return { icon: "•", text: type };
+  }
+}
+
+// Oxirgi faollik: shu vaqt ichida bo'lsa — «● Hozir botda / web'da»
+export const ONLINE_MS = 2 * 60 * 1000;
+const SEEN_VIA = { bot: "botda", web: "web'da" };
+
+// seenAt — botga yozgan / tugma bosgan yoki web'ni ishlatgan vaqt (2026-11-09 dan yoziladi). Undan oldingilarda —
+// updatedAt (bot uni ham har xabarda yangilaydi, lekin boshqaruv markazidagi o'zgarish ham kiradi): taxminiy, «Hozir» yo'q
+export function activityView(driver, now = Date.now()) {
+  const exact = driver.seenAt != null;
+  const at = exact ? driver.seenAt : (driver.updatedAt ?? null);
+  return {
+    at,
+    exact,
+    via: exact ? (SEEN_VIA[driver.seenVia] ?? null) : null,
+    online: exact && now - driver.seenAt < ONLINE_MS,
+  };
+}
+
+// Telegram xatosi → tushunarli matn
+function deliveryErrorText(error) {
+  if (!error) return null;
+  if (/blocked/i.test(error)) return "botni bloklagan";
+  if (/deactivated/i.test(error)) return "Telegram akkaunti o'chirilgan";
+  if (/chat not found/i.test(error)) return "chat topilmadi";
+  return error;
+}
+
+// «Olgan yuklari» (bazadagi deliveries, 2026-11-09 dan): haydovchiga — yuklar, yuk beruvchiga — bo'sh mashinalar.
+// blocked — oxirgi urinish xato bo'lsa (muvaffaqiyatlisidan keyin) — hozir ham yetmayapti
+export function deliveriesView(driver) {
+  const d = driver.deliveries ?? {};
+  const noun = driverShown(driver).role === "yuk_beruvchi" ? "mashina" : "yuk";
+  const load = d.lastLoad;
+  const to = load ? placeText(load, "to") : null;
+  const failing = Boolean(d.lastErrorAt) && d.lastErrorAt >= (d.lastAt ?? 0);
+  return {
+    noun,
+    today: d.today ?? 0,
+    total: d.total ?? 0,
+    lastAt: d.lastAt ?? null,
+    lastRoute: load ? `${placeText(load, "from")} → ${to === "?" && noun === "mashina" ? "istalgan joy" : to}` : null,
+    failed: d.failed ?? 0,
+    error: deliveryErrorText(d.lastError),
+    errorAt: d.lastErrorAt ?? null,
+    failing,
   };
 }
 

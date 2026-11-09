@@ -19,7 +19,7 @@
 //   --- faqat adminlar (Mini App'dagi «🛠 Boshqaruv»), boshqalarga 403 ---
 //   GET  /pub/admin/overview   ko'rsatkichlar (navbat, yuklar, foydalanuvchilar) va AI ulanishlari holati
 //   GET  /pub/admin/users      ?q&role — foydalanuvchilar ro'yxati
-//   PATCH /pub/admin/users/:id { active?, role? } — yoqish / to'xtatish, rolni almashtirish
+//   PATCH /pub/admin/users/:id { role } — rolni almashtirish (faol / pauza — faqat foydalanuvchining o'zi)
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -89,8 +89,9 @@ export const SIGNED_OUT_TEXT =
   "🚪 Hisobdan chiqdingiz. Endi bot sizga yuk yubormaydi.\n" +
   "Qaytib kirish — /start: rolingizni tanlasangiz, sozlamalaringiz va yo'nalishingiz tiklanadi.";
 
-// Hisob web'dan o'chirilganda bot chatiga yoziladigan xabar (pastki menyu ham olib tashlanadi)
-export const DELETED_TEXT = "✅ Hisobingiz ilovadan o'chirildi: sozlamalar, yo'nalish va telefon raqamingiz. Endi sizga hech narsa yuborilmaydi.\nQaytadan boshlash — /start";
+// Hisob web'dan o'chirilganda bot chatiga yoziladigan xabar (pastki menyu ham olib tashlanadi).
+// «Ma'lumotlaringiz o'chirildi» demaymiz — ular boshqaruv markazida qoladi (Azimjon, 2026-11-09: «Hammasi saqlansin»)
+export const DELETED_TEXT = "✅ Hisobingiz o'chirildi. Endi sizga hech narsa yuborilmaydi.\nQaytadan boshlash — /start (boshidan ro'yxatdan o'tasiz)";
 
 // scope — yo'nalish doirasi (.env dagi ROUTE_SCOPE): undan tashqaridagi eski yuklar ko'rsatilmaydi.
 // notify(chatId, text, extra) — bot nomidan xabar (botMessage.js); null — yuborilmaydi (testlarda soxtasi beriladi)
@@ -153,6 +154,7 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
         : { error: "Telegram ma'lumoti kelmadi" };
     if (result.error) throw httpError(401, result.error, "auth");
     const { id, name, username } = result.user;
+    store.comeBack(id, "web"); // hisobini o'chirgan bo'lsa — qaytdi (boshidan boshlaydi, tarixga yoziladi)
     const driver = store.saveDriver(id, { name, username });
     res.json({ token: sessions.issue(id), me: meOf(driver) });
   });
@@ -161,8 +163,10 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
   pub.use((req, res, next) => {
     const uid = sessions.verify((req.get("authorization") ?? "").replace(/^Bearer\s+/i, ""));
     const driver = uid ? store.getDriver(uid) : null;
-    if (!driver) return next(httpError(401, "Kirish kerak", "auth"));
+    // Hisobini o'chirgan — eski tokenlari ishlamaydi (qator qoladi, lekin u qayta kirmaguncha — yo'q hisob)
+    if (!driver || driver.deletedAt != null) return next(httpError(401, "Kirish kerak", "auth"));
     req.driver = driver;
+    store.touchDriver(uid, "web"); // oxirgi faollik — boshqaruv markazida «🟢 Hozir web'da»
     next();
   });
 
@@ -210,12 +214,12 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     res.json(meOf(user));
   });
 
-  // Hisobni o'chirish: drivers jadvalidagi qator butunlay (rol, ikkala rolning sozlamalari, yo'nalish, telefon, admin belgisi).
-  // Boshqa jadvallarda unga bog'liq narsa yo'q. Tokenlar o'z-o'zidan ishlamay qoladi (qator yo'q → 401).
-  // Keyin botga kirsa yoki ilovaga qayta kirsa — yangi, bo'sh hisob ochiladi (rol tanlashdan boshlanadi).
+  // Hisobni o'chirish (store.deleteDriver): foydalanuvchi uchun hisob yopiladi — rol, sozlamalar, raqam tozalanadi,
+  // yuborish to'xtaydi, tokenlar ishlamaydi (deletedAt → 401). Ma'lumot boshqaruv markazida «🗑 Hisobini o'chirgan» bilan qoladi.
+  // Keyin botga yozsa yoki ilovaga qayta kirsa — qaytdi (comeBack), rol tanlashdan boshlaydi.
   pub.delete("/me", (req, res) => {
     const { chatId } = req.driver;
-    store.deleteDriver(chatId);
+    store.deleteDriver(chatId, { via: "web" });
     // Javobni kutmaymiz: chatdagi pastki menyu eskirdi — bot nomidan «o'chirildi» deb yozib, menyuni olib tashlaymiz
     void notify?.(chatId, DELETED_TEXT, { reply_markup: { remove_keyboard: true } }); // xatoni o'zi yutadi
     res.json({ deleted: true });
@@ -342,9 +346,14 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
         hasProfile: Boolean(u.profile),
         registering: u.registering,
         active: u.active,
+        // Kim pauza qilgan: user (o'zi) | idle (48 soat kirmagan) | blocked (botni bloklagan)
+        pausedBy: u.active ? null : u.pausedBy,
         // Hisobdan chiqqan: role null (bot yubormaydi), lekin qaysi roldan chiqqani ko'rsatiladi
         signedOut: !u.role && u.signedOutAt != null,
         signedOutRole: u.role ? null : u.signedOutRole,
+        // Hisobini o'chirgan (qator qoladi) va necha marta o'chirgani
+        deleted: u.deletedAt != null,
+        deletedCount: u.deletedCount ?? 0,
         updatedAt: u.updatedAt,
       }));
     res.json({ total: items.length, items: items.slice(0, 200) });
@@ -358,14 +367,10 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     // Avval hammasini tekshiramiz, keyin o'zgartiramiz (xato so'rov yarim-yorti saqlanib qolmasin)
     const role = "role" in body ? validRole(body.role) : null;
     if ("role" in body && !role) throw httpError(400, "role: haydovchi yoki yuk_beruvchi bo'lishi kerak");
-    if ("active" in body && typeof body.active !== "boolean") throw httpError(400, "active: true yoki false bo'lishi kerak");
-    // Bot va web'dagidek: har rolning sozlamalari saqlanadi, yangi rolda avval to'ldirgani bo'lsa — tiklanadi.
-    // Rol almashsa, active e'tiborga olinmaydi (switchRole yoqib qo'yadi)
+    // Faol / pauza — faqat foydalanuvchining o'zi (Azimjon, 2026-11-09); 48 soat kirmasa bot o'zi pauza qiladi
+    if ("active" in body) throw httpError(400, "Faol / pauzani faqat foydalanuvchining o'zi o'zgartiradi");
+    // Bot va web'dagidek: har rolning sozlamalari saqlanadi, yangi rolda avval to'ldirgani bo'lsa — tiklanadi
     if (role && role !== roleOf(user)) return res.json(meOf(store.switchRole(chatId, role), { withPhone: false }));
-    if ("active" in body) {
-      if (body.active && !user.profile) throw httpError(409, "Bu foydalanuvchi hali sozlamalarni to'ldirmagan");
-      return res.json(meOf(store.saveDriver(chatId, { active: body.active }), { withPhone: false }));
-    }
     res.json(meOf(user, { withPhone: false }));
   });
 
