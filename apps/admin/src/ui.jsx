@@ -1,6 +1,10 @@
-// Umumiy kichik komponentlar: tugma, belgi (badge), almashtirgich, holat qutilari, sahifalash, xabarchalar.
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { formatDateTime, formatNumber, timeAgo } from "./format.js";
+// Umumiy kichik komponentlar: tugma, belgi (badge), almashtirgich, holat qutilari, sahifalash, xabarchalar, tasdiqlash oynasi.
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
+import { describeError } from "./errorInfo.js";
+import { recordMessage } from "./errors.js";
+import { ErrorScreen } from "./ErrorScreen.jsx";
+import { formatDateTime, formatNumber, formatTime, timeAgo } from "./format.js";
+import { Link } from "./navigation.jsx";
 import { pageInfo } from "./query.js";
 
 export function PageHeader({ title, subtitle, actions }) {
@@ -72,6 +76,50 @@ export function Toggle({ checked, onChange, label, disabled, busy, hideLabel = f
   );
 }
 
+// «Ishonchingiz komilmi?» oynasi (modal). Brauzerning o'z <dialog> elementi: ochilganda orqadagi sahifa bosilmaydi,
+// klaviatura oyna ichida qoladi, Esc yoki orqa fonni bosish — bekor qilish. Fokus avval «Bekor qilish» da
+// (tasodifan Enter bosilsa — hech narsa bo'lmaydi). busy — so'rov ketyapti: oynani yopib bo'lmaydi
+export function ConfirmDialog({ open, title, children, confirmLabel, cancelLabel = "Bekor qilish", tone = "danger", busy = false, onConfirm, onCancel }) {
+  const ref = useRef(null);
+  const titleId = useId();
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    else if (!open && dialog.open) dialog.close();
+  }, [open]);
+  const cancel = () => !busy && onCancel();
+  return (
+    <dialog
+      ref={ref}
+      className="modal"
+      aria-labelledby={titleId}
+      onCancel={(e) => {
+        e.preventDefault(); // Esc — o'zimiz yopamiz (open holati React'da)
+        cancel();
+      }}
+      onClick={(e) => e.target === ref.current && cancel()}
+    >
+      {open && (
+        <div className="modal-body">
+          <h2 id={titleId} className="modal-title">
+            {title}
+          </h2>
+          <div className="modal-text">{children}</div>
+          <div className="modal-actions">
+            <Button onClick={cancel} disabled={busy} autoFocus>
+              {cancelLabel}
+            </Button>
+            <Button variant={tone} onClick={onConfirm} busy={busy}>
+              {confirmLabel}
+            </Button>
+          </div>
+        </div>
+      )}
+    </dialog>
+  );
+}
+
 export function Field({ label, children, className = "" }) {
   return (
     <label className={`field ${className}`}>
@@ -89,20 +137,24 @@ export function Loading({ text = "Yuklanmoqda…" }) {
   );
 }
 
-export function ErrorBox({ error, onRetry }) {
+// Qisqa xato qutisi (sahifa ichida). Turi bo'yicha sarlavha: «Server javob bermadi», «Serverda xato (500)» ...
+// updatedAt — ekrandagi ma'lumot qachongi (yangilash xato bo'lsa, eski ma'lumot ko'rinib turadi)
+export function ErrorBox({ error, onRetry, updatedAt = null }) {
   if (!error) return null;
+  const info = describeError(error, { kind: error.kind ?? "client" });
   return (
     <div className="state state-error" role="alert">
       <div>
-        <strong>{error.offline ? "Server bilan aloqa yo'q" : "Xato"}</strong>
+        <strong>
+          <span aria-hidden="true">{info.icon}</span> {info.title}
+        </strong>
         <p>
-          {error.offline ? (
-            <>
-              API javob bermayapti — <code>npm start</code> ishlayaptimi? YukPlatform papkasida ishga tushiring va sahifani yangilang.
-            </>
-          ) : (
-            error.message
-          )}
+          {info.text}
+          {info.kind === "offline" || info.kind === "timeout" ? ` ${info.hint}` : ""}
+        </p>
+        <p className="muted small">
+          {updatedAt ? `Ko'rinib turgan ma'lumot ${formatTime(updatedAt, { seconds: true })} holatida. ` : ""}
+          <Link to="/xatolar">Barcha xatolar →</Link>
         </p>
       </div>
       {onRetry && (
@@ -124,12 +176,14 @@ export function Empty({ title, children }) {
 }
 
 // Sahifa holatini bir joyda: birinchi yuklanish, xato (ma'lumot hali yo'q), keyin — kontent
+// Ma'lumot hali yo'q va xato — to'liq xato sahifasi (server javob bermadi / aloqa yo'q / 500 ...);
+// ma'lumot bor, faqat yangilash xato — ustida qisqa quti, eski ma'lumot ko'rinib turadi
 export function Async({ state, children, loadingText }) {
-  if (state.data == null && state.error) return <ErrorBox error={state.error} onRetry={state.reload} />;
+  if (state.data == null && state.error) return <ErrorScreen error={state.error} onRetry={state.reload} />;
   if (state.data == null) return <Loading text={loadingText} />;
   return (
     <>
-      {state.error && <ErrorBox error={state.error} onRetry={state.reload} />}
+      {state.error && <ErrorBox error={state.error} onRetry={state.reload} updatedAt={state.updatedAt} />}
       <div className={state.loading ? "is-refreshing" : undefined}>{children(state.data)}</div>
     </>
   );
@@ -204,7 +258,9 @@ export const useToast = () => useContext(ToastContext);
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const nextId = useRef(1);
-  const notify = useCallback((text, tone = "good") => {
+  // record: false — xato allaqachon jurnalga yozilgan (masalan, ushlanmagan xato haqidagi xabarcha)
+  const notify = useCallback((text, tone = "good", { record = true } = {}) => {
+    if (tone === "critical" && record) recordMessage(String(text)); // «Xatolar» bo'limida ham qolsin
     const id = nextId.current++;
     setToasts((list) => [...list.slice(-3), { id, text, tone }]);
     setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), tone === "critical" ? 7000 : 3500);

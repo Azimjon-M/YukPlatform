@@ -10,6 +10,7 @@ import { NewMessage } from "telegram/events/index.js";
 import { Logger, LogLevel } from "telegram/extensions/Logger.js";
 import { StringSession } from "telegram/sessions/index.js";
 import { authErrorAction } from "./authErrors.js";
+import { senderUsername } from "./live.js";
 
 // Sessiya fayli = akkauntga kirish kaliti. U gitga tushmaydi (.gitignore: *.session).
 export const SESSION_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../telegram.session");
@@ -172,12 +173,38 @@ export function createReader(client) {
       return message?.id ?? null;
     },
     // minId dan keyingi xabarlar (eskisidan yangisiga). Daqiqada 200 tadan ko'p xabar yozilmaydi.
+    // m.sender — yozgan odam: Telegram uni javobning o'zida (users ro'yxati) beradi, qo'shimcha so'rov yo'q.
+    // Matnsiz xabarlar (izohsiz rasm, xizmat xabari) ham qaytadi — text "" : e'lon emas, lekin kursor ulardan o'tadi
     async since(source, minId, limit = 200) {
       const messages = await client.getMessages(await entityOf(source), { minId, limit });
-      return messages
-        .filter((m) => m.message)
-        .map((m) => ({ id: m.id, text: m.message, date: m.date }))
-        .reverse();
+      return messages.map((m) => ({ id: m.id, text: m.message ?? "", date: m.date, sender: m.message ? senderUsername(m.sender) : null })).reverse();
+    },
+
+    // «Yangisi bormi»: guruhlarning oxirgi xabar raqami — hammasi BITTA so'rovda (messages.getPeerDialogs, 50 tadan).
+    // Akkaunt a'zo bo'lgan guruhlarda aniq ishlaydi; a'zo bo'lmaganlarida ishlashini live.js bir marta sinab ko'radi.
+    // → Map(source.value → oxirgi xabar raqami). Javobda yo'q guruh (masalan, dialogi yo'q) Map'ga tushmaydi.
+    async tops(sources) {
+      const items = [];
+      for (const source of sources) {
+        try {
+          items.push([source, await entityOf(source)]);
+        } catch {
+          // topilmagan guruh — so'rab turish xatoni o'zi yozadi
+        }
+      }
+      const out = new Map();
+      for (let i = 0; i < items.length; i += 50) {
+        const chunk = items.slice(i, i + 50);
+        const result = await client.invoke(
+          new Api.messages.GetPeerDialogs({ peers: chunk.map(([, entity]) => new Api.InputDialogPeer({ peer: utils.getInputPeer(entity) })) }),
+        );
+        const top = new Map(result.dialogs.filter((d) => d.peer).map((d) => [utils.getPeerId(d.peer), d.topMessage]));
+        for (const [source, entity] of chunk) {
+          const value = top.get(utils.getPeerId(entity));
+          if (value != null) out.set(source.value, value);
+        }
+      }
+      return out;
     },
 
     // Akkaunt qaysi manbalarga a'zo → Map(source.value → true/false).
@@ -209,7 +236,7 @@ export function createReader(client) {
     },
 
     // A'zo bo'lingan guruhlardagi yangi xabarni Telegram o'zi yuboradi (bildirishnoma o'chiq bo'lsa ham).
-    // onMessage(source, { id, text, date }) — faqat manbalarimizdan (byPeer) kelgan matnli xabarlar.
+    // onMessage(source, { id, text, date, sender }) — faqat manbalarimizdan (byPeer) kelgan matnli xabarlar.
     // → stop() (tinglashni to'xtatadi)
     async listen(onMessage) {
       const event = new NewMessage({});
@@ -226,7 +253,8 @@ export function createReader(client) {
         const source = byPeer.get(peer);
         if (!source) return;
         stats.matched++;
-        onMessage(source, { id: message.id, text: message.message, date: message.date });
+        // Jonli update'da ham yozgan odam update'ning o'zida keladi (message.sender), getSender() tarmoqqa chiqmaydi
+        onMessage(source, { id: message.id, text: message.message, date: message.date, sender: senderUsername(message.sender) });
       };
       // Tashxis uchun: Telegram umuman nima yuboryapti (turi bo'yicha sanaymiz, mazmuniga qaramaymiz)
       const raw = (update) => {
@@ -249,6 +277,32 @@ export function createReader(client) {
         client.removeEventHandler(handler, event);
         client.removeEventHandler(raw);
       };
+    },
+
+    // Guruhga a'zo bo'lish (live.js sekin, bittadan chaqiradi). → "joined" | "requested"
+    // Guruhda «a'zolikni admin tasdiqlaydi» yoqilgan bo'lsa, Telegram INVITE_REQUEST_SENT qaytaradi — so'rov yuborildi.
+    // Boshqa xato (FLOOD_WAIT, CHANNELS_TOO_MUCH — 500 guruh limiti, CHANNEL_PRIVATE) — chaqirgan joyga
+    async join(source) {
+      const entity = await entityOf(source);
+      try {
+        await client.invoke(new Api.channels.JoinChannel({ channel: entity }));
+      } catch (error) {
+        if (error.errorMessage === "USER_ALREADY_PARTICIPANT") return "joined";
+        if (error.errorMessage === "INVITE_REQUEST_SENT") return "requested";
+        throw error;
+      }
+      return "joined";
+    },
+
+    // Guruh bildirishnomasini butunlay o'chirish (u tanlagan: faqat mute, arxivga solinmaydi, 2026-11-09)
+    async mute(source) {
+      const entity = await entityOf(source);
+      await client.invoke(
+        new Api.account.UpdateNotifySettings({
+          peer: new Api.InputNotifyPeer({ peer: utils.getInputPeer(entity) }),
+          settings: new Api.InputPeerNotifySettings({ muteUntil: 2 ** 31 - 1 }), // «doim» = 2038-yilgacha
+        }),
+      );
     },
 
     // Oxirgi so'rovdan beri: nechta update keldi, ulardan nechtasi yangi xabar, nechtasi bizning manbalardan

@@ -77,11 +77,14 @@ export function createParser(options = {}) {
   // AI ulanishiga beriladi. true (npm run parse) — noma'lum xatoda guruh shu yerda bo'linib qayta yuboriladi.
   const splitOnError = options.splitOnError ?? true;
   const mustStop = (error) => !splitOnError || provider.retryAfterMs?.(error) != null || Boolean(provider.isFatal?.(error));
+  // So'rov limitga sig'madi (Groq 413: ko'rsatma + e'lonlar + javob joyi daqiqalik tokendan katta) — ulanishning aybi emas,
+  // guruhni shu yerning o'zida kichikroq qilib qayta yuboramiz (bot pool'ida ham)
+  const tooLarge = (error) => Boolean(provider.isTooLarge?.(error));
 
   async function parse(text) {
     const phones = extractPhones(text);
     // AI telefon raqamlarini ko'rmaydi — ular yuqorida regex bilan olingan
-    const result = await generate({ text: maskPhones(text), model, effort });
+    const result = await generate({ text: maskPhones(text), model, effort, posts: 1 });
     const meta = { model: result.model, usage: result.usage, phones };
     if (!result.ok) return { ok: false, error: result.error, ...meta };
 
@@ -129,8 +132,9 @@ export function createParser(options = {}) {
     try {
       // Telefonlar har bir e'londa alohida yashiriladi, keyin e'lonlar "=== POST n ===" sarlavhasi bilan birlashtiriladi
       const text = formatBatch(texts.map((post) => maskPhones(post)));
-      answer = await generate({ text, model, effort, system: BATCH_SYSTEM_PROMPT, schema: BATCH_SCHEMA });
+      answer = await generate({ text, model, effort, system: BATCH_SYSTEM_PROMPT, schema: BATCH_SCHEMA, posts: texts.length });
     } catch (error) {
+      if (tooLarge(error)) return splitAndRetry(texts, provider.describeError?.(error) ?? error.message);
       if (mustStop(error)) throw error;
       return splitAndRetry(texts, `so'rov xatosi: ${provider.describeError?.(error) ?? error.message}`);
     }

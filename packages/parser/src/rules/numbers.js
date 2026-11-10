@@ -102,7 +102,7 @@ const RULES = [
   // Uzunlik, o'lcham: "12 metrlik", "80x1.30", "13.6 m"
   {
     kind: "size",
-    re: new RegExp(String.raw`${N}(?:\s*[x×*х]\s*${N})+(?:\s*(?:m|metr|sm))?${END}|${N}\s*(?:metrlik|metrli|metr|metaril|metrovka|m|km|osey|os|gradus|klass|remney)(?![\p{L}'\d³])`, "gu"),
+    re: new RegExp(String.raw`${N}(?:\s*[x×*х]\s*${N})+(?:\s*(?:m|metr|sm))?${END}|${N}\s*(?:metrlik|metrli|metr|metaril|metirlik|metirli|metir|metrovka|m|km|osey|os|gradus|klass|remney)(?![\p{L}'\d³])`, "gu"),
     value: () => ({}),
   },
   // Soni: "2 ta fura", "11 bosh qo'y", "3ta"

@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { openStore } from "@yuk/store";
+import { createCallLinks, openStore } from "@yuk/store";
 import { createApp } from "../src/app.js";
 import { createBotMessenger } from "../src/botMessage.js";
 import { DELETED_TEXT, SIGNED_OUT_TEXT, createPublicApp, createRateLimiter } from "../src/public.js";
@@ -75,13 +75,14 @@ test("cheklov: oynada limitdan ortig'i rad etiladi, keyingi oynada yana ruxsat",
 });
 
 // --- Server ---
-let server, base, store, sessions, adminServer, adminBase;
+let server, base, store, sessions, calls, adminServer, adminBase;
+const loadIds = {}; // e'lon raqami → bazadagi yuk id
 const env = { BOT_TOKEN, ADMIN_IDS: "558" };
 const HOUR = 3600 * 1000;
 
 function addLoad(id, load, { hoursAgo = 1, kind = "yuk" } = {}) {
   const post = store.addPost({ source: "@yuk", messageId: id, link: `https://t.me/yuk/${id}`, text: `e'lon ${id}`, postedAt: NOW - hoursAgo * HOUR });
-  return store.addLoad({ postId: post.id, key: `k${id}`, load, kind });
+  return (loadIds[id] = store.addLoad({ postId: post.id, key: `k${id}`, load, kind }));
 }
 
 before(async () => {
@@ -98,11 +99,12 @@ before(async () => {
   time = NOW;
   store.setSetting("bot_username", "Yuk_Ekspert_agent");
   sessions = createSessions(randomBytes(32), { now: () => NOW });
+  calls = createCallLinks(randomBytes(32));
 
   const dist = mkdtempSync(path.join(tmpdir(), "yuk-web-"));
   writeFileSync(path.join(dist, "index.html"), "<!doctype html><title>Yuk Ekspert</title>");
   const notify = async (chatId, text, extra) => notified.push({ chatId, text, extra });
-  const app = createPublicApp({ store, env, sessions, scope: "qoshni", webDist: dist, notify, now: () => NOW });
+  const app = createPublicApp({ store, env, sessions, calls, scope: "qoshni", webDist: dist, notify, now: () => NOW });
   await new Promise((resolve) => (server = app.listen(0, "127.0.0.1", resolve)));
   base = `http://127.0.0.1:${server.address().port}`;
 
@@ -146,7 +148,7 @@ test("config: bot username va doira; CORS va OPTIONS", async () => {
 test("kirish: Mini App initData → token; haydovchi bazaga yoziladi; xato imzo — 401", async () => {
   const { token, me } = await login();
   assert.ok(token);
-  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false, phone: null });
+  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false, phone: null, phoneAt: null });
   assert.equal(store.getDriver(555).name, "Ali Valiyev");
 
   const bad = await call("POST", "/pub/auth", { body: { initData: "user=%7B%22id%22%3A1%7D&auth_date=1&hash=00" } });
@@ -264,6 +266,10 @@ test("yo'nalish (web «Yuklar»): tugmalardagi sonlar, saqlash; noma'lum joy —
   assert.equal(saved.status, 200);
   assert.deepEqual([saved.body.profile.fromAreas, saved.body.profile.toAreas, saved.body.profile.routeAt], [["andijon"], [], NOW]);
   assert.equal(store.getDriver(555).profile.vehicle.truckClass, "fura", "mashina o'zgarmaydi");
+  assert.deepEqual(store.takeBotNotices(), [], "oddiy saqlash — botga topshiriq yo'q");
+  // Botdagi «🗺 Xaritadan tanlash» dan: bot chatda javob bersin — topshiriq bazaga
+  await call("PUT", "/pub/me/route", { token, body: { from: "andijon", to: "*", notify: true } });
+  assert.deepEqual(store.takeBotNotices().map((n) => [n.chatId, n.kind]), [[555, "route"]]);
   assert.equal((await call("GET", "/pub/loads", { token })).body.total, 0, "Andijondan fura yuki yo'q — bot ham shunday yuboradi");
   await call("PUT", "/pub/me/route", { token, body: { from: "*", to: "toshkent_sh" } });
   assert.deepEqual((await call("GET", "/pub/loads", { token })).body.items.map((i) => i.load.fromCity), ["Qo'qon"]);
@@ -357,6 +363,25 @@ test("hisobdan chiqish: rol va sozlamalar yashiriladi, mos yuklar yo'q, botga xa
   const back = await call("PUT", "/pub/me/role", { token, body: { role: "haydovchi" } });
   assert.deepEqual([back.body.role, back.body.active], ["haydovchi", true]);
   assert.deepEqual(back.body.profile.fromAreas, ["fargona"], "sozlamalar va yo'nalish tiklandi");
+});
+
+test("sozlamalardagi «Raqamni o'chirish»: faqat raqam o'chadi, so'ralgan vaqti qoladi; bot chatdagi menyuni yangilaydi", async () => {
+  store.takeBotNotices();
+  store.saveDriver(592, { name: "Raqamli", role: "haydovchi", phone: "+998901112233", phoneAskedAt: 5, active: true, profile: { vehicle: { truckClass: "fura" }, fromAreas: [], toAreas: [] } });
+  const token = sessions.issue(592);
+  assert.equal((await call("DELETE", "/pub/me/phone")).status, 401, "tokensiz o'chirib bo'lmaydi");
+  const done = await call("DELETE", "/pub/me/phone", { token });
+  assert.equal(done.status, 200);
+  assert.equal(done.body.phone, null);
+  assert.equal(done.body.role, "haydovchi", "hisob joyida");
+  const row = store.getDriver(592);
+  assert.deepEqual([row.phone, row.phoneAskedAt, row.active, row.profile != null], [null, 5, true, true]);
+  assert.equal(store.driverDetails(592).events[0].type, "phone_removed");
+  assert.deepEqual(store.takeBotNotices().map((n) => [n.chatId, n.kind]), [[592, "phone_deleted"]]);
+
+  // Raqami yo'q — o'zgarishsiz, topshiriq ham yo'q
+  assert.equal((await call("DELETE", "/pub/me/phone", { token })).body.phone, null);
+  assert.deepEqual(store.takeBotNotices(), []);
 });
 
 test("hisobni o'chirish: qator qoladi («o'chirgan» belgisi bilan), token ishlamaydi, botga xabar; qayta kirsa — boshidan", async () => {
@@ -528,4 +553,80 @@ test("admin: oddiy foydalanuvchiga 403; ADMIN_IDS va boshqaruv markazidagi belgi
   assert.equal(back.body.phone, undefined);
   assert.equal((await call("PATCH", "/pub/admin/users/999999", { token: helper, body: { active: false } })).status, 404);
   assert.equal((await call("PATCH", "/pub/admin/users/560", { token: helper, body: { role: "kosmonavt" } })).status, 400);
+});
+
+// Telegram tugmasi tel: ni ocholmaydi — bot «📞 Telefon qilish» tugmasiga shu sahifani qo'yadi (bot.js loadButtons)
+test("«📞 Telefon qilish»: imzolangan havola → tel: sahifasi, bosilgani yoziladi; yaroqsizi — 404, raqamsiz", async () => {
+  const loadId = loadIds[1];
+  store.saveDriver(570, { name: "Qo'ng'iroqchi", role: "haydovchi", profile: { vehicle: {} }, active: true });
+  store.addDelivery({ loadId, chatId: 570, ok: true });
+  const token = calls.make({ loadId, phone: 0, chatId: 570 });
+  const page = await call("GET", `/pub/call?c=${token}`); // kirish (Bearer) kerak emas
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-type"), /^text\/html/);
+  assert.match(page.body, /<a class="call" id="call" href="tel:\+998901112233">/);
+  assert.match(page.body, /var tel = "tel:\+998901112233";[\s\S]*location\.href = tel;/, "darhol qo'ng'iroq oynasiga");
+  assert.match(page.body, /post\("web_app_close"\)/, "Mini App'da — qo'ng'iroq oynasi ochilgach o'zi yopiladi");
+  assert.match(page.body, /platform === "ios"[\s\S]*post\("web_app_open_link", \{ url: tel \}\)/, "iPhone: yashil tugma Telegram orqali ochadi");
+  assert.match(page.body, /<p class="tip" id="ios" hidden>[^<]*<b>iPhone'da tezroq:<\/b>[^<]*ko'k raqamni bosing/, "iPhone maslahati (skript ochadi)");
+  assert.match(page.body, /\+998 90 111 22 33/);
+  assert.match(page.body, /🚛 Farg&#39;ona, Qo&#39;qon → Toshkent/);
+  assert.equal(page.headers.get("cache-control"), "no-store");
+  assert.match(page.headers.get("content-security-policy"), /default-src 'none'/);
+  assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+  // Bosilgani: deliveries.called_at (boshqaruv markazi) va oxirgi faollik (48 soatlik avto-pauza uchun)
+  assert.equal(store.driverDetails(570).deliveries[0].calledAt, NOW);
+  assert.equal(store.getDriver(570).seenAt, NOW);
+  assert.equal(store.getDriver(570).seenVia, "call");
+
+  // Bo'sh mashina e'loni ham (yuk beruvchiga)
+  const truck = await call("GET", `/pub/call?c=${calls.make({ loadId: loadIds[5], phone: 0, chatId: 570 })}`);
+  assert.match(truck.body, /🚚 Samarqand → istalgan joyga[\s\S]*tel:\+998905556677/);
+
+  const invalid = [
+    "",
+    "nimadir",
+    `${token.slice(0, -2)}xx`, // imzo buzilgan
+    calls.make({ loadId, phone: 3, chatId: 570 }), // bunday raqam yo'q
+    calls.make({ loadId: loadIds[2], phone: 0, chatId: 570 }), // e'londa raqam yo'q
+    calls.make({ loadId: 99_999, phone: 0, chatId: 570 }), // yuk yo'q
+    createCallLinks(randomBytes(32)).make({ loadId, phone: 0, chatId: 570 }), // boshqa kalit
+  ];
+  for (const bad of invalid) {
+    const r = await call("GET", `/pub/call?c=${encodeURIComponent(bad)}`);
+    assert.equal(r.status, 404, bad);
+    assert.match(r.body, /Havola yaroqsiz/);
+    assert.ok(!r.body.includes("tel:") && !r.body.includes("<script"), "raqam ham, skript ham yo'q");
+  }
+});
+
+test("blok: boshqaruv markazidan bloklangan — /pub/auth va eski token 403 «Uzr...»; adminni bloklab bo'lmaydi; blokdan chiqarsa — yana kiradi", async () => {
+  const patchDriver = (chatId, body) =>
+    fetch(`${adminBase}/api/drivers/${chatId}`, { method: "PATCH", headers: { "x-yuk-admin": "1", "content-type": "application/json" }, body: JSON.stringify(body) }).then(
+      async (r) => ({ status: r.status, body: await r.json() }),
+    );
+  const { token, me } = await login();
+  store.saveDriver(me.chatId, { phone: "+998901112233" });
+
+  const blocked = await patchDriver(me.chatId, { blocked: true });
+  assert.equal(blocked.status, 200);
+  assert.equal(blocked.body.banned.kind, "id");
+  const old = await call("GET", "/pub/me", { token });
+  assert.deepEqual([old.status, old.body.code, old.body.error], [403, "blocked", "Uzr, sizga xizmat ko'rsata olmaymiz!"]);
+  const initData = signWebAppData({ auth_date: nowS - 10, user: USER }, BOT_TOKEN);
+  assert.equal((await call("POST", "/pub/auth", { body: { initData } })).status, 403);
+  // Boshqa akkaunt, o'sha username bilan — u ham bloklangan
+  const twin = signWebAppData({ auth_date: nowS - 10, user: { ...USER, id: 777 } }, BOT_TOKEN);
+  assert.equal((await call("POST", "/pub/auth", { body: { initData: twin } })).body.code, "blocked");
+  assert.equal((await patchDriver(me.chatId, { isAdmin: true })).status, 409, "bloklanganni admin qilib bo'lmaydi");
+
+  assert.equal((await patchDriver(me.chatId, { blocked: false })).status, 200);
+  assert.equal((await call("GET", "/pub/me", { token })).status, 200);
+  assert.equal((await call("POST", "/pub/auth", { body: { initData: twin } })).status, 200);
+
+  store.saveDriver(778, { name: "Admin", isAdmin: true });
+  const refused = await patchDriver(778, { blocked: true });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /Adminni bloklab bo'lmaydi/);
+  assert.equal((await patchDriver(778, { blocked: "ha" })).status, 400);
 });

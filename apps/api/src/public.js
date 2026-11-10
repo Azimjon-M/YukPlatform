@@ -5,15 +5,19 @@
 //
 //   GET  /pub/config           bot username (saytdagi «Telegram bilan kirish» uchun), yo'nalish doirasi
 //   POST /pub/auth             { initData } (Mini App) yoki { widget } (sayt) → { token, me }
+//   GET  /pub/call?c=<token>   «📞 Telefon qilish» tugmasi (bot yuk xabari ostida): HTML sahifa → tel:+998… (kirishsiz)
 //   GET  /pub/me               foydalanuvchi: ism, rol, obuna, admin, profil, faolmi, o'z raqami (ulashgan bo'lsa)
 //   PUT  /pub/me/role          { role } — haydovchi | yuk_beruvchi (har rolning sozlamalari saqlanadi, qaytganda tiklanadi)
 //   PUT  /pub/me/profile       { profile, role? } — sozlamalarni saqlash (bot ham shu qoidalar bilan tekshiradi)
 //   PATCH /pub/me              { active } — pauza / davom
 //   POST /pub/me/logout        hisobdan chiqish: rol va sozlamalar yashiriladi, bot yubormaydi (qayta kirsa — tiklanadi)
 //   DELETE /pub/me             hisobni o'chirish (botdagi /ochirish → «Hammasini o'chirish» bilan bir xil)
+//   DELETE /pub/me/phone       faqat o'z raqamini o'chirish (botdagi «📱 Faqat raqamni o'chirish» bilan bir xil); qayta
+//                              ulashish — Mini App'dagi «📱 Raqam ulashish» (kontakt botga boradi)
 //   GET  /pub/me/route         ?from&hours — haydovchining yo'nalish tanlovi: joylar va har biridagi mos yuklar soni
 //                              (from yo'q — «Qayerdan?» qadami, bor — «Qayerga?», "*" = hamma joydan)
-//   PUT  /pub/me/route         { from, to } — yo'nalishni saqlash ("*" = istalgan); botdagi «📋 Mos yuklar» bilan bir xil
+//   PUT  /pub/me/route         { from, to, notify? } — yo'nalishni saqlash ("*" = istalgan); botdagi «📋 Mos yuklar» bilan bir xil;
+//                              notify: true (botdagi «🗺 Xaritadan tanlash») — bot chatda javob beradi va mos yuklarni yuboradi
 //   GET  /pub/loads            ?view=mine|all&from&to&hours&limit&offset — yuklar (haydovchiga), eng yangisi birinchi
 //   GET  /pub/trucks           xuddi shunday — bo'sh mashinalar (yuk beruvchiga)
 //   --- faqat adminlar (Mini App'dagi «🛠 Boshqaruv»), boshqalarga 403 ---
@@ -25,16 +29,21 @@ import path from "node:path";
 import express from "express";
 import { pacificDay } from "@yuk/parser";
 import {
+  BLOCKED_TEXT,
   KIND_MATCHERS,
   KIND_ROLE,
   applyRoute,
+  formatContactPhone,
   isAdmin,
   parseAdminIds,
+  phoneText,
+  placeText,
   roleOf,
   routeCounts,
   routeInScope,
   sameArea,
   sanitizeProfileFor,
+  truckPlaceText,
   validRole,
   validRouteArea,
   withRoute,
@@ -93,9 +102,109 @@ export const SIGNED_OUT_TEXT =
 // «Ma'lumotlaringiz o'chirildi» demaymiz — ular boshqaruv markazida qoladi (Azimjon, 2026-11-09: «Hammasi saqlansin»)
 export const DELETED_TEXT = "✅ Hisobingiz o'chirildi. Endi sizga hech narsa yuborilmaydi.\nQaytadan boshlash — /start (boshidan ro'yxatdan o'tasiz)";
 
+const escapeHtml = (value) =>
+  String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+// Sahifa skripti. Bot tugmasi — Mini App (web_app): sahifa Telegram ichida ochiladi. Darhol tel: ga o'tadi va qo'ng'iroq
+// oynasi oldinga chiqishi bilan (sahifa ko'rinmay qoladi / fokusni yo'qotadi) Mini App'ni yopadi — haydovchi qo'ng'iroqdan
+// keyin to'g'ri chatga qaytadi. Telegram bilan gaplashish telegram-web-app.js siz (tashqi fayl yuklanmasin): Android/iOS'da
+// window.TelegramWebviewProxy.postEvent, web.telegram.org da — ota oynaga postMessage (core.telegram.org/api/web-events).
+// Eski xabarlardagi oddiy havola tugmasidan (brauzerda) ochilsa — faqat tel: ga o'tadi, yopish yo'q.
+//
+// iPhone (2026-11-09, Azimjon sinadi: Mini App ochildi, yashil tugma ishlamadi): Telegram-iOS Mini App ichida tel: ga
+// o'tishni umuman qayta ishlamaydi (WebAppController: navigatsiya shunchaki .allow, WKWebView esa tel: ni ochmaydi).
+// Shuning uchun iPhone'da yashil tugma Telegram'ga «havolani och» (web_app_open_link) deydi — bosilgandan keyin 10 s
+// ichida qabul qilinadi (Telegram sahifadagi har teginishni eslaydi), avtomatik emas:
+//   1) tel: — Telegram ruxsat bergan protokollar ro'yxatida bo'lsa, iPhone «Qo'ng'iroq qilinsinmi?» deb so'raydi;
+//   2) ruxsat bo'lmasa, shu sahifa Safari'da ochiladi — u yerda tel: ishlaydi. Telegram ruxsatsiz protokolni teginishni
+//      «ishlatmasdan» rad etadi, qabul qilganini esa «ishlatilgan» deb belgilaydi — shuning uchun ikkalasini ketma-ket
+//      yuborish xavfsiz: faqat bittasi ochiladi.
+const CALL_SCRIPT = `(function () {
+  var tel = __TEL__;
+  var proxy = window.TelegramWebviewProxy;
+  var inTelegram = Boolean(proxy) || location.hash.indexOf("tgWebApp") >= 0;
+  var platform = (location.hash.match(/tgWebAppPlatform=([a-z]+)/) || [])[1] || "";
+  function post(type, data) {
+    var body = JSON.stringify(data || {});
+    try {
+      if (proxy) proxy.postEvent(type, body);
+      else if (window.parent !== window) window.parent.postMessage(JSON.stringify({ eventType: type, eventData: data || {} }), "*");
+    } catch (e) {}
+  }
+  if (inTelegram && platform === "ios") {
+    // Maslahat (Azimjon, 2026-11-09: «Ha, qo'sh»): xabardagi ko'k raqam Telegram'ning o'z menyusini ochadi — brauzersiz, tezroq
+    document.getElementById("hint").textContent = "iPhone'da yashil tugma qo'ng'iroqni Safari orqali ochadi.";
+    document.getElementById("ios").hidden = false;
+    document.getElementById("call").addEventListener("click", function (event) {
+      event.preventDefault();
+      post("web_app_open_link", { url: tel });
+      post("web_app_open_link", { url: location.href.split("#")[0] });
+    });
+  }
+  var closed = false;
+  function close() {
+    if (closed || !inTelegram) return;
+    closed = true;
+    post("web_app_close");
+  }
+  post("web_app_ready");
+  if (inTelegram) {
+    document.addEventListener("visibilitychange", function () { if (document.hidden) close(); });
+    window.addEventListener("pagehide", close);
+    window.addEventListener("blur", close);
+    var back = document.getElementById("back");
+    back.hidden = false;
+    back.addEventListener("click", function (event) { event.preventDefault(); closed = false; close(); });
+  }
+  location.href = tel;
+})();`;
+
+// «📞 Telefon qilish» sahifasi. Telegram tugmasi tel: ni ocholmaydi, shuning uchun tugma shu sahifani ochadi, sahifa esa
+// darhol tel:+998… ga o'tadi — telefonning qo'ng'iroq oynasi raqam yozilgan holda ochiladi, haydovchi yashil tugmani bosadi.
+// O'zi o'tmasa (ba'zi brauzerlar ruxsat so'raydi yoki to'sadi) — sahifadagi katta yashil tugma. call null — havola yaroqsiz.
+// Tashqi fayl yo'q (CSS va JS shu yerda) — sahifa tez ochiladi
+export function callPage(call) {
+  const head = (title) =>
+    `<!doctype html><html lang="uz"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<meta name="robots" content="noindex"><title>${escapeHtml(title)}</title><style>` +
+    "body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#f2f4f7;color:#17212b;" +
+    "min-height:100vh;display:flex;align-items:center;justify-content:center}" +
+    "main{width:100%;max-width:420px;padding:24px 16px;box-sizing:border-box;text-align:center}" +
+    ".route{margin:0 0 8px;font-size:16px;color:#5b6773}.phone{margin:0 0 28px;font-size:30px;font-weight:700;letter-spacing:.5px}" +
+    "a.call{display:block;padding:18px;border-radius:16px;background:#1fa855;color:#fff;font-size:21px;font-weight:600;text-decoration:none}" +
+    "a.call:active{background:#178a45}.hint{margin:20px 0 0;font-size:14px;line-height:1.45;color:#5b6773}" +
+    "a.back{display:inline-block;margin-top:18px;padding:10px 18px;color:#2481cc;font-size:16px;text-decoration:none}[hidden]{display:none!important}" +
+    ".tip{margin:16px 0 0;padding:12px 14px;border-radius:12px;background:#e6f0fa;font-size:15px;line-height:1.45;text-align:left}" +
+    "@media (prefers-color-scheme:dark){body{background:#17212b;color:#eef2f5}.route,.hint{color:#8e9aa6}.tip{background:#22303f}}" +
+    "</style></head><body><main>";
+  if (!call) {
+    return (
+      head("Havola yaroqsiz") +
+      "<p class=\"phone\" style=\"font-size:22px\">Havola yaroqsiz</p>" +
+      "<p class=\"hint\">Telefon raqami yuk xabarining o'zida yozilgan — Telegram'ga qayting va raqamni bosing.</p></main></body></html>"
+    );
+  }
+  const tel = `tel:${call.phone.replace(/[^\d+]/g, "")}`; // faqat raqamlar va + (HTML va JS ichiga xavfsiz)
+  const shown = formatContactPhone(call.phone);
+  return (
+    head(`Qo'ng'iroq: ${shown}`) +
+    (call.route ? `<p class="route">${escapeHtml(call.route)}</p>` : "") +
+    `<p class="phone">${escapeHtml(shown)}</p>` +
+    `<a class="call" id="call" href="${tel}">📞 Qo'ng'iroq qilish</a>` +
+    "<p class=\"hint\" id=\"hint\">Qo'ng'iroq oynasi o'zi ochilmasa — yashil tugmani bosing.</p>" +
+    // Faqat iPhone'dagi Telegram'da ko'rinadi (skript ochadi)
+    "<p class=\"tip\" id=\"ios\" hidden>💡 <b>iPhone'da tezroq:</b> Telegram'ga qayting, yuk xabaridagi ko'k raqamni bosing va " +
+    "«Aloqa operatori orqali chaqiruv» ni tanlang — brauzer ochilmaydi.</p>" +
+    `<a class="back" id="back" href="#" hidden>← Telegram'ga qaytish</a>` +
+    `</main><script>${CALL_SCRIPT.replace("__TEL__", JSON.stringify(tel))}</script></body></html>`
+  );
+}
+
 // scope — yo'nalish doirasi (.env dagi ROUTE_SCOPE): undan tashqaridagi eski yuklar ko'rsatilmaydi.
 // notify(chatId, text, extra) — bot nomidan xabar (botMessage.js); null — yuborilmaydi (testlarda soxtasi beriladi)
-export function createPublicApp({ store, env = process.env, sessions, scope, webDist = null, notify = null, now = () => Date.now() }) {
+// calls — «📞 Telefon qilish» havolalari (@yuk/store createCallLinks, bot bilan bir kalit); null — /pub/call 404
+// errors — boshqaruv markazining xatolar jurnali (errorLog.js); server xatolari u yerda ham ko'rinadi
+export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, notify = null, errors = null, now = () => Date.now() }) {
   const app = express();
   app.disable("x-powered-by");
   const botToken = env.BOT_TOKEN?.trim() || null;
@@ -115,7 +224,8 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     isAdmin: isAdmin(driver, adminIds),
     profile: driver.profile,
     active: driver.active,
-    ...(withPhone ? { phone: driver.phone ?? null } : {}),
+    // phoneAt — qachon ulashgan: «Raqamni almashtirish» da o'sha raqamni qayta ulashsa ham ilova saqlanganini ko'radi
+    ...(withPhone ? { phone: driver.phone ?? null, phoneAt: driver.phoneAt ?? null } : {}),
   });
 
   const pub = express.Router();
@@ -154,9 +264,33 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
         : { error: "Telegram ma'lumoti kelmadi" };
     if (result.error) throw httpError(401, result.error, "auth");
     const { id, name, username } = result.user;
+    // Boshqaruv markazidan bloklangan (id, username yoki raqam) — kiritmaymiz, ilova «Uzr...» ekranini ko'rsatadi
+    if (!adminIds.includes(id) && store.banOf({ chatId: id, username, phone: store.getDriver(id)?.phone })) {
+      throw httpError(403, BLOCKED_TEXT, "blocked");
+    }
     store.comeBack(id, "web"); // hisobini o'chirgan bo'lsa — qaytdi (boshidan boshlaydi, tarixga yoziladi)
     const driver = store.saveDriver(id, { name, username });
     res.json({ token: sessions.issue(id), me: meOf(driver) });
+  });
+
+  // «📞 Telefon qilish» (bot.js loadButtons). Kirish kerak emas: havola faqat shu odamning chatida, imzosiz token yaroqsiz.
+  // Raqam manzilda yo'q — token «qaysi yuk, nechanchi raqam, kimga» ni aytadi, raqamni bazadagi yukdan olamiz.
+  // Bosilgani yoziladi: deliveries.called_at (boshqaruv markazida «📞 raqamni ochgan») va oxirgi faollik — 48 soatlik
+  // avto-pauza faqat qo'ng'iroq qiladigan haydovchini ham «faol» deb biladi (oldin raqam bosilgani botga ko'rinmasdi)
+  pub.get("/call", (req, res) => {
+    const link = calls?.read(typeof req.query.c === "string" ? req.query.c : "");
+    const row = link ? store.getLoad(link.loadId) : null;
+    const phone = row?.load.phones?.[link.phone];
+    res.set({
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+      "referrer-policy": "no-referrer",
+    });
+    if (!phone) return res.status(404).type("html").send(callPage(null));
+    store.markCalled({ loadId: link.loadId, chatId: link.chatId });
+    store.touchDriver(link.chatId, "call");
+    const place = row.kind === "mashina" ? truckPlaceText : placeText;
+    const route = `${row.kind === "mashina" ? "🚚" : "🚛"} ${place(row.load, "from")} → ${place(row.load, "to")}`;
+    res.type("html").send(callPage({ phone: phoneText(phone), route }));
   });
 
   // Bundan keyingi hamma yo'l — faqat kirgan haydovchi uchun: "Authorization: Bearer <token>"
@@ -165,6 +299,8 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     const driver = uid ? store.getDriver(uid) : null;
     // Hisobini o'chirgan — eski tokenlari ishlamaydi (qator qoladi, lekin u qayta kirmaguncha — yo'q hisob)
     if (!driver || driver.deletedAt != null) return next(httpError(401, "Kirish kerak", "auth"));
+    // Kirgandan keyin bloklangan — eski token ham ishlamaydi
+    if (!adminIds.includes(driver.chatId) && store.banOf(driver)) return next(httpError(403, BLOCKED_TEXT, "blocked"));
     req.driver = driver;
     store.touchDriver(uid, "web"); // oxirgi faollik — boshqaruv markazida «🟢 Hozir web'da»
     next();
@@ -214,6 +350,17 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     res.json(meOf(user));
   });
 
+  // Sozlamalardagi «🗑 Raqamni o'chirish» (Azimjon, 2026-11-10). Botdagi /ochirish → «Faqat raqamni o'chirish» bilan
+  // bir xil: raqam o'chadi, phoneAskedAt qoladi (bot o'zi boshqa so'ramaydi), tarixda «raqamini o'chirdi».
+  // Chatdagi pastki menyuni bot yangilaydi (server bot kabi to'liq menyu yasay olmaydi) — topshiriq "phone_deleted"
+  pub.delete("/me/phone", (req, res) => {
+    const { chatId } = req.driver;
+    if (!req.driver.phone) return res.json(meOf(req.driver));
+    const user = store.saveDriver(chatId, { phone: null });
+    store.addBotNotice?.(chatId, "phone_deleted");
+    res.json(meOf(user));
+  });
+
   // Hisobni o'chirish (store.deleteDriver): foydalanuvchi uchun hisob yopiladi — rol, sozlamalar, raqam tozalanadi,
   // yuborish to'xtaydi, tokenlar ishlamaydi (deletedAt → 401). Ma'lumot boshqaruv markazida «🗑 Hisobini o'chirgan» bilan qoladi.
   // Keyin botga yozsa yoki ilovaga qayta kirsa — qaytdi (comeBack), rol tanlashdan boshlaydi.
@@ -244,11 +391,16 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
     res.json({ hours, from, ...routeCounts({ profile, scope, rows, from }) });
   });
 
+  // notify: true — yo'nalish botdagi «🗺 Xaritadan tanlash» orqali tanlandi (web xaritasi Telegram ichida):
+  // bot chatdagi «Qayerdan?» xabarini «✅ Yo'nalish: …» ga almashtirib, mos yuklarni yuborsin. Bu server botning
+  // o'zi emas (u alohida jarayon) — shuning uchun bazaga topshiriq yoziladi, bot 2 soniyada oladi (store bot_notices)
   pub.put("/me/route", (req, res) => {
     const profile = driverProfile(req.driver);
-    const { from, to } = req.body ?? {};
+    const { from, to, notify } = req.body ?? {};
     if (!validRouteArea(profile, scope, from) || !validRouteArea(profile, scope, to)) throw httpError(400, "Bunday joy tanlab bo'lmaydi");
-    res.json(meOf(store.saveDriver(req.driver.chatId, { profile: applyRoute(profile, from, to, now()) })));
+    const saved = store.saveDriver(req.driver.chatId, { profile: applyRoute(profile, from, to, now()) });
+    if (notify === true) store.addBotNotice?.(req.driver.chatId, "route");
+    res.json(meOf(saved));
   });
 
   // kind "yuk" — yuklar (haydovchiga), "mashina" — bo'sh mashinalar (yuk beruvchiga).
@@ -398,9 +550,13 @@ export function createPublicApp({ store, env = process.env, sessions, scope, web
   app.use((error, req, res, next) => {
     // express.json buzilgan JSON uchun 400 beradi; boshqa kutilmagan xato — 500
     const status = error.status ?? error.statusCode ?? 500;
-    if (status >= 500) console.error(error);
+    if (status >= 500) {
+      console.error(error);
+      // Boshqaruv markazining «Xatolar» bo'limiga (haydovchiga faqat «Server xatosi» ko'rinadi)
+      errors?.add({ source: "web", level: "error", kind: "server", text: `${req.method} ${req.originalUrl.split("?")[0]}: ${error.message}`, details: error.stack });
+    }
     // code — web nima qilishini biladi: auth → qayta kirish, no_profile → sozlamalarga, no_role → rol tanlash
-    const code = ["auth", "no_profile", "no_role", "role", "forbidden"].includes(error.code) ? { code: error.code } : {};
+    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked"].includes(error.code) ? { code: error.code } : {};
     res.status(status).json({ error: status >= 500 ? "Server xatosi" : error.message, ...code });
   });
 

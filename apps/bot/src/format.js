@@ -1,13 +1,34 @@
 // Yukni Telegram xabariga aylantiradi (HTML). Haydovchiga ham, kanalga ham shu matn ketadi.
 // Telefon matnda +998901234567 ko'rinishida yoziladi — Telegram uni o'zi bosiladigan qiladi (bosganda qo'ng'iroq).
-// Inline tugmada tel: ishlamaydi, shuning uchun tugma faqat asl e'longa olib boradi.
-import { cargoText, phoneText, placeText, postedText, priceText, truckPlaceText, truckVehicleText, vehicleText } from "@yuk/shared";
+// Xabar ostidagi tugmalar («📄 Asl e'lon», «📞 Telefon qilish») — bot.js loadButtons.
+import {
+  cargoText,
+  phoneText,
+  placeText,
+  postedText,
+  priceText,
+  senderLink,
+  truckPlaceText,
+  truckVehicleText,
+  vehicleText,
+} from "@yuk/shared";
 
 // Matn qismlari @yuk/shared (loadText.js) da — haydovchilar web'i ham xuddi shunday yozadi
 export { placeText, postedText, priceText, weightText } from "@yuk/shared";
 
 export function escapeHtml(text) {
   return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// E'lon guruhda chiqqan vaqt: «🕒 Asl e'lon: 09.11 12:05». Guruh nomi yozilmaydi (Azimjon, 2026-11-09: «@TutGruz kerak emas»)
+export const postedLine = (postedAt) => `🕒 Asl e'lon: ${escapeHtml(postedText(postedAt))}`;
+
+// E'lonni guruhga yozgan odamning shaxsiy chati: «💬 Lichkasi» (havola). Username'i yo'q bo'lsa — qator yo'q.
+// t.me havolasi Telegram ichida «Havolani ochish» so'ramasdan darhol o'sha odam bilan chatni ochadi
+export const SENDER_TEXT = "Lichkasi";
+export function senderLine(sender) {
+  const url = senderLink(sender);
+  return url ? `💬 <a href="${escapeHtml(url)}">${SENDER_TEXT}</a>` : null;
 }
 
 // → { text, url } — url: asl e'lon (tugma uchun), bo'lmasa null
@@ -25,9 +46,10 @@ export function formatLoad(load, post = {}) {
   if (load.note) lines.push(`📝 ${escapeHtml(load.note)}`);
   if (load.phones?.length) lines.push(`📞 ${load.phones.map(phoneText).join(", ")}`);
   else lines.push("📞 telefon yozilmagan — asl e'lonni oching");
+  const sender = senderLine(post.sender);
+  if (sender) lines.push(sender);
 
-  const source = post.source?.startsWith("@") ? post.source : null;
-  if (post.postedAt) lines.push(`🕒 ${escapeHtml(postedText(post.postedAt, source))}`);
+  if (post.postedAt) lines.push(postedLine(post.postedAt));
 
   return { text: lines.join("\n"), url: post.link ?? null };
 }
@@ -45,9 +67,10 @@ export function formatTruck(truck, post = {}) {
   if (truck.note) lines.push(`📝 ${escapeHtml(truck.note)}`);
   if (truck.phones?.length) lines.push(`📞 ${truck.phones.map(phoneText).join(", ")}`);
   else lines.push("📞 telefon yozilmagan — asl e'lonni oching");
+  const sender = senderLine(post.sender);
+  if (sender) lines.push(sender);
 
-  const source = post.source?.startsWith("@") ? post.source : null;
-  if (post.postedAt) lines.push(`🕒 ${escapeHtml(postedText(post.postedAt, source))}`);
+  if (post.postedAt) lines.push(postedLine(post.postedAt));
 
   return { text: lines.join("\n"), url: post.link ?? null };
 }

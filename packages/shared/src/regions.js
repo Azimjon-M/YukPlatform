@@ -141,7 +141,7 @@ export const COUNTRIES = [
     cities: ["Olmaota", "Astana", "Shymkent", "Taraz", "Aqtobe", "Qarag'anda", "Atirau", "Aqtau", "Pavlodar", "Oral", "Qostanay", "Turkiston", "Saryag'och"],
     aliases: {
       Olmaota: ["Almaty", "Almati", "Almatı", "Almata", "Алматы", "Алма-Ата", "Алмата"], Shymkent: ["Chimkent", "Shimkent", "Шымкент", "Чимкент"],
-      Astana: ["Астана"], Oral: ["Uralsk", "Уральск"], Aqtobe: ["Aktobe", "Актобе"], "Qarag'anda": ["Karaganda", "Караганда"],
+      Astana: ["Астана", "Ostona", "Остона"], Oral: ["Uralsk", "Уральск"], Aqtobe: ["Aktobe", "Актобе"], "Qarag'anda": ["Karaganda", "Караганда", "Qorag'andi", "Qarag'andi", "Karagandy"],
       Atirau: ["Atyrau", "Атырау"], Aqtau: ["Aktau", "Актау"], Qostanay: ["Kostanay", "Костанай"], Turkiston: ["Turkestan", "Туркестан"],
       "Saryag'och": ["Saryagash", "Сарыагаш"],
     },

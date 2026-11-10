@@ -8,7 +8,7 @@
 // Hisobini o'chirgan (bot /ochirish yoki web «🗑 Hisobni o'chirish»): qator qoladi — o'chirgan paytdagi rol, sozlamalar,
 // raqam va «N marta o'chirgan». Hammasi sig'maydi — har qatorda «Batafsil» (akkordeon, DriverDetails.jsx).
 import { Fragment, useState } from "react";
-import { PLANS, ROLES, formatContactPhone } from "@yuk/shared";
+import { BLOCKED_TEXT, PLANS, ROLES, formatContactPhone } from "@yuk/shared";
 import { get, patch } from "../api.js";
 import {
   activeView,
@@ -22,7 +22,7 @@ import {
   registrationText,
 } from "../format.js";
 import { useApi, useNow } from "../hooks.js";
-import { Async, Badge, Button, Empty, PageHeader, TimeAgo, Toggle, useTitle, useToast } from "../ui.jsx";
+import { Async, Badge, Button, ConfirmDialog, Empty, PageHeader, TimeAgo, Toggle, useTitle, useToast } from "../ui.jsx";
 import { DriverDetails } from "./DriverDetails.jsx";
 
 const COLUMNS = 8;
@@ -60,12 +60,17 @@ function StatusCell({ driver, idleSince, now }) {
     );
   }
   if (!driver.profile) {
-    return driver.registering ? (
-      <Badge tone="warning" icon="◷">
-        Ro'yxatdan o'tyapti
-      </Badge>
-    ) : (
-      <Badge icon="–">Profil yo'q</Badge>
+    return (
+      <>
+        {driver.registering ? (
+          <Badge tone="warning" icon="◷">
+            Ro'yxatdan o'tyapti
+          </Badge>
+        ) : (
+          <Badge icon="–">Profil yo'q</Badge>
+        )}
+        <SubBadge driver={driver} />
+      </>
     );
   }
   const v = activeView(driver, idleSince, now);
@@ -84,6 +89,111 @@ function StatusCell({ driver, idleSince, now }) {
         </div>
       )}
       {v.active && v.pauseAt != null && <div className="muted small">{pauseInText(v.pauseAt, now)}</div>}
+      <SubBadge driver={driver} />
+    </>
+  );
+}
+
+// Kanal va guruhga a'zo emas (bot tekshiradi, .env REQUIRED_CHATS): bot ishlamaydi, yuk yuborilmaydi
+function SubBadge({ driver }) {
+  if (driver.subOk !== false) return null;
+  return (
+    <div>
+      <Badge tone="critical" icon="🔒" title="Bot faqat kanal va guruh a'zolariga ishlaydi: yuk yuborilmaydi, botga yozsa — «a'zo bo'ling» chiqadi">
+        A'zo emas
+      </Badge>
+      {driver.subMissing?.length > 0 && <div className="muted small">{driver.subMissing.join(", ")}</div>}
+    </div>
+  );
+}
+
+// Boshqaruv markazidan bloklangan (store bans): qachon va nimasi bo'yicha — o'zi bloklangan bo'lsa ID, boshqa akkauntning
+// username / raqami mos kelgan bo'lsa — o'sha
+const BAN_BY = { id: "Telegram ID", username: "username", phone: "telefon raqami" };
+function BanBadge({ driver, now }) {
+  const ban = driver.banned;
+  if (!ban) return null;
+  const other = ban.chatId != null && ban.chatId !== driver.chatId;
+  const value = ban.by === "username" ? `@${ban.value}` : ban.by === "phone" ? formatContactPhone(ban.value) : null;
+  return (
+    <div>
+      <Badge tone="critical" icon="🚫" title={`Botga yozsa — «${BLOCKED_TEXT}», yuk yuborilmaydi, Mini App ochilmaydi`}>
+        Bloklangan
+      </Badge>
+      <div className="muted small">
+        <TimeAgo ts={ban.at} now={now} />
+        {other && value && ` · ${BAN_BY[ban.by]} bo'yicha: ${value}`}
+      </div>
+    </div>
+  );
+}
+
+// Bloklash / blokdan chiqarish — admin toggle kabi, lekin avval «Ishonchingiz komilmi?» oynasi (Azimjon, 2026-11-09).
+// Blok shu odamning Telegram ID, username va raqamiga qo'yiladi (store.banDriver). Adminni bloklab bo'lmaydi
+function BlockToggle({ driver, onChanged }) {
+  const notify = useToast();
+  const [asking, setAsking] = useState(null); // true — bloklash so'ralyapti, false — blokdan chiqarish, null — oyna yopiq
+  const [busy, setBusy] = useState(false);
+  const blocked = driver.banned != null;
+  const name = driver.name || (driver.username ? `@${driver.username}` : String(driver.chatId));
+  const keys = [
+    `Telegram ID ${driver.chatId}`,
+    driver.username ? `@${driver.username}` : null,
+    driver.phone ? formatContactPhone(driver.phone) : null,
+  ].filter(Boolean);
+  async function confirm() {
+    setBusy(true);
+    try {
+      await patch(`/api/drivers/${driver.chatId}`, { blocked: asking });
+      notify(asking ? `${name} bloklandi` : `${name} blokdan chiqarildi — botdan yana foydalana oladi`);
+      setAsking(null);
+      onChanged();
+    } catch (e) {
+      notify(e.message, "critical");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <Toggle
+        checked={blocked}
+        onChange={setAsking}
+        disabled={driver.isAdmin && !blocked}
+        label={driver.isAdmin && !blocked ? "Blok (admin — avval huquqini oling)" : "Bloklangan"}
+      />
+      <ConfirmDialog
+        open={asking != null}
+        busy={busy}
+        tone={asking ? "danger" : "primary"}
+        title={asking ? "Foydalanuvchini bloklaysizmi?" : "Blokdan chiqarasizmi?"}
+        confirmLabel={asking ? "Ha, bloklash" : "Ha, blokdan chiqarish"}
+        onConfirm={confirm}
+        onCancel={() => setAsking(null)}
+      >
+        {asking ? (
+          <>
+            <p>
+              Ishonchingiz komilmi? <b>{name}</b> bloklanadi:
+            </p>
+            <ul>
+              <li>
+                botga nima yozsa ham «{BLOCKED_TEXT}» javobini oladi, Mini App va sayt ham shuni ko'rsatadi;
+              </li>
+              <li>yuk va bo'sh mashina xabarlari yuborilmaydi.</li>
+            </ul>
+            <p>
+              Blok qo'yiladi: <b>{keys.join(", ")}</b>. Boshqa akkaunt shu username{driver.phone ? " yoki raqam" : ""} bilan kelsa ham
+              bloklangan bo'ladi.
+              {!driver.phone && " Raqamini ulashmagan — raqam bo'yicha blok yo'q."}
+            </p>
+          </>
+        ) : (
+          <p>
+            <b>{name}</b> botdan va ilovadan yana foydalana oladi, mos yuklar yana boradi (agar pauzada bo'lmasa).
+          </p>
+        )}
+      </ConfirmDialog>
     </>
   );
 }
@@ -136,6 +246,12 @@ function Deliveries({ driver, now }) {
     <>
       <div>
         Bugun <strong>{formatNumber(d.today)}</strong> · jami {formatNumber(d.total)}
+        {d.called > 0 && (
+          <span className="muted" title="Shuncha yukda «📞 Telefon qilish» tugmasini bosgan (2026-11-09 dan)">
+            {" "}
+            · 📞 {formatNumber(d.called)}
+          </span>
+        )}
       </div>
       {d.lastAt != null && (
         <div className="muted small">
@@ -254,8 +370,10 @@ function DriverRow({ driver, open, onToggle, now, reload, idleSince }) {
           <Deliveries driver={driver} now={now} />
         </td>
         <td data-label="Holat">
+          <BanBadge driver={driver} now={now} />
           <StatusCell driver={driver} idleSince={idleSince} now={now} />
           {!shown.deleted && <AdminToggle key={`${driver.chatId}:admin:${driver.isAdmin}`} driver={driver} onChanged={reload} />}
+          <BlockToggle driver={driver} onChanged={reload} />
         </td>
         <td data-label="Faollik" className="nowrap">
           <Activity driver={driver} now={now} />

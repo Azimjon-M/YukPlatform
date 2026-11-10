@@ -65,6 +65,14 @@ export function extractPhones(text) {
   return result;
 }
 
+// E'londa aloqa bormi: matnda telefon raqami yoki e'lonni yozgan odamning username'i (sender — «💬 Lichkasi»).
+// Ikkalasi ham yo'q yuk bilan haydovchi hech narsa qila olmaydi: bot bunday e'lonni AI'ga ham, haydovchiga ham
+// yubormaydi (Azimjon, 2026-11-10: «Aloqasiz yuklarni to'xtat»). Telefon raqami har doim regex bilan olinadi
+// (AI'dan emas), shuning uchun buni AI'dan OLDIN bilsa bo'ladi.
+export function hasContact({ text, sender } = {}) {
+  return Boolean(sender) || extractPhones(text ?? "").length > 0;
+}
+
 // Matndagi telefon raqamlarini "[telefon]" bilan almashtiradi; qolgan sonlar (tonna, narx) joyida qoladi.
 // AI'ga yuborishdan oldin ishlatiladi: raqamlar regex bilan allaqachon olingan, AI'ga kerak emas,
 // begona odamlarning raqamlari esa tashqi xizmatga chiqmaydi (bepul Gemini'da Google matnlarni o'qishi mumkin).

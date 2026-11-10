@@ -107,6 +107,44 @@ test("manbalar: qo'shish, takror, o'chirib-yoqish, o'chirish", async () => {
   assert.equal((await send("DELETE", `/api/sources/${name}`)).status, 404);
 });
 
+test("manbalar: a'zo bo'lish navbati — bittasi, hammasi, bekor qilish", async () => {
+  for (const n of ["@navbat_a", "@navbat_b", "@navbat_c", "@navbat_off"]) await send("POST", "/api/sources", { name: n });
+  const join = (n) => `/api/sources/${encodeURIComponent(n)}/join`;
+  assert.deepEqual((await send("POST", join("@navbat_a"))).body, { state: "wanted" });
+  assert.deepEqual((await send("POST", join("@navbat_a"))).body, { state: "wanted" }, "takror bosish — o'zgarmaydi");
+  assert.equal((await send("POST", join("@yoq_guruh"))).status, 404);
+  assert.equal((await send("DELETE", join("@navbat_a"))).status, 200);
+  assert.equal((await send("DELETE", join("@navbat_a"))).status, 409, "navbatda emas");
+  assert.equal((await send("POST", join("@navbat_a"), undefined, { "x-yuk-admin": "" })).status, 403, "boshqa saytdan bo'lmaydi");
+
+  // c — akkaunt allaqachon a'zo, off — kuzatilmaydi, b — so'rov yuborilgan: hammasi o'tkazib yuboriladi
+  store.setSourceMembership("@navbat_c", true);
+  await send("PATCH", `/api/sources/${encodeURIComponent("@navbat_off")}`, { enabled: false });
+  store.setJoinState("@navbat_b", "requested");
+  assert.deepEqual((await send("POST", "/api/sources/join-all")).body, { queued: 1 });
+  const items = (await get("/api/sources")).body.items.filter((s) => s.name.startsWith("@navbat_"));
+  assert.deepEqual(
+    items.map((s) => [s.name, s.joinState]),
+    [["@navbat_a", "wanted"], ["@navbat_b", "requested"], ["@navbat_c", null], ["@navbat_off", null]],
+  );
+  assert.deepEqual((await send("POST", join("@navbat_c"))).body, { state: "joined" }, "a'zo bo'lsa navbatga qo'yilmaydi");
+  for (const n of ["@navbat_a", "@navbat_b", "@navbat_c", "@navbat_off"]) await send("DELETE", `/api/sources/${encodeURIComponent(n)}`);
+});
+
+test("manbalar: foydalanuvchi qo'shgani — kim qo'shgan va sinov hisobi; sinovdagi «hammasiga a'zo bo'lish» ga kirmaydi", async () => {
+  store.saveDriver(8, {});
+  store.addUserSource({ name: "@user_guruh", chatId: 8, title: "Foydalanuvchi guruhi", members: 900, chatType: "group" });
+  store.finishProbe("@user_guruh", { ok: true, note: "Oxirgi 50 ta xabaridan 20 tasi yuk e'loniga o'xshaydi" });
+  const post = store.addPost({ source: "@user_guruh", messageId: 1, text: "Toshkentdan Samarqandga 20 tonna yuk bor" });
+  store.finishPost(post.id, "done");
+  const row = (await get("/api/sources")).body.items.find((s) => s.name === "@user_guruh");
+  assert.deepEqual([row.checkState, row.enabled, row.title, row.members, row.addedBy], ["trial", true, "Foydalanuvchi guruhi", 900, 8]);
+  assert.equal(row.addedByUser.chatId, 8);
+  assert.equal(row.trial.loads, 1);
+  assert.deepEqual((await send("POST", "/api/sources/join-all")).body, { queued: 0 });
+  await send("DELETE", `/api/sources/${encodeURIComponent("@user_guruh")}`);
+});
+
 test("jarayonlar: yoqish/o'chirish, loglar, noma'lum amal", async () => {
   assert.equal((await send("POST", "/api/processes/bot/restart")).body.status, "running");
   assert.equal((await send("POST", "/api/processes/bot/portlat")).status, 404);

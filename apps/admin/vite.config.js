@@ -9,6 +9,9 @@ const proxy = { "/api": process.env.ADMIN_API || "http://127.0.0.1:3000" };
 export default defineConfig({
   base: "/admin/",
   plugins: [react()],
+  // keepNames — siqilgan kodda ham funksiya / komponent nomlari qoladi: xato sahifasidagi «Komponentlar» ro'yxatida
+  // «at _n» emas, «at LoadsPage» ko'rinadi (qaysi sahifa / qism yiqilganini topish oson)
+  build: { rolldownOptions: { output: { keepNames: true } } },
   server: { port: 5174, proxy },
   preview: { port: 4174, proxy },
 });

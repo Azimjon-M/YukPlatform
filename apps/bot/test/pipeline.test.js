@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "@yuk/store";
-import { createWorker, processPost, ruleParse } from "../src/pipeline.js";
+import { NO_CONTACT, createWorker, processPost, ruleParse } from "../src/pipeline.js";
 
 const LOAD = {
   fromCity: "Toshkent", fromRegion: "toshkent_sh", fromCountry: "O'zbekiston",
@@ -27,22 +27,25 @@ function setup(answers) {
   };
   const published = [];
   const delivered = [];
+  const loadIds = []; // deliver ning 5-argumenti — bazadagi yuk id («📞 Telefon qilish» tugmasi uchun)
   const deps = {
     parser,
     store,
     publish: async (load) => (published.push(load), 100 + published.length),
-    deliver: async (chatId) => (delivered.push(chatId), true),
+    deliver: async (chatId, load, post, kind, loadId) => (delivered.push(chatId), loadIds.push(loadId), true),
   };
   // postedAt standart: id tartibida (1-e'lon eng eski), bir millisekundda qo'shilsa ham tartib aniq bo'lsin
   const add = (id, text = `e'lon ${id} ${"x".repeat(20)}`, postedAt = Date.now() - 1000 + id) =>
     store.addPost({ source: "@g", messageId: id, text, postedAt });
-  return { store, deps, published, delivered, add };
+  return { store, deps, published, delivered, loadIds, add };
 }
 
 test("yuk kanalga va faqat mos, faol haydovchiga boradi", async () => {
-  const { store, deps, published, delivered, add } = setup([{ ok: true, postType: "yuk_bor", loads: [LOAD] }]);
+  const { store, deps, published, delivered, loadIds, add } = setup([{ ok: true, postType: "yuk_bor", loads: [LOAD] }]);
   add(1);
   const result = await processPost(store.takeNewPosts()[0], deps);
+  const [saved] = store.recentLoads();
+  assert.deepEqual(loadIds, [saved.id], "deliver yuk id'sini oladi");
   assert.deepEqual(result, { status: "done", kind: "yuk", loads: 1, outOfScope: 0, fresh: 1, sent: 1 });
   assert.equal(published.length, 1);
   assert.deepEqual(delivered, [1], "Isuzu (5 t) va pauzadagi haydovchiga bormaydi");
@@ -648,4 +651,69 @@ test("ruleParse: haqiqiy qoidaviy parser — ishonchli bo'lsa natija, aks holda 
   assert.equal(result.loads[0].toCity, "Samarqand");
   assert.deepEqual(result.loads[0].phones, ["+998900000001"]);
   assert.equal(ruleParse("Hasanboydan Toshkentga 20 tonna yuk bor +998900000001"), null, "noma'lum joy — AI'ga");
+});
+
+test("kanal va guruhga a'zo bo'lmagan haydovchiga yuk bormaydi (canReceive), yozuv ham qo'shilmaydi", async () => {
+  const { store, deps, delivered, add } = setup([{ ok: true, postType: "yuk_bor", loads: [LOAD] }]);
+  store.saveDriver(4, { profile: FURA, active: true });
+  const asked = [];
+  deps.canReceive = async (user) => (asked.push(user.chatId), user.chatId !== 1);
+  add(1);
+  const result = await processPost(store.takeNewPosts()[0], deps);
+  assert.deepEqual(delivered, [4]);
+  assert.equal(result.sent, 1);
+  assert.deepEqual(asked.sort(), [1, 4], "faqat mos haydovchilar so'raladi (Isuzu va pauzadagi — yo'q)");
+  assert.equal(store.listDrivers().find((d) => d.chatId === 1).deliveries.failed, 0);
+});
+
+// --- Aloqasiz e'lonlar (deps.requireContact; .env REQUIRE_CONTACT) ---
+const postsById = (store) => Object.fromEntries(store.listPosts().items.map((p) => [p.messageId, p]));
+const SITE_TEXT = "Toshkentdan Samarqandga 20 tonna un bor, tent fura kerak, aloqa saytimizda";
+
+test("aloqasiz: telefon ham, lichka ham yo'q e'lon qoidaviy parserga ham, AI'ga ham bormaydi; lichkasi bori boradi", async () => {
+  const { store, deps, delivered } = setup([{ ok: true, postType: "yuk_bor", loads: [{ ...LOAD, phones: [] }] }]);
+  let aiCalls = 0;
+  const parse = deps.parser.parse;
+  deps.parser.parse = (...args) => (aiCalls++, parse(...args));
+  let ruleCalls = 0;
+  deps.rules = () => (ruleCalls++, null); // qoidalar tushunmaydi — AI'ga qoladi
+  deps.requireContact = true;
+  store.addPost({ source: "@g", messageId: 1, text: SITE_TEXT, postedAt: Date.now() - 2000 });
+  store.addPost({ source: "@g", messageId: 2, text: "Toshkentdan Samarqandga 20 tonna un bor, lichkaga yozing", postedAt: Date.now() - 1000, sender: "ali_logist" });
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.equal(ruleCalls, 1, "qoidalar faqat lichkasi bor e'lonni ko'rdi");
+  assert.equal(aiCalls, 1, "AI ham faqat uni");
+  assert.deepEqual(delivered, [1], "lichkasi bor yuk haydovchiga ketdi («💬 Lichkasi»)");
+  const posts = postsById(store);
+  assert.equal(posts[1].status, "done");
+  assert.equal(posts[1].error, `${NO_CONTACT} — AI'ga yuborilmadi`);
+  assert.equal(posts[1].parsedBy, null, "hech kim tahlil qilmadi");
+  assert.equal(posts[2].error, null);
+  assert.equal(store.recentLoads().length, 1, "aloqasiz e'londan yuk yozilmadi");
+});
+
+test("aloqasiz: qoidaviy parser o'chiq (RULE_PARSER=0) bo'lsa ham AI'ga bormaydi; REQUIRE_CONTACT o'chiq — avvalgidek", async () => {
+  const on = setup([]);
+  on.deps.requireContact = true;
+  on.store.addPost({ source: "@g", messageId: 1, text: SITE_TEXT, postedAt: Date.now() - 1000 });
+  assert.equal(await createWorker(on.deps, { log: () => {} }).runOnce(), 0, "AI'ga hech narsa ketmadi");
+  assert.match(postsById(on.store)[1].error, /^Aloqasiz:/);
+
+  const off = setup([{ ok: true, postType: "yuk_bor", loads: [{ ...LOAD, phones: [] }] }]);
+  off.store.addPost({ source: "@g", messageId: 1, text: SITE_TEXT, postedAt: Date.now() - 1000 });
+  await createWorker(off.deps, { log: () => {} }).runOnce();
+  assert.deepEqual(off.delivered, [1]);
+});
+
+test("aloqasiz: AI natijasidagi yuklarda telefon yo'q va lichka yo'q — saqlanmaydi, yuborilmaydi (oxirgi to'siq)", async () => {
+  const { store, deps, delivered, published, add } = setup([{ ok: true, postType: "mashina_bor", loads: [{ ...LOAD, phones: [] }] }]);
+  deps.requireContact = true;
+  add(1);
+  const result = await processPost(store.takeNewPosts()[0], deps);
+  assert.deepEqual(result, { status: "skipped", reason: "contact", kind: "mashina" });
+  assert.deepEqual(delivered, []);
+  assert.deepEqual(published, []);
+  assert.equal(store.recentLoads({ kind: "mashina" }).length, 0);
+  assert.equal(postsById(store)[1].error, NO_CONTACT);
+  assert.equal(postsById(store)[1].parsedBy, "ai");
 });

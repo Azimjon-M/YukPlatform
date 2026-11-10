@@ -7,11 +7,14 @@
 //
 // Natija AI natijasi bilan bir xil shaklda (schema.js LOAD_PROPERTIES): bot uni o'zgartirmasdan ishlata oladi.
 // Hozircha bot buni ishlatmaydi — avval `npm run parse:rules` bilan AI natijalariga solishtirib o'lchanadi.
-import { REGIONS, cargoCategory, normalizePlaces, routeInScope, sameArea, truckFamily } from "@yuk/shared";
+import { HOME_COUNTRY, REGIONS, cargoCategory, normalizePlaces, routeInScope, sameArea, scopeCountries, truckFamily } from "@yuk/shared";
 import { extractPhones, maskPhones } from "../phones.js";
+// collector @yuk/parser/rules ni import qiladi (AI SDK'larini yuklamaslik uchun) — aloqa tekshiruvi ham shu yerdan
+export { hasContact } from "../phones.js";
 import { conformLoad } from "../schema.js";
 import { readNumbers } from "./numbers.js";
 import { findPlace, isCommonWordPlace } from "./places.js";
+import { cleanTemplates } from "./templates.js";
 import { editDistance, toLatin, tokenizeLine, wordKey } from "./text.js";
 import {
   BODY_WORDS,
@@ -90,6 +93,51 @@ function contains(a, b) {
   return b.country === a.country && sameArea(a.region, b.region);
 }
 const sameEntry = (a, b) => a.name === b.name && a.region === b.region && a.country === b.country && a.place === b.place;
+
+// "viloyati", "obl" — oldidagi viloyat nomli shahar aslida viloyatni bildiradi
+const REGION_NOUNS = new Set(["viloyat", "viloyati", "vil", "obl", "oblast", "oblasti"].map(wordKey));
+// Viloyat nomli shahar (Buxoro, Samarqand) → o'sha viloyat. Toshkent: shahar alohida hudud, viloyati — "toshkent"
+function regionEntry(city) {
+  const region = REGIONS.find((r) => /viloyati$/.test(r.name) && REGION_NAME.get(r.id) === wordKey(city.name));
+  return { name: null, region: region?.id ?? city.region, country: city.country, place: null, kind: "region" };
+}
+
+// Yo'nalish doirasidagi davlatlar (O'zbekiston + chegaradoshlar, ROUTE_SCOPE standarti)
+const IN_SCOPE_COUNTRIES = new Set([HOME_COUNTRY, ...scopeCountries()]);
+
+// Joy qanchalik aniq: tuman > shahar > viloyat > davlat
+const RANK = { district: 3, city: 2, region: 1, country: 0 };
+
+// Yo'nalish ko'rsatkichlari: "→", "➡️", "->", "=>". Chiziqcha ("-") bu yerda yo'q: u "20-22 t" da ham uchraydi
+const ARROWS = new Set(["→", "➡", "->", "=>", "⇒"]);
+
+// Yo'nalishi aniq qator: shablon yorlig'i ("Qayerdan: X", hint) yoki bitta strelkali "A ➡️ B" (chapi — qayerdan, o'ngi —
+// qayerga). Har tomondagi joylarga o'sha yo'nalish beriladi; bir tomonda keng joy va uning ichidagisi bo'lsa
+// ("O'zbekiston, Navoiy shahri", "Farg'ona viloyati, O'zbekiston") — aniqrog'i qoladi.
+// → { mentions, sided } — sided: qator yo'nalishli (undagi noma'lum so'z — noma'lum joy deb hisoblanadi)
+function sideRoles(mentions, tokens, hint) {
+  let sideOf = null;
+  if (hint === "from" || hint === "to") sideOf = () => hint;
+  else {
+    const arrows = tokens.filter((t) => t.type === "sep" && ARROWS.has(t.text));
+    const at = arrows.length === 1 ? arrows[0].index : null;
+    if (at != null && mentions.some((m) => m.index < at) && mentions.some((m) => m.index > at)) sideOf = (m) => (m.index < at ? "from" : "to");
+  }
+  if (!sideOf) return { mentions, sided: false };
+  const out = mentions.filter((m) => m.ambiguous);
+  for (const side of ["from", "to"]) {
+    const group = mentions.filter((m) => !m.ambiguous && sideOf(m) === side);
+    // m — keng joy, ichidagisi (o) ham aytilgan bo'lsa tashlanadi. "Andijon tumani, Andijon viloyati",
+    // "Yunusobod tumani, Toshkent shahri": viloyat nomli shahar va viloyat bir-birini «o'z ichiga oladi» —
+    // bunda aniqrog'i qoladi (tuman → shahar → viloyat → davlat), teng bo'lsa — birinchisi
+    const wider = (m, o) => contains(m.entry, o.entry) && (!contains(o.entry, m.entry) || RANK[o.entry.kind] > RANK[m.entry.kind] || (RANK[o.entry.kind] === RANK[m.entry.kind] && o.index < m.index));
+    for (const m of group) {
+      if (group.some((o) => o !== m && wider(m, o))) continue;
+      out.push({ ...m, role: m.role ?? side });
+    }
+  }
+  return { mentions: out.sort((a, b) => a.index - b.index), sided: true };
+}
 
 // Ruscha ko'plik va kelishik qo'shimchalari: "тенты", "рефов", "площадки", "ставки" → tent, ref, ploshadka, stavka.
 // Faqat lug'atda AYNAN bor so'zga olib kelsa ishlatiladi (asosi kamida 3 harf)
@@ -188,7 +236,8 @@ function placeAt(words, i, { routeLine }) {
   return null;
 }
 
-function classifyLine(line, lineNo) {
+// hint — shablon yorlig'idan (templates.js): "from" | "to" — qatordagi joylar shu tomon, "cargo" — qator yuk nomi
+function classifyLine(line, lineNo, hint = null) {
   const { facts } = readNumbers(line);
   const tokens = tokenizeLine(line).map((t, index) => ({ ...t, index, line: lineNo, used: null }));
   // Son-qoida qamragan bo'laklar (son, "tonna", "so'm", "kub"...) — tushunilgan
@@ -199,7 +248,8 @@ function classifyLine(line, lineNo) {
 
   // Faqat joy nomlari va ajratuvchilardan iborat qator ("Toshkent - Andijon", "🇷🇺Екатеренбург"): imlo xatosiga ruxsat
   const free = words.filter((t) => !t.used);
-  const routeLine = free.length > 0 && free.length <= 3 && free.every((t, k) => placeAt(free, k, { routeLine: true }) || PLACE_NOUNS.has(wordKey(t.text)));
+  // Shablonning "Qayerdan: Pop tumani, …" qatori ham yo'nalish qatori: "Pop", "Juma" bu yerda joy nomi
+  const routeLine = hint === "from" || hint === "to" || (free.length > 0 && free.length <= 3 && free.every((t, k) => placeAt(free, k, { routeLine: true }) || PLACE_NOUNS.has(wordKey(t.text))));
 
   for (let i = 0; i < words.length; i++) {
     const t = words[i];
@@ -243,6 +293,7 @@ function classifyLine(line, lineNo) {
     }
     if (place) {
       let role = place.role;
+      let entry = place.entry;
       const last = words[i + place.len - 1];
       for (let k = 0; k < place.len; k++) words[i + k].used = "place";
       let end = last.index;
@@ -255,6 +306,8 @@ function classifyLine(line, lineNo) {
           next.used = "place";
           role = role ?? noun?.role ?? loose;
           end = next.index;
+          // "Buxoro viloyati" — Buxoro shahri emas, butun viloyat (AI ham shahar yozmaydi)
+          if (noun && REGION_NOUNS.has(wordKey(noun.stem)) && entry.kind === "city" && regionLike(entry)) entry = regionEntry(entry);
         }
       }
       // "из Ташкента", "в Москву"
@@ -263,7 +316,7 @@ function classifyLine(line, lineNo) {
         role = RU_FROM.has(prev.text) ? "from" : "to";
         prev.used = "place";
       }
-      mentions.push({ entry: place.entry, role, typo: place.typo, line: lineNo, index: t.index, end });
+      mentions.push({ entry, role, typo: place.typo, line: lineNo, index: t.index, end });
       i += place.len - 1 + (end > last.index ? 1 : 0);
       continue;
     }
@@ -290,7 +343,14 @@ function classifyLine(line, lineNo) {
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (t.type === "sep" && t.text === "(" && tokens[i - 1]?.used === "place") {
-      for (let k = i + 1; k < tokens.length && tokens[k].text !== ")"; k++) if (tokens[k].type === "word" && !tokens[k].used) tokens[k].used = "detail";
+      const inside = [];
+      for (let k = i + 1; k < tokens.length && tokens[k].text !== ")"; k++) if (tokens[k].type === "word" && !tokens[k].used) inside.push(tokens[k]);
+      for (const w of inside) w.used = "detail";
+      // "Namangan (pop)": viloyat nomli shahar + qavsda shu viloyatdagi joy → aniqrog'i (AI yo'lidagi normalizePlaces kabi).
+      // "Qo'qon (Uchko'prik)" — Qo'qon haqiqiy shahar, o'zgarmaydi
+      const m = mentions.find((x) => x.end === tokens[i - 1].index);
+      const hit = m && inside.length && inside.length <= 2 ? findPlace(inside.map((w) => w.text).join(" "), { exact: true }) : null;
+      if (hit?.entry && regionLike(m.entry) && !regionLike(hit.entry) && sameArea(m.entry.region, hit.entry.region)) m.entry = hit.entry;
     }
     if (t.type === "word" && !t.used && stems(t.text).some((s) => PLACE_DETAILS.has(wordKey(s.stem)))) t.used = "detail";
   }
@@ -322,6 +382,12 @@ function classifyLine(line, lineNo) {
   // 6) yuk nomi: "metallom bor", "Груз: Пряжа", "Tovar Bigbag", "Mol ortiladi". Noma'lum joyga o'xshagan so'z
   // ("Jomdan") yoki mashinaga o'xshagan so'z ("Tentfurakerak", "Тень") yuk nomi bo'lmaydi — u e'lonni AI'ga yuboradi
   const cargoWord = (w) => w && !w.used && !looksLikePlace(w.text) && !looksLikeVehicle(w.text);
+  // Shablondagi "Yuk turi: Qurilish mollari" — qatorning qolgani yuk nomi
+  if (hint === "cargo") {
+    const cargo = words.filter(cargoWord);
+    for (const c of cargo) c.used = "cargo";
+    if (cargo.length) found.cargo.push(cargo.map((c) => c.text).join(" "));
+  }
   for (let i = 0; i < words.length; i++) {
     const t = words[i];
     const key = wordKey(t.text);
@@ -344,7 +410,18 @@ function classifyLine(line, lineNo) {
     for (const w of rest) w.used = "cargo";
     found.cargo.push(rest.map((w) => w.text).join(" "));
   }
-  return { tokens, words, facts, mentions, found, lineNo };
+  // Yo'nalishli qatordagi noma'lum so'z — bizda yo'q joy nomi bo'lishi mumkin ("Qayerdan: Xorgos, Xitoy",
+  // "O'zbekiston, Xyz shahri ➡️ …"). Uni oddiy noma'lum so'z deb kechirsak, yuk faqat davlat bilan («O'zbekiston»)
+  // hamma haydovchiga ketardi. Yorliqli qatorda — har noma'lum so'z, strelkali qatorda — davlat nomi yonidagisi
+  // Istisno: qatorda doiradan tashqari davlat bor ("Sverdlovsk viloyati, Rossiya") — shahri qaysi bo'lmasin, yuk
+  // baribir hech kimga ketmaydi, noma'lum shahar nomi oddiy noma'lum so'z bo'lib qoladi
+  const sided = sideRoles(mentions, tokens, hint);
+  if (sided.sided) {
+    const countries = mentions.filter((m) => m.entry?.kind === "country");
+    const far = countries.some((m) => !IN_SCOPE_COUNTRIES.has(m.entry.country));
+    for (const w of words) if (!w.used && !far && (hint || countries.some((m) => Math.abs(m.index - w.index) <= 2))) w.placeLike = true;
+  }
+  return { tokens, words, facts, mentions: sided.mentions, found, lineNo };
 }
 
 // Qatorlarni yuk bloklariga ajratadi: e'londa bir nechta yuk bo'lsa, har biri o'z yo'nalishi bilan boshlanadi.
@@ -492,6 +569,8 @@ function readSegment(segment) {
 
 // E'lon → { confident, reasons, postType, loads, unknown, service }
 // options.maxUnknown — nechta noma'lum so'zga chidaymiz (yuk nomi, izohdagi so'zlar). Ko'p bo'lsa — AI.
+const NO_LOAD_SIGNAL = "yuk yoki mashina e'loni — aniq emas";
+
 export function parseByRules(text, { maxUnknown = 2, allowAlternatives = true } = {}) {
   const phones = extractPhones(text);
   const latin = toLatin(maskPhones(text));
@@ -499,13 +578,14 @@ export function parseByRules(text, { maxUnknown = 2, allowAlternatives = true } 
 
   if (SERVICE_PATTERNS.some((re) => re.test(latin))) return result(true, [], "boshqa", [], { service: true, unknown: [], suspects: [], numbers: [] });
 
-  const lines = latin.split(/\r?\n/).map((line, i) => classifyLine(line, i));
+  // Avto-joylash shablonlari: reklama qatorlari olib tashlanadi, "Qayerdan:/Qayerga:" yorliqlari yo'nalish beradi
+  const lines = cleanTemplates(latin).map(({ text: line, hint }, i) => classifyLine(line, i, hint));
   const reasons = [];
   const tokens = lines.flatMap((l) => l.tokens);
   const unknown = tokens.filter((t) => t.type === "word" && !t.used);
   const numbers = tokens.filter((t) => t.type === "num" && !t.used);
 
-  const suspects = unknown.filter((t) => looksLikePlace(t.text));
+  const suspects = unknown.filter((t) => t.placeLike || looksLikePlace(t.text));
   if (suspects.length) reasons.push(`noma'lum joy: ${suspects.map((t) => t.text).join(", ")}`);
   // Tushunilmagan son va undan keyingi so'z (lug'atni to'ldirish uchun: "15 tonnadan" — nimaga tushmadi)
   const numberContext = numbers.map((t) => {
@@ -531,7 +611,7 @@ export function parseByRules(text, { maxUnknown = 2, allowAlternatives = true } 
   const loadSignal =
     lines.some((l) => l.facts.some((f) => f.kind === "price")) ||
     tokens.some((t) => t.type === "word" && (t.used === "cargo" || LOAD_SIGNAL.has(wordKey(t.text))));
-  if (!loadSignal) reasons.push("yuk yoki mashina e'loni — aniq emas");
+  if (!loadSignal) reasons.push(NO_LOAD_SIGNAL);
   // "Юк ёпилди" — yuk berib bo'lingan; "видийгами ... йук йугмиди" — savol (haydovchi so'rayapti)
   if (CLOSED_RE.test(latin)) reasons.push("yuk yopilgan");
   if (QUESTION_RE.test(latin)) reasons.push("savol");
@@ -564,4 +644,16 @@ export function parseByRules(text, { maxUnknown = 2, allowAlternatives = true } 
     numbers: numberContext,
     segments: segments.length,
   });
+}
+
+// «Yuk (yoki bo'sh mashina) e'loniga o'xshaydimi» — AI'siz, tezkor: foydalanuvchi qo'shgan guruhning oxirgi xabarlarini
+// ko'rib chiqishda (apps/collector probe.js). parseByRules ishonchli bo'lishi shart emas: joy topildi (qayerdan yoki qayerga)
+// va telefon raqami bor yoki yuk belgisi (kerak, yuk bor, gruz, narx…) bor. Xizmat xabarlari («obuna bo'ling») — yo'q.
+// 10.11 da AI tahlil qilgan 6 000 e'londa: «ha» deganlarining 99,9% i AI'da ham yuk e'loni, AI yuk deganlarining 96% i topiladi
+export function looksLikeLoad(text) {
+  const parsed = parseByRules(String(text ?? ""));
+  if (parsed.service) return false;
+  const placed = parsed.loads.some((load) => load.fromRegion || load.fromCountry || load.toRegion || load.toCountry);
+  if (!placed) return false;
+  return extractPhones(text).length > 0 || !parsed.reasons.includes(NO_LOAD_SIGNAL);
 }

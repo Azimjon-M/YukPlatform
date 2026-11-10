@@ -3,10 +3,13 @@
 // Savol-javob mantig'i wizard.js da, pastki menyu menu.js da, xabar ko'rinishi format.js da,
 // «📋 Mos yuklar» dagi «Qayerdan? → Qayerga?» route.js da.
 // Telefon raqami — ixtiyoriy: profil saqlangach bir marta so'raladi (/raqam — keyin), /ochirish — ma'lumotlarni o'chirish.
+// Kanal va guruhga a'zolik (members.js): .env REQUIRED_CHATS bo'lsa, bot faqat ularning a'zolariga ishlaydi.
+// Boshqaruv markazidan bloklangan (store.banOf: id, username yoki raqam) — har xabarga «Uzr, sizga xizmat ko'rsata olmaymiz!».
 import { existsSync } from "node:fs";
 import { autoRetry } from "@grammyjs/auto-retry";
 import { Bot, GrammyError, InlineKeyboard, InputFile } from "grammy";
 import {
+  BLOCKED_TEXT,
   DEFAULT_DEDUPE_WINDOW_MS,
   KIND_MATCHERS,
   ROLES,
@@ -16,52 +19,58 @@ import {
   isAdmin,
   isOwnContact,
   normalizeContactPhone,
+  phoneText,
   roleOf,
   routeChosen,
   sanitizeProfileFor,
   shouldAskPhone,
+  telegramUsername,
   validRole,
   withRoute,
 } from "@yuk/shared";
+import { createCommandSync } from "./commands.js";
 import { escapeHtml, formatLoad, formatTruck } from "./format.js";
 import { IDLE_BUTTONS } from "./idle.js";
-import { MENU, PHONE, mainMenu, matchesLabel, phoneKeyboard, settingsLabel } from "./menu.js";
-import { applyRoute, chosenText, fromStep, toStep, validArea } from "./route.js";
+import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
+import { MENU, PHONE, mainMenu, matchesLabel, miniAppUrl, phoneKeyboard, settingsLabel } from "./menu.js";
+import { createNoticeLoop } from "./notices.js";
+import { ANY, applyRoute, chosenText, fromStep, toStep, validArea } from "./route.js";
+import { ADD_GROUP_TEXT, INTAKE, LINK_RE, createSourceIntake, createSourceWatcher, parseSourceLink } from "./userSources.js";
 import { applyAction, applyText, describeProfile, newDraft, profileFromDraft, renderStep } from "./wizard.js";
 
 const LOADS_WINDOW_MS = 24 * 60 * 60 * 1000; // "📋 Mos yuklar" / "🚚 Bo'sh mashinalar" — oxirgi 24 soat
 const LOADS_SHOWN = 5;
 const LOADS_LIMIT = 5000; // 24 soatda ~4 000 yuk — hammasidan sanaladi (store standarti 500)
 
-// Bot profilidagi matnlar (botni birinchi ochganda "Bu bot nima qila oladi?" o'rnida chiqadi)
-const DESCRIPTION =
-  "🚛 Yuk Ekspert — yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazadi: vositachisiz.\n\n" +
-  "Bundan tashqari, O'zbekistondagi katta yuk guruhlaridan haydovchiga mashinasi va yo'nalishiga mos yuklarni, " +
-  "yuk beruvchiga esa yo'nalishidagi bo'sh mashinalarni saralab, shaxsiy xabarda yuboradi.\n\n" +
-  "Boshlash uchun «Start» ni bosing.";
+// Bot haqida — Azimjon yozgan matn (2026-11-10). Bot tavsifi ham, rol tanlanmagandagi /start ham shu bilan boshlanadi.
+// «o'zingiz belgilagan guruhlar» — menyudagi «➕ Guruh qo'shish» (raqam ulashganlarda; userSources.js)
+const NAME = "Yuk Eksperti";
+const ABOUT =
+  "Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz. Shuningdek, yirik guruhlar yoki o'zingiz " +
+  "belgilagan guruhlardan e'lonlarni yo'nalishingiz va transportingizga mos e'lonni shaxsiy xabaringizga yuboramiz.";
+
+// Bot profilidagi matnlar (botni birinchi ochganda "Bu bot nima qila oladi?" o'rnida chiqadi; Telegram cheki — 512 belgi)
+const DESCRIPTION = `🚛 ${NAME} — ${ABOUT}\n\nBoshlash uchun /start ni bosing!`;
 const SHORT_DESCRIPTION = "Yuk beruvchidan haydovchiga — to'g'ridan-to'g'ri. Katta yuk guruhlaridan mos yuklar va bo'sh mashinalar.";
 
-const COMMANDS = [
-  { command: "start", description: "Boshlash va menyu" },
-  { command: "sozlamalar", description: "Sozlamalarni o'zgartirish" },
-  { command: "rol", description: "Rolni almashtirish: haydovchi ↔ yuk beruvchi" },
-  { command: "pauza", description: "Yuk yuborishni to'xtatib turish" },
-  { command: "davom", description: "Yana yuborish" },
-  { command: "raqam", description: "Telefon raqamni ulashish (ixtiyoriy)" },
-  { command: "ilovalar", description: "Telefon ilovalari" },
-  { command: "ochirish", description: "Ma'lumotlarimni o'chirish" },
-  { command: "yordam", description: "Yordam" },
-];
-
 // Rolni almashtirishdan oldin (/rol, «🔄 Rolni almashtirish»)
-const ROLE_SWITCH_NOTE = "Har rolning sozlamalari alohida saqlanadi — qaytib kelsangiz, qaytadan kiritish shart emas.";
+// Ro'yxatdan o'tishdagi oxirgi qadamdan oldin (forma va raqamdan keyin) — «Qayerdan?» shu matndan keyin keladi
+const ROUTE_NEXT = "Endi qayerdan qayerga yuk kerakligini tanlang 👇";
+const ROLE_SWITCH_NOTE ="Har rolning sozlamalari alohida saqlanadi — qaytib kelsangiz, qaytadan kiritish shart emas.";
 
 // Nega raqam so'raymiz — so'rashda, /raqam da va /start dagi menyu tavsifida bir xil ma'no
-// (raqam keyin ilovaga kirishda ham kerak bo'ladi — Azimjon, 2026-11-07)
+// (raqam keyin ilovaga kirishda ham kerak bo'ladi — Azimjon, 2026-11-07; 2026-11-10 da uning so'zlari bilan qayta yozildi).
+// «hech kimga ko'rsatilmaydi … O'chirish — /ochirish» qatori olib tashlandi (uning matni); raqam saqlangach ham faqat
+// «Raqamingiz saqlandi! ✅». /ochirish — «Menu» buyruqlari ro'yxatida
+// Raqam ulashgandan keyin menyuda «📱 Raqam ulashish» o'rnida «➕ Guruh qo'shish» chiqadi (Azimjon, 2026-11-10:
+// «forma to'ldirgandan so'ng raqam ulashishdan avval» aytilsin — shu rejim uchun ham raqam ulashsin).
+// Matni — hamma joydagidek bitta jumla (ADD_GROUP_TEXT, userSources.js)
+const GROUP_UNLOCK = ADD_GROUP_TEXT;
 const PHONE_WHY =
-  "Ixtiyoriy. Raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz " +
-  "saqlanib qoladi va joyidan davom etasiz — qaytadan ro'yxatdan o'tish shart emas. Raqamingiz hech kimga ko'rsatilmaydi va " +
-  "e'lonlarga qo'shilmaydi. O'chirish — /ochirish";
+  "Raqamingizni ulashsangiz, botni o'chirib qayta yoqsangiz yoki keyin ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi " +
+  "va joyidan davom etaverasiz — qaytadan ro'yxatdan o'tish shart emas.\n\n" +
+  GROUP_UNLOCK +
+  "\n\nRaqamingizni ulashish ixtiyoriy!";
 
 // Hisob o'chirilgach (bot /ochirish; web'dagi o'chirishda — apps/api public.js DELETED_TEXT, ma'nosi bir xil)
 const ACCOUNT_DELETED_TEXT = "✅ Hisobingiz o'chirildi. Endi sizga hech narsa yuborilmaydi.";
@@ -84,15 +93,23 @@ function storedDataText(driver) {
   ].join("\n");
 }
 
-// /start matnining boshi (Azimjon, 2026-11-07): avval — yuk beruvchidan to'g'ridan-to'g'ri yuk (yuk berish qismi qo'shiladi),
-// keyin — katta guruhlardagi e'lonlarni saralab yuborish (ROLE_TEXT[rol].groups)
-const INTRO = "🚛 <b>Yuk Ekspert</b> — yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazadi";
+// /start ning birinchi qatori (faqat /start da — /yordam da emas)
+const GREETING = "Assalomu alaykum!";
 
-// Rolga qarab so'zlar: nima keladi, sozlamalarda nima so'raladi
+// Bot haqida (Azimjon matni, 2026-11-10) — /start va /yordam ning boshida, rol bor-yo'qligidan qat'i nazar.
+// Rol tanlanmaganda ostida ikki rol va «Iltimos, rolingizni tanlang». Rol tanlanganda 2026-11-07…10 da alohida matn
+// edi («…yetkazamiz: vositachisiz, yuk egasining o'zi bilan gaplashasiz» + «Bundan tashqari, katta yuk guruhlaridagi…») —
+// Azimjon uni ham shu matnga almashtirdi.
+const INTRO = `🚛 <b>${NAME}</b> — ${ABOUT}`;
+
+// Rol so'rash (ostida ikki tugma: r:haydovchi / r:yuk_beruvchi). Avval «Siz kimsiz?» edi — Azimjon: qo'pol
+const ROLE_QUESTION = "Iltimos, rolingizni tanlang 👇";
+
+// Rolga qarab so'zlar: nima keladi, sozlamalarda nima so'raladi.
+// chosen — rol tanlangach (sozlamalar hali yo'q): haydovchinikini Azimjon yozgan (2026-11-10), yuk beruvchiniki — unga o'xshatib
 const ROLE_TEXT = {
   haydovchi: {
-    direct: "vositachisiz, yuk egasining o'zi bilan gaplashasiz.",
-    groups: "Bundan tashqari, katta yuk guruhlaridagi minglab e'lonlarni saralab, faqat sizning mashinangiz va yo'nalishingizga mos yuklarni shaxsiy xabarda yuboramiz.",
+    chosen: "🚚 Haydovchisiz. Sizga to'g'ri keladigan yuk e'lonlarini (transportingiz va yo'nalishingizga mos) yo'naltiramiz.",
     one: "yuk",
     many: "yuklar",
     matches: "qayerdan qayerga — tanlaysiz: oxirgi 24 soatdagi mos yuklar chiqadi, yangilari ham shu yo'nalishda keladi",
@@ -100,8 +117,7 @@ const ROLE_TEXT = {
     setup: "transportingizni",
   },
   yuk_beruvchi: {
-    direct: "yukingiz vositachisiz, to'g'ridan-to'g'ri mos haydovchilarga boradi.",
-    groups: "Bundan tashqari, katta yuk guruhlaridagi «mashina bo'sh» e'lonlarini saralab, yo'nalishingizdagi bo'sh mashinalarni shaxsiy xabarda yuboramiz.",
+    chosen: "📦 Yuk beruvchisiz. Sizga to'g'ri keladigan bo'sh mashina e'lonlarini (yo'nalishingiz va kerakli transportga mos) yo'naltiramiz.",
     one: "bo'sh mashina",
     many: "bo'sh mashinalar",
     matches: "oxirgi 24 soatdagi mos bo'sh mashinalar",
@@ -114,41 +130,77 @@ function helpText(driver) {
   const role = roleOf(driver);
   if (!role) {
     return [
-      `${INTRO} — vositachisiz.`,
+      INTRO,
       "",
-      "Bundan tashqari, katta yuk guruhlaridagi e'lonlarni saralab, shaxsiy xabarda yuboramiz:",
-      `${ROLES.haydovchi.icon} haydovchiga — ${ROLES.haydovchi.gets};`,
-      `${ROLES.yuk_beruvchi.icon} yuk beruvchiga — ${ROLES.yuk_beruvchi.gets}.`,
+      `${ROLES.yuk_beruvchi.icon} Yuk beruvchilarga — yukingizga mos transportlar;`,
+      `${ROLES.haydovchi.icon} Haydovchilarga — transportingizga mos yuklar.`,
     ].join("\n");
   }
   const t = ROLE_TEXT[role];
+  // Menyudagi tartibda (menu.js mainMenu). Ro'yxatdan o'tmaguncha menyuda faqat 3 tugma — ro'yxat ham shular.
+  // Matnlar — Azimjon (2026-11-10; ro'yxatdan o'tmagan haydovchining /start ekrani bo'yicha, umumiy qatorlar hammaga)
+  const roleLine = `${MENU.role} — haydovchi va yuk beruvchi`;
+  const menuLines = driver?.profile
+    ? [
+        `${matchesLabel(driver)} — ${t.matches}`,
+        `${MENU.pause} / ${MENU.resume} — yuborishni to'xtatish va yoqish`,
+        roleLine,
+        driver.phone
+          ? ADD_GROUP_TEXT
+          : `${MENU.phone} — raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi va joyidan davom etasiz`,
+        `${settingsLabel(driver)} — ${t.settings}`,
+      ]
+    : [`${settingsLabel(driver)} — sizga qanday e'lonlar yo'naltirishimiz haqida`, roleLine]; // «1 daqiqalik forma» — /start oxirida
   return [
-    `${INTRO}: ${t.direct}`,
-    "",
-    t.groups,
+    INTRO,
     "",
     "<b>Pastdagi menyu:</b>",
-    `${matchesLabel(driver)} — ${t.matches}`,
-    `${settingsLabel(driver)} — ${t.settings}`,
-    `${MENU.pause} / ${MENU.resume} — yuborishni to'xtatish va yoqish`,
-    `${MENU.phone} — raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi va joyidan davom etasiz`,
-    `${MENU.role} — haydovchi ↔ yuk beruvchi (yoki /rol)`,
+    ...menuLines,
     "",
-    `Siz: ${ROLES[role].icon} ${ROLES[role].name}.`,
-    "Menyuni yozish qatorining o'ng tomonidagi belgi ochib-yopadi, umuman yo'qolsa — /start",
-    "Telefon ilovalari — /ilovalar, ma'lumotlarni o'chirish — /ochirish",
+    `Siz: ${ROLES[role].icon} ${ROLES[role].name}siz.`, // «Haydovchisiz» / «Yuk beruvchisiz»
+    "Menyuni yozish qatorining o'ng tomonidagi belgi orqali ochib-yopiladi, umuman yo'qolsa — /start ni bosing.",
+    // /ochirish bu yerda yo'q (Azimjon matni) — u «Menu» buyruqlari ro'yxatida va raqam so'rash/saqlash xabarlarida bor
+    "Telefon ilovalari — /ilovalar.",
   ].join("\n");
 }
 
 const roleKeyboard = () => InlineKeyboard.from(ROLE_IDS.map((id) => [InlineKeyboard.text(ROLES[id].choice, `r:${id}`)]));
 
-const toKeyboard = (rows) => InlineKeyboard.from(rows.map((row) => row.map((b) => InlineKeyboard.text(b.text, b.data))));
+// route.js tugmalari: { text, data } — oddiy (callback), { text, webApp } — Mini App (xarita)
+const toKeyboard = (rows) =>
+  InlineKeyboard.from(rows.map((row) => row.map((b) => (b.webApp ? InlineKeyboard.webApp(b.text, b.webApp) : InlineKeyboard.text(b.text, b.data)))));
 
-// Shaxsiy xabardagi yuk (haydovchiga) yoki bo'sh mashina (kind "mashina", yuk beruvchiga):
-// tugmasiz, asl e'lon havolasi matn ichida
+// Shaxsiy xabardagi yuk (haydovchiga) yoki bo'sh mashina (kind "mashina", yuk beruvchiga) matni.
+// Asl e'lon va qo'ng'iroq — matnda emas, xabar ostidagi tugmalarda (loadButtons)
 export function directText(load, post, kind = "yuk") {
-  const { text, url } = kind === "mashina" ? formatTruck(load, post) : formatLoad(load, post);
-  return url ? `${text}\n<a href="${escapeHtml(url)}">📄 Asl e'lon</a>` : text;
+  return (kind === "mashina" ? formatTruck(load, post) : formatLoad(load, post)).text;
+}
+
+export const SOURCE_BUTTON = "📄 Asl e'lon";
+export const CALL_BUTTON = "📞 Telefon qilish";
+const MAX_CALL_BUTTONS = 3;
+
+// Yuk xabari ostidagi tugmalar (Azimjon, 2026-11-09): «📄 Asl e'lon» va «📞 Telefon qilish».
+// Telegram tugmasiga tel: qo'yib bo'lmaydi (faqat http(s):// va tg://) — shuning uchun «Telefon qilish» bizning https
+// sahifamizni ochadi (GET /pub/call, apps/api public.js), u esa raqamni telefonning qo'ng'iroq oynasiga uzatadi:
+// raqam yozilgan holda ochiladi, haydovchi yashil tugmani bosadi.
+// Oddiy havola (url) tugmasi EMAS, Mini App (web_app) tugmasi: havola tugmasiga Telegram har safar «Havolani ochish?»
+// deb so'raydi va sahifani o'z brauzerida ochadi (Azimjon telefonda sinadi: 3 qadam). Mini App tugmasi so'ramaydi,
+// sahifa esa qo'ng'iroq oynasi ochilishi bilan Mini App'ni o'zi yopadi. web_app faqat shaxsiy chatda ishlaydi — yuklar shu yerda.
+// callUrl(i) — i-raqamning sahifa manzili yoki null (tunnel o'chiq — unda faqat matndagi raqam qoladi).
+// Raqam bitta — ikkala tugma bir qatorda; bir nechta — har raqam o'z tugmasida. → InlineKeyboard yoki null (tugma yo'q)
+export function loadButtons(load, post, callUrl = () => null) {
+  const source = post?.link ? InlineKeyboard.url(SOURCE_BUTTON, post.link) : null;
+  const phones = (load.phones ?? []).slice(0, MAX_CALL_BUTTONS);
+  const calls = phones
+    .map((phone, i) => {
+      const url = callUrl(i);
+      if (!url) return null;
+      return InlineKeyboard.webApp(phones.length === 1 ? CALL_BUTTON : `📞 ${formatContactPhone(phoneText(phone))}`, url);
+    })
+    .filter(Boolean);
+  const rows = calls.length <= 1 ? [[source, ...calls].filter(Boolean)] : [...(source ? [[source]] : []), ...calls.map((b) => [b])];
+  return rows[0].length ? InlineKeyboard.from(rows) : null;
 }
 
 // Guruh yoki kanal xabaridan navbat uchun e'lon
@@ -161,17 +213,32 @@ export function postFromMessage(chat, message) {
     : String(chat.id).startsWith("-100")
       ? `https://t.me/c/${String(chat.id).slice(4)}/${message.message_id}`
       : null;
-  return { source, messageId: message.message_id, link, text: text.trim(), postedAt: message.date * 1000 };
+  // Yozgan odam («💬 Lichkasi»): kanal nomidan yozilgan (sender_chat) yoki bot bo'lsa — yo'q
+  const person = message.sender_chat || message.from?.is_bot ? null : message.from;
+  const sender = telegramUsername(person?.username);
+  return { source, messageId: message.message_id, link, text: text.trim(), postedAt: message.date * 1000, sender };
 }
 
 // botInfo — testda Telegram'ga ulanmasdan ishlatish uchun (odatda init() o'zi oladi)
 // appUrl — Mini App manzili HOZIR: .env dagi MINIAPP_URL yoki ishlab turgan tunnel bergani (main.js). Tunnel qayta yoqilsa,
 // manzil o'zgaradi — shuning uchun har safar shu funksiyadan so'raladi, ishga tushganda bir marta emas.
 // linkToken(chatId) — Mini App tugmasiga qo'shiladigan kirish tokeni (main.js: @yuk/store sessions.link; bir hafta bir xil)
-export function createBot({ token, store, config, log = console.log, botInfo, appUrl = () => config.miniappUrl, linkToken = () => null }) {
+// callLink({ loadId, phone, chatId }) — «📞 Telefon qilish» sahifasi tokeni (main.js: @yuk/store createCallLinks); null — tugma yo'q
+export function createBot({
+  token,
+  store,
+  config,
+  log = console.log,
+  botInfo,
+  appUrl = () => config.miniappUrl,
+  linkToken = () => null,
+  callLink = () => null,
+}) {
   const bot = new Bot(token, botInfo ? { botInfo } : undefined);
   // Telegram "juda tez" (429) desa, aytilgan vaqtcha kutib qayta yuboradi
   bot.api.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 60 }));
+  // «Menu» tugmasi (buyruqlar ro'yxati) — faqat rol tanlaganlarda (commands.js). main.js commands.start() ni chaqiradi
+  const commands = createCommandSync({ api: bot.api, store, log });
 
   // Oxirgi faollik (boshqaruv markazida «🟢 Hozir botda»): shaxsiy chatdagi har xabar yoki tugmadan KEYIN —
   // yangi foydalanuvchining yozuvi handler ichida yaratiladi, /ochirish dan keyin esa yozadigan joy qolmaydi
@@ -193,6 +260,61 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     } catch (error) {
       log(`Oxirgi faollik yozilmadi: ${error.message}`);
     }
+    // Rol hozir tanlandi yoki olib tashlandi (/ochirish) — «Menu» tugmasi darhol paydo bo'ladi / yo'qoladi
+    try {
+      await commands.sync(ctx.from.id);
+    } catch (error) {
+      log(`Menu tugmasi yangilanmadi: ${error.description ?? error.message}`);
+    }
+  });
+
+  // Blok (boshqaruv markazidan; Azimjon, 2026-11-09): id, username (Telegram'dan kelgan hozirgisi) yoki bazadagi raqam
+  // ro'yxatda bo'lsa — hech narsa bajarilmaydi, faqat «Uzr, sizga xizmat ko'rsata olmaymiz!» (pastki menyu ham olinadi).
+  // Tugma bosilsa — oynachada. .env ADMIN_IDS dagilar bloklanmaydi (egasi o'zini qulflab qo'ymasin).
+  bot.use(async (ctx, next) => {
+    if (ctx.chat?.type !== "private" || !ctx.from || !(ctx.message || ctx.callbackQuery)) return next();
+    if ((config.admins ?? []).includes(ctx.from.id)) return next();
+    const ban = store.banOf?.({ chatId: ctx.from.id, username: ctx.from.username, phone: store.getDriver(ctx.from.id)?.phone });
+    if (!ban) return next();
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery({ text: BLOCKED_TEXT, show_alert: true }).catch(() => {});
+      return;
+    }
+    await ctx.reply(BLOCKED_TEXT, { reply_markup: { remove_keyboard: true } });
+  });
+
+  // Kanal va guruhga a'zolik (members.js; Azimjon, 2026-11-09). REQUIRED_CHATS bo'sh bo'lsa — yo'q, bot hammaga ishlaydi.
+  // Telegram'dan haqiqiy javob kelganda bazaga yoziladi — boshqaruv markazida «🔒 A'zo emas» ko'rinadi
+  const members = config.requiredChats?.length
+    ? createMembership({
+        api: bot.api,
+        refs: config.requiredChats,
+        log,
+        onChecked: (userId, result) => {
+          try {
+            store.setSubscription?.(userId, result);
+          } catch (error) {
+            log(`A'zolik yozilmadi: ${error.message}`);
+          }
+        },
+      })
+    : null;
+
+  // To'siq: shaxsiy chatdagi xabar yoki tugma — avval a'zolik. A'zo bo'lmasa — «a'zo bo'ling» xabari va tugmalar,
+  // xabarning o'zi bajarilmaydi (next() chaqirilmaydi). Guruh va kanal postlari, «✅ A'zo bo'ldim», /ochirish va uning
+  // tugmalari (ma'lumotini o'chirish huquqi a'zolikka bog'liq emas), /id va adminlar — tekshirilmaydi.
+  // A'zo natijasi 10 daqiqa eslab qolinadi (Telegram'ga har xabarda so'rov ketmaydi), «a'zo emas» — har safar qayta so'raladi.
+  const FREE_COMMAND = /^\/(ochirish|id)(@\w+)?(\s|$)/;
+  bot.use(async (ctx, next) => {
+    if (!members || ctx.chat?.type !== "private" || !ctx.from || !(ctx.message || ctx.callbackQuery)) return next();
+    const data = ctx.callbackQuery?.data ?? "";
+    if (data === SUB_CHECK || /^del:/.test(data) || FREE_COMMAND.test(ctx.message?.text ?? "")) return next();
+    if (isAdmin(store.getDriver(ctx.from.id) ?? { chatId: ctx.from.id }, config.admins ?? [])) return next();
+    rememberUser(ctx); // yangi odam ham boshqaruv markazida ko'rinsin (va a'zoligi yozilsin)
+    const result = await members.check(ctx.from.id, { fresh: true });
+    if (result.ok) return next();
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text: "Avval kanal va guruhimizga a'zo bo'ling" }).catch(() => {});
+    await sendJoinPrompt(ctx, result.missing);
   });
 
   const isChannel = (chat) =>
@@ -204,13 +326,38 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     message.via_bot?.id === bot.botInfo?.id;
 
   const scope = config.routeScope; // yo'nalish doirasi: sozlamalarda qaysi davlatlar tanlanadi
-  // Pastki menyu (Mini App manzili + shu odamning tokeni har safar yangidan — tunnel yoki hafta almashsa ham to'g'ri)
+  // Pastki menyu (Mini App manzili + shu odamning tokeni har safar yangidan — tunnel yoki hafta almashsa ham to'g'ri).
+  // Rol tanlanmaguncha menyu YO'Q (Azimjon, 2026-11-10: «rol tanlamagunigacha pastki menyu chiqmasin») — tugmalarini
+  // bosib adashmasin. Ilgari ko'rsatilgan menyu bo'lsa (masalan, hisobdan chiqqan odamda) — olib tashlanadi.
+  // Rol tanlangach (chooseRole) birinchi javob bilan menyu chiqadi.
   const menu = (driver) => {
+    if (!roleOf(driver)) return { reply_markup: { remove_keyboard: true } };
     const url = appUrl() ?? null;
     const token = driver?.chatId != null && url ? linkToken(driver.chatId) : null;
     return { reply_markup: mainMenu(driver, url, scope, { admin: isAdmin(driver, config.admins ?? []), token }) };
   };
   const html = (driver) => ({ parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...menu(driver) });
+
+  // «📞 Telefon qilish» sahifasining manzili: Mini App bilan bir server (nginx /pub/ ni haydovchilar serveriga uzatadi).
+  // Faqat https — Telegram tugmada boshqasini qabul qilmaydi (xabar umuman ketmay qolardi). loadId — loads jadvalidagi id
+  const callUrl = (chatId, loadId) => (phone) => {
+    const base = appUrl();
+    if (loadId == null || !base?.startsWith("https://")) return null;
+    const link = callLink({ loadId, phone, chatId });
+    return link ? new URL(`/pub/call?c=${link}`, base).href : null;
+  };
+
+  // «🗺 Xaritadan tanlash» (yo'nalish; Azimjon, 2026-11-10) — web ilovaning xarita sahifasi (?v=yonalish, f — tanlangan
+  // «Qayerdan»). Faqat https (Telegram web_app tugmasi boshqasini qabul qilmaydi). Kirish tokeni (?t=) QO'SHILMAYDI:
+  // inline tugmadan ochilgan Mini App'ga Telegram kimlikni o'zi beradi (initData), inline tugmali xabarni esa boshqaga
+  // yo'naltirish (forward) mumkin — token u bilan begona qo'lga o'tmasin
+  const routeMapUrl = (from = null) => {
+    const base = appUrl();
+    if (!base?.startsWith("https://")) return null;
+    const url = new URL(miniAppUrl(base, null, scope, { view: "yonalish", role: "haydovchi" }));
+    if (from) url.searchParams.set("f", from);
+    return url.href;
+  };
 
   function rememberUser(ctx) {
     const from = ctx.from;
@@ -225,32 +372,68 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     return store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind }).filter((row) => matches(row.load, user.profile).ok);
   }
 
-  // Yangi xabar yoki o'sha xabarni o'zgartirish (tugma bosilganda). "message is not modified" — o'sha tugma ikki marta bosildi
+  // Yangi xabar yoki o'sha xabarni o'zgartirish (tugma bosilganda). "message is not modified" — o'sha tugma ikki marta bosildi.
+  // → xabar raqami (message_id) yoki null
   async function render(ctx, text, options, edit) {
+    const shown = ctx.callbackQuery?.message?.message_id ?? null;
     if (edit) {
       try {
         await ctx.editMessageText(text, options);
-        return;
+        return shown;
       } catch (error) {
-        if (error instanceof GrammyError && /not modified/.test(error.description)) return;
+        if (error instanceof GrammyError && /not modified/.test(error.description)) return shown;
       }
     }
-    await ctx.reply(text, options);
+    const message = await ctx.reply(text, options);
+    return message?.message_id ?? null;
   }
 
-  // «📋 Mos yuklar» → «📍 Qayerdan yuk olasiz?» (route.js). Tugmalarda — har joydagi mos yuklar soni
+  // Chatdagi yo'nalish tanlash xabari: xaritada tanlansa, bot aynan shu xabarni «✅ Yo'nalish: …» ga almashtiradi
+  function rememberRouteMessage(chatId, messageId) {
+    try {
+      store.setRouteMessage?.(chatId, messageId);
+    } catch (error) {
+      log(`Yo'nalish xabari yozilmadi: ${error.message}`);
+    }
+  }
+
+  // «🔒 Botdan foydalanish uchun ... a'zo bo'ling» + a'zo bo'lish tugmalari + «✅ A'zo bo'ldim» (members.js joinPrompt)
+  async function sendJoinPrompt(ctx, missing, { edit = false } = {}) {
+    const { text, keyboard } = joinPrompt(members.chats(), missing);
+    await render(ctx, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: keyboard }, edit);
+  }
+
+  // A'zo bo'lmagan foydalanuvchiga eslatma (yuk kelganda yoki kanaldan chiqqanda): kuniga ko'pi bilan bir marta
+  // (drivers.sub_reminded_at). reason: "load" | "left" (members.js remindText)
+  async function remindJoin(chatId, missing, reason) {
+    const user = store.getDriver(chatId);
+    if (!user || user.deletedAt || isAdmin(user, config.admins ?? [])) return;
+    if (user.subRemindedAt != null && Date.now() - user.subRemindedAt < REMIND_EVERY_MS) return;
+    const t = ROLE_TEXT[roleOf(user)] ?? ROLE_TEXT.haydovchi;
+    const { text, keyboard } = remindText(members.chats(), missing, { reason, one: t.one, many: t.many });
+    try {
+      await bot.api.sendMessage(chatId, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: keyboard });
+      store.markSubReminded?.(chatId);
+    } catch (error) {
+      // 403 — botni bloklagan: deliver dagidek pauza
+      if (error instanceof GrammyError && error.error_code === 403) store.saveDriver(chatId, { active: false, why: "blocked" });
+      else log(`A'zolik eslatmasi yuborilmadi (${chatId}): ${error.description ?? error.message}`);
+    }
+  }
+
+  // «📋 Mos yuklar» → «📍 Qayerdan yuk olasiz?» (route.js). Tugmalarda yuklar soni yo'q (2026-11-10 dan);
+  // oxirida «🗺 Xaritadan tanlash» (web xaritasi, https manzil bo'lsa)
   async function askRoute(ctx, driver, { edit = false } = {}) {
-    const rows = store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind: "yuk" });
-    const { text, keyboard } = fromStep({ profile: driver.profile, scope, rows });
-    await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
+    const { text, keyboard } = fromStep({ profile: driver.profile, scope, mapUrl: routeMapUrl() });
+    rememberRouteMessage(ctx.chat.id, await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit));
   }
 
-  // "Siz kimsiz?" — ikki tugma (r:haydovchi / r:yuk_beruvchi)
+  // «Iltimos, rolingizni tanlang» (yoki /rol da — hozirgi rol) — ikki tugma (r:haydovchi / r:yuk_beruvchi)
   async function askRole(ctx, driver = null) {
     const role = roleOf(driver);
     const text = role
       ? `Hozir siz: <b>${ROLES[role].icon} ${ROLES[role].name}</b>.\n${ROLE_SWITCH_NOTE}`
-      : "Siz kimsiz? 👇";
+      : ROLE_QUESTION;
     await ctx.reply(text, { parse_mode: "HTML", reply_markup: roleKeyboard() });
   }
 
@@ -279,7 +462,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   async function openSettings(ctx) {
     const driver = rememberUser(ctx);
     const role = roleOf(driver);
-    if (!role) return askRole(ctx);
+    if (!role) return showStart(ctx);
     if (!appUrl()) return startWizard(ctx, driver.profile, role);
     await ctx.reply(`Pastdagi «${settingsLabel(driver)}» tugmasini bosing — forma ochiladi. To'ldirib, «Saqlash» ni bosasiz.`, menu(driver));
   }
@@ -291,27 +474,55 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     if (role === "haydovchi") profile = withRoute(profile, store.getDriver(ctx.chat.id)?.profile);
     const driver = store.saveDriver(ctx.chat.id, { role, profile, draft: null, active: true });
     const t = ROLE_TEXT[role];
-    // Yangi haydovchi: yo'nalish tanlanmaguncha yuk yuborilmaydi — darhol so'raymiz (raqam — yo'nalishdan keyin)
+    // Yangi haydovchi: yo'nalish tanlanmaguncha yuk yuborilmaydi. Tartib (Azimjon, 2026-11-10): forma → raqam (bir marta,
+    // ixtiyoriy) → yo'nalish. Raqamga javob bergach (ulashdi yoki «Keyinroq») — afterPhone() yo'nalishni so'raydi.
+    // 2026-11-07…10 da raqam yo'nalishdan KEYIN so'ralardi.
     if (role === "haydovchi" && !routeChosen(profile)) {
-      await ctx.reply(`✅ Saqlandi.\n\n${describeProfile(profile, scope, role)}\n\nEndi qayerdan qayerga yuk kerakligini tanlang 👇`, menu(driver));
+      if (shouldAskPhone(driver)) {
+        // Faqat «✅ Saqlandi.» — sozlamalar ro'yxatisiz (Azimjon, 2026-11-10): uzun ro'yxat keyingi raqam savolini
+        // ekrandan chiqarib yuborardi; xato bo'lsa — «⚙️ Sozlamalar» da ko'radi va tuzatadi.
+        // Menyusiz: darhol keyingi xabardagi raqam klaviaturasi uning o'rnini oladi, menyu javobdan keyin qaytadi
+        await ctx.reply("✅ Saqlandi.");
+        await askPhone(ctx, driver);
+        return;
+      }
+      await ctx.reply(`✅ Saqlandi.\n\n${describeProfile(profile, scope, role)}\n\n${ROUTE_NEXT}`, menu(driver));
       await askRoute(ctx, driver);
       return;
     }
+    // Birinchi marta sozlagach (yuk beruvchi, yoki yo'nalishi tiklangan haydovchi) — raqamni bir marta so'raymiz (ixtiyoriy).
+    // Shunda ham faqat «✅ Saqlandi.» (Azimjon, 2026-11-10: yuk beruvchida ham — ro'yxat raqam savolini ekrandan chiqarardi)
+    if (shouldAskPhone(driver)) {
+      await ctx.reply("✅ Saqlandi.");
+      await askPhone(ctx, driver);
+      return;
+    }
+    // Qayta saqlash (raqam allaqachon so'ralgan) — sozlamalar ro'yxati va 24 soatdagi mos e'lonlar soni bilan
     const count = matching(driver).length;
     const extra = count ? `\n\nOxirgi 24 soatda sizga mos ${count} ta ${t.one} bor — «${matchesLabel(driver)}» ni bosing.` : "";
     await ctx.reply(`✅ Saqlandi. Endi mos ${t.many} shu yerga keladi.\n\n${describeProfile(profile, scope, role)}${extra}`, menu(driver));
-    // Birinchi marta sozlagach — raqamni bir marta so'raymiz (ixtiyoriy)
-    if (shouldAskPhone(driver)) await askPhone(ctx, driver);
   }
 
   // Raqam so'rash: bir martalik klaviatura «📱 Raqam ulashish» / «⏭ Keyinroq» (yoki raqami bo'lsa — «O'zgartirmaslik»).
   // Qachon so'ralgani yoziladi — bot o'zi boshqa so'ramaydi (faqat /raqam bilan foydalanuvchining o'zi).
-  async function askPhone(ctx, driver) {
-    store.saveDriver(ctx.chat.id, { phoneAskedAt: Date.now() });
+  const askPhone = (ctx, driver) => askPhoneIn(ctx.chat.id, driver);
+  // chatId bo'yicha — xaritadan kelgan topshiriqda ham (routeFromWeb; u yerda ctx yo'q)
+  async function askPhoneIn(chatId, driver) {
+    store.saveDriver(chatId, { phoneAskedAt: Date.now() });
     const text = driver.phone
-      ? `📱 Sizning raqamingiz: <b>${escapeHtml(formatContactPhone(driver.phone))}</b>\nAlmashtirish uchun pastdagi «${PHONE.share}» tugmasini bosing.`
+      ? `📱 Sizning raqamingiz: <b>${escapeHtml(formatContactPhone(driver.phone))}</b>\n` +
+        `Almashtirish uchun pastdagi «${PHONE.change}», o'chirish uchun «${PHONE.remove}» tugmasini bosing.`
       : `📱 <b>Telefon raqamingizni ulashasizmi?</b>\n${PHONE_WHY}`;
-    await ctx.reply(text, { parse_mode: "HTML", reply_markup: phoneKeyboard(Boolean(driver.phone)) });
+    await bot.api.sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: phoneKeyboard(Boolean(driver.phone)) });
+  }
+
+  // Raqamga javobdan keyin (ulashdi / «Keyinroq» / «O'zgartirmaslik»): menyu qaytadi; yo'nalishi yo'q haydovchiga —
+  // darhol «Qayerdan?» (ro'yxatdan o'tish shu bilan tugaydi: forma → raqam → yo'nalish)
+  // hint: false — «Endi qayerdan qayerga…» qo'shilmaydi (raqam saqlangach — faqat «Raqamingiz saqlandi! ✅»)
+  async function afterPhone(ctx, driver, text, { hint = true } = {}) {
+    const needsRoute = roleOf(driver) === "haydovchi" && Boolean(driver.profile) && !routeChosen(driver.profile);
+    await ctx.reply(needsRoute && hint ? `${text}\n\n${ROUTE_NEXT}` : text, menu(driver));
+    if (needsRoute) await askRoute(ctx, driver);
   }
 
   // Rol tanlandi. Har rolning sozlamalari alohida saqlanadi (store.switchRole): bu rolda avval to'ldirgan bo'lsa —
@@ -333,8 +544,9 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
       );
       return;
     }
-    const next = appUrl() ? `\n\n👇 Endi «${settingsLabel(driver)}» tugmasini bosing — 1 daqiqalik forma.` : "";
-    await ctx.reply(`${ROLES[role].icon} Siz: <b>${ROLES[role].name}</b>. Sizga ${ROLES[role].gets} keladi.${next}`, html(driver));
+    // Rol tanlandi, sozlamalar hali yo'q (Azimjon matni, 2026-11-10): nima keladi + «Ro'yxatdan o'tish» tugmasi
+    const next = appUrl() ? `\n\n👇 Endi pastdagi «${settingsLabel(driver)}» tugmasini bosing — 1 daqiqalik forma.` : "";
+    await ctx.reply(`${ROLE_TEXT[role].chosen}${next}`, html(driver));
     if (!appUrl()) await startWizard(ctx, null, role);
   }
 
@@ -350,7 +562,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   async function showMatches(ctx) {
     const driver = rememberUser(ctx);
     const role = roleOf(driver);
-    if (!role) return askRole(ctx);
+    if (!role) return showStart(ctx);
     const t = ROLE_TEXT[role];
     if (!driver.profile) {
       await ctx.reply(`Avval ${t.setup} kiriting: «${settingsLabel(driver)}».`, menu(driver));
@@ -361,24 +573,62 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   }
 
   // Oxirgi 24 soatdagi mos e'lonlar (eng yangi LOADS_SHOWN tasi)
-  async function listMatches(ctx, driver) {
+  const listMatches = (ctx, driver) => listMatchesIn(ctx.chat.id, driver);
+  // chatId bo'yicha — xaritadan kelgan topshiriqda ham (routeFromWeb)
+  async function listMatchesIn(chatId, driver) {
+    const say = (text, other) => bot.api.sendMessage(chatId, text, other);
     const role = roleOf(driver);
     const t = ROLE_TEXT[role];
     const found = matching(driver);
     if (!found.length) {
-      await ctx.reply(`Oxirgi 24 soatda sizga mos ${t.one} chiqmadi. Yangisi chiqishi bilan shu yerga yuboraman.`, menu(driver));
+      await say(`Oxirgi 24 soatda sizga mos ${t.one} chiqmadi. Yangisi chiqishi bilan shu yerga yuboraman.`, menu(driver));
       return;
     }
     const kind = ROLE_KIND[role];
     const icon = role === "yuk_beruvchi" ? "🚚" : "📋";
     const more = found.length > LOADS_SHOWN ? `, eng yangi ${LOADS_SHOWN} tasi` : "";
-    await ctx.reply(`${icon} Oxirgi 24 soatda sizga mos ${found.length} ta ${t.one}${more}:`, menu(driver));
+    await say(`${icon} Oxirgi 24 soatda sizga mos ${found.length} ta ${t.one}${more}:`, menu(driver));
     // Eskisidan yangisiga: eng yangisi chatda eng pastda turadi
     for (const row of found.slice(0, LOADS_SHOWN).reverse()) {
-      await ctx.reply(directText(row.load, row.post, kind), html(driver));
+      const buttons = loadButtons(row.load, row.post, callUrl(chatId, row.id));
+      await say(directText(row.load, row.post, kind), { ...html(driver), ...(buttons ? { reply_markup: buttons } : {}) });
     }
-    if (driver.active === false) await ctx.reply(`⏸ Siz pauzadasiz: yangi ${t.many} o'zi kelmaydi. Yoqish: «${MENU.resume}»`, menu(driver));
+    if (driver.active === false) await say(`⏸ Siz pauzadasiz: yangi ${t.many} o'zi kelmaydi. Yoqish: «${MENU.resume}»`, menu(driver));
   }
+
+  // Haydovchi yo'nalishni web xaritasida tanladi (server PUT /pub/me/route { notify: true } → bot_notices "route").
+  // Chatda tugmalar bilan tanlagandagi kabi: «Qayerdan?» xabari «✅ Yo'nalish: …» ga almashadi (topilmasa — yangi xabar),
+  // keyin mos yuklar ro'yxati va (hali so'ralmagan bo'lsa) raqam savoli.
+  // Kanal/guruhga a'zo bo'lmasa — ro'yxat yo'q (bot unga baribir javob bermasdi), faqat yo'nalish xabari
+  async function routeFromWeb(chatId) {
+    const driver = store.getDriver(chatId);
+    if (!driver || driver.deletedAt || roleOf(driver) !== "haydovchi" || !driver.profile || !routeChosen(driver.profile)) return;
+    const text = chosenText(driver.profile);
+    const messageId = store.routeMessage?.(chatId) ?? null;
+    let shown = false;
+    if (messageId) {
+      try {
+        await bot.api.editMessageText(chatId, messageId, text, { parse_mode: "HTML" });
+        shown = true;
+      } catch (error) {
+        shown = error instanceof GrammyError && /not modified/.test(error.description);
+      }
+      rememberRouteMessage(chatId, null);
+    }
+    if (!shown) await bot.api.sendMessage(chatId, text, { parse_mode: "HTML" });
+    if (members && !isAdmin(driver, config.admins ?? []) && !(await members.check(chatId)).ok) return;
+    await listMatchesIn(chatId, driver);
+    if (shouldAskPhone(driver)) await askPhoneIn(chatId, driver);
+  }
+  // Raqamini web sozlamalarida o'chirdi (server DELETE /pub/me/phone → bot_notices "phone_deleted"). Chatdagi pastki
+  // menyu eskirdi («➕ Guruh qo'shish» turibdi) — botdagi «Faqat raqamni o'chirish» kabi yozib, menyuni yangilaymiz.
+  // Shu orada qayta ulashgan bo'lsa (Mini App'dagi «📱 Raqam ulashish») — hech narsa demaymiz
+  async function phoneDeletedFromWeb(chatId) {
+    const driver = store.getDriver(chatId);
+    if (!driver || driver.deletedAt || driver.phone) return;
+    await bot.api.sendMessage(chatId, "✅ Raqamingiz o'chirildi.", menu(driver));
+  }
+  const notices = createNoticeLoop({ store, log, handlers: { route: routeFromWeb, phone_deleted: phoneDeletedFromWeb } });
 
   let apkFileId = null; // bir marta yuklangach, Telegram fayl id'si bilan qayta yuboriladi
   async function showApps(ctx) {
@@ -387,7 +637,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     const lines = ["📱 <b>Yuk Ekspert ilovalari</b>", ""];
     lines.push(`🤖 Android: ${config.androidUrl ? link(config.androidUrl, "yuklab olish") : config.apkFile ? "o'rnatish fayli pastda 👇" : "tez orada"}`);
     lines.push(`🍏 iPhone: ${config.iosUrl ? link(config.iosUrl, "App Store") : "tez orada"}`);
-    if (appUrl()) lines.push(`💬 Telegram ichida: pastdagi «${settingsLabel(driver)}» tugmasi ilovani ochadi`);
+    if (appUrl() && roleOf(driver)) lines.push(`💬 Telegram ichida: pastdagi «${settingsLabel(driver)}» tugmasi ilovani ochadi`);
     if (config.channelLoads && config.channel?.startsWith("@")) lines.push(`📢 Hamma yangi yuklar kanalda: ${config.channel}`);
     await ctx.reply(lines.join("\n"), html(driver));
     if (!config.apkFile) return;
@@ -406,35 +656,65 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
 
   const privateChat = bot.chatType("private");
 
-  // /start (kanaldagi "🤖 Menga mos yuklar" havolasi ham shu yerga keladi: /start kanal)
-  privateChat.command("start", async (ctx) => {
+  // «➕ Guruh qo'shish» → raqami yo'q → raqam so'raldi. Azimjon (2026-11-10): raqam guruh uchun ulashilgan bo'lsa,
+  // keyin yo'nalish savoli («Qayerdan yuk olasiz?») emas — guruh qo'shishning o'zi kelsin. Shuning uchun shu niyat
+  // (va havola yuborgan bo'lsa — o'sha guruh nomi) eslab qolinadi. Raqam savoliga javobdan (kontakt yoki «Keyinroq»)
+  // boshqa har qanday xabar yoki tugma uni unutadi — keyin menyudan raqam ulashsa, odatdagidek. Faqat xotirada:
+  // bot qayta ishga tushsa, unutiladi (raqam odatda bir necha soniyada ulashiladi).
+  const GROUP_INTENT_MS = 30 * 60_000;
+  const groupIntents = new Map(); // chatId → { username: "Yuk_Guruh" | null, at }
+  privateChat.use((ctx, next) => {
+    if (!ctx.message?.contact && ctx.message?.text !== PHONE.later) groupIntents.delete(ctx.chat.id);
+    return next();
+  });
+  // Bir marta olinadi (olingach o'chadi); eskirgani — yo'q hisob
+  function takeGroupIntent(chatId) {
+    const intent = groupIntents.get(chatId);
+    groupIntents.delete(chatId);
+    return intent && Date.now() - intent.at < GROUP_INTENT_MS ? intent : null;
+  }
+
+  // /start (kanaldagi "🤖 Menga mos yuklar" havolasi ham shu yerga keladi: /start kanal).
+  // «✅ A'zo bo'ldim» tasdiqlansa ham shu ekran chiqadi. Rol tanlanmagan odam nima bossa yoki yozsa ham shu ekran:
+  // salom + bot haqida (pastki menyu olib tashlanadi — menu()), ostida «Iltimos, rolingizni tanlang» va ikki tugma
+  async function showStart(ctx) {
     const driver = rememberUser(ctx);
     const role = roleOf(driver);
+    const hello = `${GREETING}\n\n${helpText(driver)}`; // salomdan keyin bo'sh qator (Azimjon, 2026-11-10)
     if (!role) {
-      await ctx.reply(helpText(driver), html(driver));
+      await ctx.reply(hello, html(driver));
       await askRole(ctx);
       return;
     }
     if (driver.profile) {
-      await ctx.reply(`${helpText(driver)}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describeProfile(driver.profile, scope, role))}`, html(driver));
+      await ctx.reply(`${hello}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describeProfile(driver.profile, scope, role))}`, html(driver));
       // Raqam so'rash paydo bo'lishidan oldin ro'yxatdan o'tganlar — bir marta shu yerda so'raladi
       if (shouldAskPhone(driver)) await askPhone(ctx, driver);
       return;
     }
     if (appUrl()) {
-      await ctx.reply(`${helpText(driver)}\n\n👇 Boshlash uchun «${settingsLabel(driver)}» tugmasini bosing — 1 daqiqalik forma.`, html(driver));
+      // «pastdagi» dan keyin yangi qator: tor ekranda «…pastdagi «🚚» bo'lib tugma nomi bo'linib qolardi (Azimjon, 2026-11-10)
+      await ctx.reply(`${hello}\n\n👇 Boshlash uchun pastdagi\n«${settingsLabel(driver)}» tugmasini bosing — 1 daqiqalik forma.`, html(driver));
       return;
     }
-    await ctx.reply(helpText(driver), html(driver));
+    await ctx.reply(hello, html(driver));
     await startWizard(ctx, null, role);
-  });
+  }
+  privateChat.command("start", showStart);
+
+  // /rol va «🔄 Rolni almashtirish»: rol bor — hozirgisi va ikki tugma; rol yo'q — /start ekrani
+  const switchRolePrompt = (ctx) => {
+    const driver = rememberUser(ctx);
+    return roleOf(driver) ? askRole(ctx, driver) : showStart(ctx);
+  };
 
   privateChat.command("sozlamalar", openSettings);
-  privateChat.command("rol", (ctx) => askRole(ctx, rememberUser(ctx)));
+  privateChat.command("rol", switchRolePrompt);
   privateChat.command("pauza", (ctx) => setActive(ctx, false));
   privateChat.command("davom", (ctx) => setActive(ctx, true));
   const showHelp = (ctx) => {
     const driver = rememberUser(ctx);
+    if (!roleOf(driver)) return showStart(ctx);
     return ctx.reply(helpText(driver), html(driver));
   };
   privateChat.command("yordam", showHelp);
@@ -451,7 +731,8 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     const driver = rememberUser(ctx);
     const { contact } = ctx.message;
     if (!isOwnContact(contact, ctx.from.id)) {
-      await ctx.reply(`⚠️ Bu boshqa odamning kontakti — uni saqlamaymiz. O'z raqamingiz uchun pastdagi «${PHONE.share}» tugmasini bosing.`, {
+      const button = driver.phone ? PHONE.change : PHONE.share;
+      await ctx.reply(`⚠️ Bu boshqa odamning kontakti — uni saqlamaymiz. O'z raqamingiz uchun pastdagi «${button}» tugmasini bosing.`, {
         reply_markup: phoneKeyboard(Boolean(driver.phone)),
       });
       return;
@@ -462,14 +743,29 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
       return;
     }
     const updated = store.saveDriver(ctx.chat.id, { phone, phoneAskedAt: driver.phoneAskedAt ?? Date.now() });
-    await ctx.reply(`✅ Raqamingiz saqlandi: ${formatContactPhone(phone)}\nU hech kimga ko'rsatilmaydi. O'chirish — /ochirish`, menu(updated));
+    // Raqam «➕ Guruh qo'shish» uchun ulashildi — yo'nalish savoli o'rniga guruh qo'shishga qaytamiz
+    const intent = takeGroupIntent(ctx.chat.id);
+    if (intent && roleOf(updated)) return groupAfterPhone(ctx, updated, intent);
+    // Faqat shu (Azimjon, 2026-11-10). Raqamning o'zi — /raqam da, o'chirish — /ochirish (buyruqlar ro'yxatida)
+    await afterPhone(ctx, updated, "Raqamingiz saqlandi! ✅", { hint: false });
   });
 
   // «⏭ Keyinroq» / «↩️ O'zgartirmaslik» — asosiy menyu qaytadi, bot boshqa so'ramaydi
   privateChat.hears([PHONE.later, PHONE.keep], async (ctx) => {
     const driver = rememberUser(ctx);
-    const text = driver.phone ? "Raqamingiz o'zgarmadi." : "Mayli. Xohlasangiz, keyin /raqam buyrug'i bilan ulashasiz.";
-    await ctx.reply(text, menu(driver));
+    const text = driver.phone ? "Raqamingiz o'zgarmadi." : `Mayli. Xohlasangiz, keyin pastdagi «${MENU.phone}» tugmasi bilan ulashasiz.`;
+    // Guruh qo'shish uchun so'ralgan edi — faqat menyu (yo'nalish savolisiz)
+    if (takeGroupIntent(ctx.chat.id)) return ctx.reply(text, menu(driver));
+    await afterPhone(ctx, driver, text);
+  });
+
+  // /raqam → «🗑 Raqamni o'chirish» (Azimjon, 2026-11-10). /ochirish dagi «Faqat raqamni o'chirish» bilan bir xil:
+  // phoneAskedAt qoladi — bot o'zi qayta so'ramaydi; menyuda «➕ Guruh qo'shish» o'rnida yana «📱 Raqam ulashish»
+  privateChat.hears(PHONE.remove, async (ctx) => {
+    const driver = rememberUser(ctx);
+    if (!driver.phone) return ctx.reply("Sizda saqlangan raqam yo'q.", menu(driver));
+    const updated = store.saveDriver(ctx.chat.id, { phone: null });
+    await ctx.reply(`✅ Raqamingiz o'chirildi.\nXohlasangiz, keyin yana ulashasiz — pastdagi «${MENU.phone}» yoki /raqam.`, menu(updated));
   });
 
   // /ochirish — nimani saqlashimizni ko'rsatadi va o'chirishni taklif qiladi
@@ -496,6 +792,43 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     );
   });
 
+  // --- «➕ Guruh qo'shish» (userSources.js; Azimjon, 2026-11-10) ---
+  // Faqat raqamini ulashganlar: menyuda tugma ham faqat ularda. Raqamsiz odam havola yuborsa — avval raqam.
+  // Havola (t.me/…, @nomi) chatga qachon yozilsa ham shu yerga keladi (tugmani bosish shart emas)
+  const sourceIntake = createSourceIntake({ api: bot.api, store, log, ours: [config.channel, ...(config.requiredChats ?? [])] });
+  // Raqam so'raladi va niyat eslab qolinadi (yuqorida groupIntents): username — havola yuborgan bo'lsa, o'sha guruh
+  function needPhone(ctx, username = null) {
+    groupIntents.set(ctx.chat.id, { username, at: Date.now() });
+    return ctx.reply(INTAKE.needPhone(Boolean(username)), { reply_markup: phoneKeyboard(false) });
+  }
+  // Raqam guruh uchun ulashilgach: havolasi bor edi — o'sha darhol tekshiriladi, yo'q edi — «havolani yuboring» xabari
+  async function groupAfterPhone(ctx, driver, { username }) {
+    const text = username ? await sourceIntake.submit(ctx.chat.id, username) : sourceIntake.intro(ctx.chat.id);
+    await ctx.reply(`Raqamingiz saqlandi! ✅\n\n${text}`, html(driver));
+  }
+  async function showAddGroup(ctx) {
+    const driver = rememberUser(ctx);
+    if (!roleOf(driver)) return showStart(ctx);
+    if (!driver.phone) return needPhone(ctx);
+    await ctx.reply(sourceIntake.intro(ctx.chat.id), html(driver));
+  }
+  privateChat.hears(MENU.addGroup, showAddGroup);
+  privateChat.command("guruh_qoshish", showAddGroup); // «Menu» ro'yxatida ham (commands.js)
+  privateChat.hears(LINK_RE, async (ctx) => {
+    const driver = rememberUser(ctx);
+    if (!roleOf(driver)) return showStart(ctx);
+    const link = parseSourceLink(ctx.message.text);
+    if (!driver.phone) return needPhone(ctx, link.username ?? null);
+    const text = link.error ? INTAKE[link.error] : await sourceIntake.submit(ctx.chat.id, link.username);
+    await ctx.reply(text, html(driver));
+  });
+  // Natijani (sinovga olindi / rad etildi / doimiy qo'shildi / o'chirildi) qo'shgan odamga yozadi — pastki menyu bilan
+  const sources = createSourceWatcher({
+    store,
+    log,
+    send: (chatId, text) => bot.api.sendMessage(chatId, text, html(store.getDriver(chatId))),
+  });
+
   // Pastki menyu tugmalari (savol-javob o'rtasida bosilsa ham ishlaydi, qoralama saqlanib qoladi)
   privateChat.hears([MENU.loads, MENU.trucks], showMatches);
   privateChat.hears([MENU.settings, MENU.register], openSettings);
@@ -503,7 +836,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
   privateChat.hears(MENU.resume, (ctx) => setActive(ctx, true));
   privateChat.hears(MENU.apps, showApps); // eski menyudagi tugma (endi menyuda raqam tugmasi)
   privateChat.command("ilovalar", showApps);
-  privateChat.hears(MENU.role, (ctx) => askRole(ctx, rememberUser(ctx)));
+  privateChat.hears(MENU.role, switchRolePrompt);
   privateChat.hears(MENU.help, showHelp);
 
   // Mini App formasi "Saqlash" bosilganda: { type: "profile", role?, profile }. Ma'lumotga ishonmaymiz — tekshiramiz.
@@ -525,13 +858,49 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     await saved(ctx, profile, role);
   });
 
-  // "Siz kimsiz?" tugmalari
+  // «Iltimos, rolingizni tanlang» tugmalari
   bot.callbackQuery(/^r:(\w+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const role = validRole(ctx.match[1]);
     if (!role || ctx.chat?.type !== "private") return;
-    await ctx.editMessageText(`✅ ${ROLES[role].choice}`).catch(() => {});
+    // «Iltimos, rolingizni tanlang» o'rnida — tanlangani, belgi oxirida (Azimjon, 2026-11-10)
+    await ctx.editMessageText(`${ROLES[role].choice} ✅`).catch(() => {});
     await chooseRole(ctx, role);
+  });
+
+  // «✅ A'zo bo'ldim»: qayta tekshiramiz. Hali a'zo emas — ogohlantirish (oyna) va ro'yxat yangilanadi
+  // (bittasiga a'zo bo'lgan bo'lsa, u ✅ bo'ladi); a'zo — «Rahmat» va /start ekrani
+  bot.callbackQuery(SUB_CHECK, async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    if (!members) {
+      await ctx.answerCallbackQuery();
+      return showStart(ctx);
+    }
+    rememberUser(ctx);
+    const result = await members.check(ctx.from.id, { fresh: true });
+    if (!result.ok) {
+      const names = result.missing.map((c) => c.title).join(" va ");
+      await ctx.answerCallbackQuery({ text: `Hali a'zo emassiz: ${names}. A'zo bo'lib, qayta bosing.`, show_alert: true });
+      await sendJoinPrompt(ctx, result.missing, { edit: true });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: "✅ Rahmat!" });
+    await ctx.editMessageText("✅ Rahmat! Kanal va guruhimizga a'zosiz.").catch(() => {});
+    await showStart(ctx);
+  });
+
+  // Kanal yoki guruhga kimdir qo'shildi / chiqdi (bot u yerda admin, main.js allowed_updates: chat_member).
+  // Eslab qolingan natija o'chiriladi. Bot foydalanuvchisi chiqib ketsa va yuk olib turgan bo'lsa — darrov eslatma
+  bot.on("chat_member", async (ctx) => {
+    if (!members?.watches(ctx.chat)) return;
+    const { old_chat_member: before, new_chat_member: after } = ctx.chatMember;
+    members.forget(after.user.id);
+    const driver = store.getDriver(after.user.id);
+    if (!driver) return; // botdan foydalanmagan odam — bazaga yozilmaydi
+    const result = await members.check(after.user.id);
+    if (isMember(before) && !isMember(after) && !result.ok && driver.profile && driver.active) {
+      await remindJoin(after.user.id, result.missing, "left");
+    }
   });
 
   // /ochirish tugmalari
@@ -586,15 +955,17 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     }
     if (from != null) {
       if (!validArea(driver.profile, scope, from)) return askRoute(ctx, driver, { edit: true });
-      const rows = store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind: "yuk" });
-      const { text, keyboard } = toStep({ profile: driver.profile, scope, rows, from });
-      return render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, true);
+      // «🗺 Xaritadan tanlash» bu qadamda «Qayerdan» bilan ochiladi (xaritada faqat «Qayerga?» qoladi; "*" — eski tugma)
+      const { text, keyboard } = toStep({ profile: driver.profile, scope, from, mapUrl: routeMapUrl(from === ANY ? null : from) });
+      return rememberRouteMessage(ctx.chat.id, await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, true));
     }
     if (!validArea(driver.profile, scope, routeFrom) || !validArea(driver.profile, scope, routeTo)) return askRoute(ctx, driver, { edit: true });
     const updated = store.saveDriver(ctx.chat.id, { profile: applyRoute(driver.profile, routeFrom, routeTo) });
+    rememberRouteMessage(ctx.chat.id, null);
     await ctx.editMessageText(chosenText(updated.profile), { parse_mode: "HTML" }).catch(() => {});
     await listMatches(ctx, updated);
-    // Birinchi marta sozlagach — raqamni bir marta so'raymiz (ixtiyoriy)
+    // Odatda raqam formadan keyin so'ralgan bo'ladi (saved). Bu — forma botga kelmagan hollar uchun (masalan, web saytda
+    // to'ldirgan yoki 2026-11-10 dan oldin yo'nalishsiz qolgan): raqam baribir bir marta so'raladi
     if (shouldAskPhone(updated)) await askPhone(ctx, updated);
   });
 
@@ -604,7 +975,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     const driver = store.getDriver(ctx.chat.id);
     await ctx.answerCallbackQuery();
     const role = roleOf(driver);
-    if (!role) return askRole(ctx);
+    if (!role) return showStart(ctx);
     if (!driver.draft) return startWizard(ctx, driver.profile, role);
     const { draft, saved: done } = applyAction(driver.draft, step, value);
     if (done) {
@@ -618,6 +989,7 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
 
   privateChat.on("message:text", async (ctx) => {
     const driver = rememberUser(ctx);
+    if (!roleOf(driver)) return showStart(ctx); // menyu yo'q — avval rol
     if (!driver.draft) {
       await ctx.reply("Pastdagi menyudan tanlang 👇", menu(driver));
       return;
@@ -669,19 +1041,35 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     }
   }
 
-  // kind — "yuk" (haydovchiga) yoki "mashina" (yuk beruvchiga)
-  // Har bir yuk xabari pastki menyu bilan boradi (Azimjon, 2026-11-07: «bot ochilganida menyu ochiq bo'lsin»). Menyu
-  // yig'iladigan (menu.js), Telegram esa yopilgan menyuni yangi menyuli xabar kelguncha yopiq saqlaydi — bot chat
-  // ochilganini bilmaydi, shuning uchun yangi yuk kelganda menyu yana ochiq turadi. Manzil va token ham doim yangi.
+  // Pipeline har yukdan oldin so'raydi: kanal va guruhga a'zomi? A'zo emas — yuk yuborilmaydi, o'rniga eslatma
+  // (kuniga bir marta). Adminlar va REQUIRED_CHATS bo'lmasa — hammaga. Natija 10 daqiqa eslab qolinadi.
+  async function canReceive(user) {
+    if (!members || isAdmin(user, config.admins ?? [])) return true;
+    const result = await members.check(user.chatId);
+    if (result.ok) return true;
+    await remindJoin(user.chatId, result.missing, "load");
+    return false;
+  }
+
+  // kind — "yuk" (haydovchiga) yoki "mashina" (yuk beruvchiga); loadId — loads jadvalidagi id («📞 Telefon qilish» uchun)
+  // Xabar ostida «📄 Asl e'lon» va «📞 Telefon qilish» tugmalari (loadButtons). Bitta xabarda yo inline tugmalar, yo pastki
+  // menyu bo'ladi — ikkalasi emas. Shuning uchun pastki menyu (Mini App manzili va tokeni bilan) faqat tugmasiz yuk xabarida
+  // keladi, qolgan payt — botning har javobida (/start, menyu tugmalari). 2026-11-07 dan 11-09 gacha har yuk menyu bilan borardi.
   // → { ok: true } yoki { ok: false, error } — pipeline buni deliveries ga yozadi (boshqaruv markazi «Olgan yuklari»)
-  async function deliver(chatId, load, post, kind = "yuk") {
+  async function deliver(chatId, load, post, kind = "yuk", loadId = null) {
     const driver = store.getDriver(chatId);
+    const buttons = loadButtons(load, post, callUrl(chatId, loadId));
+    const send = (markup) =>
+      bot.api.sendMessage(chatId, directText(load, post, kind), { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup });
     try {
-      await bot.api.sendMessage(chatId, directText(load, post, kind), {
-        parse_mode: "HTML",
-        link_preview_options: { is_disabled: true },
-        ...(driver ? menu(driver) : {}),
-      });
+      try {
+        await send(buttons ? { reply_markup: buttons } : driver ? menu(driver) : {});
+      } catch (error) {
+        // Telegram tugmani qabul qilmasa (400, masalan manzil yaroqsiz) — yuk baribir yetib borsin: tugmalarsiz
+        if (!buttons || !(error instanceof GrammyError) || error.error_code !== 400) throw error;
+        log(`Yuk tugmalari qabul qilinmadi (${error.description}) — tugmalarsiz yuborildi`);
+        await send(driver ? menu(driver) : {});
+      }
       return { ok: true };
     } catch (error) {
       const reason = error.description ?? error.message;
@@ -704,11 +1092,15 @@ export function createBot({ token, store, config, log = console.log, botInfo, ap
     await bot.init();
     // Haydovchilar web'idagi «Telegram bilan kirish» tugmasi bot username'ini shu yerdan oladi (apps/api public.js)
     store.setSetting?.("bot_username", bot.botInfo.username);
-    await bot.api.setMyCommands(COMMANDS);
+    // Buyruqlar ro'yxati endi hamma uchun emas — har chatga alohida (commands.js; main.js commands.start)
     await syncProfileTexts().catch((error) => log(`Bot tavsifi yangilanmadi: ${error.description ?? error.message}`));
     if (config.channel?.startsWith("-100")) config.channelId = Number(config.channel);
     else if (config.channel) config.channelId = (await bot.api.getChat(config.channel).catch(() => null))?.id ?? null;
+    // A'zolik: kanal/guruh nomlari va havolalari, bot u yerda adminmi
+    if (members) await members.init(bot.botInfo.id);
   }
 
-  return { bot, init, publish, deliver };
+  // notices — server (apps/api) qo'ygan topshiriqlar (xaritada yo'nalish tanlandi): main.js notices.start()
+  // sources — foydalanuvchi qo'shgan guruhlar kuzatuvchisi: main.js sources.start()
+  return { bot, init, publish, deliver, canReceive, members, commands, notices, sources };
 }

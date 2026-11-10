@@ -161,8 +161,10 @@ test("haqiqiy yordamchilar: matn modellari saralanadi, sinov e'loni bitta so'rov
   ]);
   // Haqiqiy ro'yxat: Gemini bepul, 1pro kunlik limitli, Claude pullik
   const real = Object.fromEntries(createAiTools().providers.map((p) => [p.id, p]));
-  assert.deepEqual(Object.keys(real), ["gemini", "onepro", "claude"]);
-  assert.deepEqual([real.gemini.free, real.onepro.free, real.claude.free], [true, null, false]);
+  assert.deepEqual(Object.keys(real), ["gemini", "onepro", "groq", "openrouter", "claude"]);
+  assert.deepEqual([real.gemini.free, real.onepro.free, real.groq.free, real.openrouter.free, real.claude.free], [true, null, true, true, false]);
+  assert.equal(real.groq.keyPlaceholder, "gsk_…");
+  assert.match(real.openrouter.keyHelp, /:free/);
   assert.equal(real.onepro.limitNote, "kuniga 1 mln token");
   assert.equal(real.onepro.defaultModel, "qwen3.8-flash");
 });

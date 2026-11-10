@@ -4,7 +4,7 @@
 // Bir nechta AI ulanishi (kalit + model) bo'lsa, guruhlar parallel tahlil qilinadi.
 // Telegram va AI tashqaridan beriladi (deps), shuning uchun testda soxtasi qo'yiladi.
 import { setTimeout as wait } from "node:timers/promises";
-import { parseByRules, poolFromParser } from "@yuk/parser";
+import { hasContact, parseByRules, poolFromParser } from "@yuk/parser";
 import {
   DEFAULT_DEDUPE_WINDOW_MS,
   DEFAULT_ROUTE_SCOPE,
@@ -22,10 +22,20 @@ import {
 //   mashina_bor → kind "mashina" → yuk beruvchilarga (matchTruck: yo'nalishi, kerakli mashina turi)
 const POST_KIND = { yuk_bor: "yuk", mashina_bor: "mashina" };
 
+// Aloqasiz e'lon (@yuk/parser hasContact): matnda telefon raqami ham, yozgan odamning username'i («💬 Lichkasi») ham yo'q.
+// Haydovchi bunday yuk bilan bog'lana olmaydi (Azimjon, 2026-11-10: «Aloqasiz yuklarni to'xtat»). 2026-11-10 o'lchovi
+// (24 soat): AI'ga borgan 11 423 ta e'lonning 5 833 tasi (51%) aloqasiz edi — asosan @XALQARO_YUKLARI va
+// @VODIY_BOYLAB_YUKLAR dagi GLogistics / Targo.uz e'lonlari (aloqa — ularning sayti yoki boti orqali).
+// Boshqaruv markazi izohni «Aloqasiz» deb taniydi (posts.error shu so'z bilan boshlanadi)
+export const NO_CONTACT = "Aloqasiz: telefon raqami ham, lichkasi ham yo'q";
+const NO_CONTACT_SKIPPED = `${NO_CONTACT} — AI'ga yuborilmadi`;
+
 // Tahlil natijasi tayyor bo'lgan bitta e'lon: yo'nalish doirasi → takrorni tashlash → bazaga yozish → kanal → foydalanuvchilar.
 // result — AI natijasi yoki qoidaviy parserniki (result.by === "rules"); bazaga kim tushungani yoziladi (posts.parsed_by).
-// deps: { store, publish?(load, post) → kanal xabar id | null, deliver(chatId, load, post, kind) → { ok, error? } | true/false, windowMs,
-//         routeScope — @yuk/shared ROUTE_SCOPES kodi (.env dagi ROUTE_SCOPE; standart "qoshni") }
+// deps: { store, publish?(load, post) → kanal xabar id | null, deliver(chatId, load, post, kind, loadId) → { ok, error? } | true/false, windowMs,
+//         routeScope — @yuk/shared ROUTE_SCOPES kodi (.env dagi ROUTE_SCOPE; standart "qoshni"),
+//         canReceive?(user) → Promise<boolean> — kanal va guruhga a'zomi (bot.js; yo'q bo'lsa — hammaga),
+//         requireContact — aloqasiz e'lonning yuklari saqlanmaydi va yuborilmaydi (.env REQUIRE_CONTACT, standart yoqiq) }
 export async function handleParsed(post, result, deps) {
   const { store, windowMs = DEFAULT_DEDUPE_WINDOW_MS, routeScope = DEFAULT_ROUTE_SCOPE } = deps;
   if (!result.ok) {
@@ -38,6 +48,13 @@ export async function handleParsed(post, result, deps) {
   if (!kind || result.loads.length === 0) {
     store.finishPost(post.id, "done", result.postType, by);
     return { status: "skipped", postType: result.postType };
+  }
+
+  // Telefon ham, lichka ham yo'q — bog'lanib bo'lmaydi: yuk saqlanmaydi va hech kimga yuborilmaydi.
+  // Odatda bunday e'lon AI'gacha yopiladi (createWorker), bu — oxirgi to'siq (masalan, processPost yo'li)
+  if (deps.requireContact && !post.sender && result.loads.every((load) => !load.phones?.length)) {
+    store.finishPost(post.id, "done", NO_CONTACT, by);
+    return { status: "skipped", reason: "contact", kind };
   }
 
   // Faqat doiradagi yo'nalishlar (boshlanishiga: O'zbekiston ichi va chegaradosh davlatlar bilan).
@@ -71,8 +88,10 @@ export async function handleParsed(post, result, deps) {
       if (!matches(load, user.profile).ok) continue;
       // Obuna (hozircha hamma bepul va hammaga yuboriladi — roles.js planAllows)
       if (!planAllows(user, { kind })) continue;
+      // Kanal va guruhimizga a'zo emas — yuborilmaydi (bot.js canReceive o'zi kuniga bir marta «a'zo bo'ling» deb eslatadi)
+      if (deps.canReceive && !(await deps.canReceive(user))) continue;
       // deliver → { ok, error } (bot.js) yoki true/false. Har biri yoziladi: boshqaruv markazida kim qancha yuk olgani ko'rinadi
-      const outcome = await deps.deliver(user.chatId, load, post, kind);
+      const outcome = await deps.deliver(user.chatId, load, post, kind, id); // id — «📞 Telefon qilish» tugmasi uchun
       const ok = outcome === true || outcome?.ok === true;
       store.addDelivery?.({ loadId: id, chatId: user.chatId, ok, error: ok ? null : (outcome?.error ?? null) });
       if (ok) count++;
@@ -132,6 +151,8 @@ function formatHours(ms) {
 // deps.rules(text) → natija | null — AI'siz qoidaviy parser (main.js: @yuk/parser parseByRules). Har yangi e'lon avval
 // shundan o'tadi: ishonchli bo'lsa — AI'ni kutmasdan darhol yuborishga ketadi (AI limiti ham tejaladi), null bo'lsa —
 // e'lon navbatda qoladi va AI oladi. deps.rules yo'q bo'lsa (RULE_PARSER=0, testlar) — hammasi AI'da, avvalgidek.
+// deps.requireContact — aloqasiz e'lon (telefon ham, lichka ham yo'q) qoidaviy parserga ham, AI'ga ham bormaydi:
+// navbatga tushishi bilan «Aloqasiz» deb yopiladi (yuqorida NO_CONTACT). Yo'q bo'lsa (REQUIRE_CONTACT=0, testlar) — avvalgidek.
 // maxAgeMs — joylanganiga shundan ko'p vaqt o'tgan e'lon AI'ga bormaydi, "Eskirgan" deb yopiladi (0 — cheklovsiz;
 // bot .env dagi POST_MAX_AGE_HOURS ni beradi, standart 3 soat). Yukni odatda bir soat ichida olib bo'lishadi:
 // kechagi e'lonni "yangi yuk" deb kanalga chiqarish haydovchini chalg'itadi va bepul AI limitini behuda yeydi.
@@ -180,13 +201,23 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
     if (count) log(`${count} ta e'lon eskirgan (joylanganiga ${ageText}) — AI'ga yuborilmadi`);
   }
 
+  // Aloqasiz e'lon — darhol yopiladi (AI so'rovi ham, qoidaviy parser ham kerak emas). true — yopildi
+  let noContactCount = 0;
+  function contactless(post) {
+    if (!deps.requireContact || hasContact(post)) return false;
+    store.finishPost(post.id, "done", NO_CONTACT_SKIPPED);
+    noContactCount++;
+    return true;
+  }
+
   // Tez yo'l: navbatga yangi tushgan e'lonlar qoidaviy parserdan o'tadi (~2 ms). Ishonchlisi — darhol yuborishga,
   // qolgani navbatda AI'ni kutadi. ruleCursor — qaysi e'longacha ko'rib bo'lindi (har e'lon bir marta tekshiriladi).
   // AI hammasi dam olayotganda ham ishlaydi: kunlik limit tugasa ham oddiy yuklar haydovchilarga ketaveradi.
   let ruleCursor = 0;
   let ruleCount = 0;
+  // Aloqasiz e'lonlar ham shu yerda (qoidaviy parserdan oldin) yopiladi.
   function quick() {
-    if (!deps.rules) return 0;
+    if (!deps.rules && !deps.requireContact) return 0;
     let handled = 0;
     for (;;) {
       const posts = store.takeNewPostsAfter(ruleCursor, 50);
@@ -196,6 +227,8 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
         ruleCursor = Math.max(ruleCursor, post.id);
         if (claimed.has(post.id)) continue; // AI allaqachon olgan
         if (maxAgeMs > 0 && post.postedAt < now() - maxAgeMs) continue; // eskirgan — expire() yopadi
+        if (contactless(post)) continue;
+        if (!deps.rules) continue; // aloqasi bor — AI kutadi
         let result = null;
         try {
           result = deps.rules(post.text);
@@ -219,7 +252,8 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
   // lease.batchSize — ulanishning o'z chegarasi (1pro: 6 ta), umumiy o'lchamdan katta bo'lmaydi
   function take(fill, lease, live = Math.min(liveWait, fill)) {
     const n = Math.min(size, lease?.batchSize || size);
-    const posts = store.takeNewPosts(n, { newest: true, exclude: [...claimed] });
+    // quick() aloqasizlarni odatda oldinroq yopadi; bu — o'rtada kelib qolgani uchun (collector boshqa jarayon)
+    const posts = store.takeNewPosts(n, { newest: true, exclude: [...claimed] }).filter((post) => !contactless(post));
     if (posts.length === 0) return [];
     if (posts.length < n && fill > 0) {
       // Eng erta tugaydigan muddat: jonli e'lon — navbatga tushganidan live ms, qolganlari — fill ms
@@ -368,16 +402,22 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
       const count = pool.size();
       log(count ? `AI: ${count} ta ulanish, bir vaqtda ${Math.min(count, parallel)} tagacha so'rov` : "AI: ulanish yo'q");
       if (deps.rules) log("Qoidaviy parser yoqiq: oddiy e'lonlar AI'siz, darhol yuboriladi (.env: RULE_PARSER=0 — o'chirish)");
-      // Har 10 daqiqada: nechta e'lon AI'siz tushunildi
+      if (deps.requireContact) log("Aloqasiz e'lonlar (telefon ham, lichka ham yo'q) AI'ga ham, foydalanuvchilarga ham yuborilmaydi (.env: REQUIRE_CONTACT=0 — o'chirish)");
+      // Har 10 daqiqada: nechta e'lon AI'siz tushunildi, nechtasi aloqasiz deb tashlandi
       let reportedAt = now();
       let reported = 0;
+      let reportedNoContact = 0;
       while (!controller.signal.aborted) {
         // Hamma AI dam olayotgan bo'lsa ham: kechasi to'plangan e'lonlar navbatda "kutib" turmasin
         expire();
         quick();
-        if (deps.rules && now() - reportedAt >= 10 * 60_000) {
+        if ((deps.rules || deps.requireContact) && now() - reportedAt >= 10 * 60_000) {
           if (ruleCount > reported) log(`Qoidaviy parser: oxirgi 10 daqiqada ${ruleCount - reported} ta e'lon AI'siz tushunildi`);
+          if (noContactCount > reportedNoContact) {
+            log(`Aloqasiz: oxirgi 10 daqiqada ${noContactCount - reportedNoContact} ta e'lon (telefon ham, lichka ham yo'q) AI'ga yuborilmadi`);
+          }
           reported = ruleCount;
+          reportedNoContact = noContactCount;
           reportedAt = now();
         }
         // Yuborish ortda qolsa yoki hamma yo'lak band — kutamiz (Telegram'dan tezroq tahlil qilishning foydasi yo'q)

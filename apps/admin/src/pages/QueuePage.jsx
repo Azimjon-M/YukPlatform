@@ -52,6 +52,12 @@ function PostCard({ item, now, onChanged }) {
             AI'siz
           </Badge>
         )}
+        {/* Telefon ham, lichka ham yo'q — bot yopdi, hech kimga yubormadi (apps/bot pipeline.js NO_CONTACT) */}
+        {item.error?.startsWith("Aloqasiz") && (
+          <Badge tone="neutral" icon="📵" title={item.error}>
+            Aloqasiz
+          </Badge>
+        )}
         <span className="muted small">#{item.id}</span>
         <span className="muted small post-time">
           <TimeAgo ts={item.postedAt} now={now} />

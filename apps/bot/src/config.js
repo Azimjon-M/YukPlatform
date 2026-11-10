@@ -2,6 +2,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { routeScopeFrom } from "@yuk/shared";
+import { readRequiredChats } from "./members.js";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -60,13 +61,25 @@ export function readConfig(env = process.env) {
 
   const ruleParser = ruleParserOn(env);
 
-  return { token, channel, channelLoads, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope, maxPostAgeMs, ruleParser };
+  // Aloqasiz e'lonlar (telefon ham, lichka ham yo'q) AI'ga ham, foydalanuvchilarga ham bormaydi (pipeline.js NO_CONTACT)
+  const requireContact = requireContactOn(env);
+
+  // Bot faqat shu kanal va guruh a'zolariga ishlaydi (members.js; Azimjon, 2026-11-09). Bo'sh — hammaga
+  const requiredChats = readRequiredChats(env.REQUIRED_CHATS);
+
+  return { token, channel, channelLoads, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope, maxPostAgeMs, ruleParser, requireContact, requiredChats };
 }
 
 // AI'siz qoidaviy parser (pipeline.js ruleParse). Standart — YOQIQ (Azimjon, 2026-11-09: «Ha, ulab qo'y»);
 // RULE_PARSER=0 (yoki yo'q / off / false) — hamma e'lon avvalgidek AI'ga
 export function ruleParserOn(env = process.env) {
   return !/^(0|yo'q|yoq|no|false|off)$/i.test(env.RULE_PARSER?.trim() ?? "");
+}
+
+// Aloqasiz yuklarni to'xtatish. Standart — YOQIQ (Azimjon, 2026-11-10: «Aloqasiz yuklarni to'xtat»);
+// REQUIRE_CONTACT=0 (yoki yo'q / off / false) — aloqasiz e'lonlar ham avvalgidek tahlil qilinib yuboriladi
+export function requireContactOn(env = process.env) {
+  return !/^(0|yo'q|yoq|no|false|off)$/i.test(env.REQUIRE_CONTACT?.trim() ?? "");
 }
 
 // "1", "ha", "true", "on" — yoqilgan; bo'sh va boshqa hamma narsa — o'chiq

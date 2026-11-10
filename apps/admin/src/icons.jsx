@@ -28,6 +28,7 @@ const paths = {
       <path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" />
     </>
   ),
+  errors: <path d="M12 3.5L21.5 20h-19zM12 10v4.5M12 17.2v.1" />,
   menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
 };

@@ -10,6 +10,7 @@ export const ROUTES = [
   { path: "/manbalar", id: "sources", title: "Manbalar" },
   { path: "/jarayonlar", id: "processes", title: "Jarayonlar" },
   { path: "/ai", id: "ai", title: "AI" },
+  { path: "/xatolar", id: "errors", title: "Xatolar" },
 ];
 
 // "/admin/yuklar/" → "/yuklar"; "/admin" → "/"; boshqa joy → null

@@ -93,6 +93,8 @@ export const TRUCK_FREE_WORDS = lexicon([
     "ishu gruz", "yuk izlayapman", "yuk izlaymiz",
     "olamz", "olmiz", "shafyor bor", "shofyor bor", "shopir bor", "haydovchi bor", "yuki borlar", "yuklari borlar", "yuk bosa",
     "pochta bosa", "opketamiz", "opketaman", "olib ketamiz", "olib ketaman", "qo'yib beraman", "qoyib beraman",
+    // Logistik.uz mashina shabloni: "🔥 DIQQAT! 🇺🇿 MAHALLIY MASHINA", "⚖️ Yuk ko'tarishi: 22 t"
+    "mahalliy mashina", "xalqaro mashina", "yuk ko'tarishi", "yuk kotarishi",
   ]],
 ]);
 
@@ -145,6 +147,9 @@ const FILLER_LIST = [
   "glonas", "glonass", "глонасс", "trebovaniya", "trebovaniye", "bot", "bo'lishi", "bolishi", "libo", "либо", "ortish", "tushirish",
   "bir", "bu", "shu", "yengil", "tonna", "tonnaj", "tonaj", "avtomobil", "avtomobili", "avtomobiley", "transporta", "mash",
   "ves", "fut", "fud", "nalichnimi",
+  // avto-joylash shablonlari (GLogistics, Logistik.uz, 2026-11-09): "🔥 YANGI YUK E'LONI!", "🔥 DIQQAT! 🇺🇿 MAHALLIY YUK",
+  // "Transport turi:", "📏 Hajmi: —", "💰 Kelishilgan holda"
+  "yangi", "e'lon", "e'loni", "elon", "eloni", "diqqat", "mahalliy", "xalqaro", "turi", "hajmi", "hajm", "holda", "vazn",
   // bo'shliq bilan yozilgan so'z harflari ("Y U K B O R", "a k r a m"), "2026 g." — alohida harf ma'lumot emas
   "a", "b", "c", "d", "e", "f", "g", "h", "j", "k", "l", "n", "o", "p", "q", "r", "u", "w", "y", "z",
 ];
@@ -173,7 +178,9 @@ export const CARGO_AFTER = new Set(["gruz", "груз", "yuk", "юк", "tovar", 
 // Joyni aniqlovchi otlar: "Koson tumanidan", "Toshkent shahriga", "Qashqadaryo viloyatidan".
 // Ular joyning o'zi emas: yo'nalish qo'shimchasi ularning oxirida bo'ladi.
 export const PLACE_NOUNS = new Set(
-  ["shahar", "shahri", "shaxar", "shaxri", "sh", "viloyat", "viloyati", "vil", "obl", "oblast", "oblasti", "tuman", "tumani", "rayon", "rayoni", "gorod", "qishloq", "qishlog'i"].map(wordKey),
+  ["shahar", "shahri", "shaxar", "shaxri", "sh", "viloyat", "viloyati", "vil", "obl", "oblast", "oblasti", "tuman", "tumani", "rayon", "rayoni", "gorod", "qishloq", "qishlog'i",
+    // Rossiya hududlari (Logistik.uz shabloni): "Krasnoyarsk o'lkasi", "Oltoy respublikasi"
+    "o'lka", "o'lkasi", "respublika", "respublikasi", "kray", "kraya"].map(wordKey),
 );
 
 // Joy ichidagi aniq nuqta: "Mirobod bozoridan", "sement zavodidan", "Qarshi krugdan" — viloyat/shahar o'zgarmaydi,
@@ -202,4 +209,6 @@ export const SERVICE_PATTERNS = [
   /reklama tarqatmang/,
   /@tutgruzbot - bot po poisku gruzov/,
   /#pravila/,
+  // Targo.uz boti: "<ism>, кечирасиз, бу гуруҳда ёзиш учун Targo.uz канали ва гуруҳига обуна бўлинг" (2026-11-09: 6 soatda 260+)
+  /bu guruhda yozish uchun .{0,60}obuna bo'ling/s,
 ];

@@ -143,6 +143,7 @@ function Feeds({ data, driver }) {
                 <span>
                   {d.load ? `${placeText(d.load, "from")} → ${placeText(d.load, "to")}` : "yuk o'chirilgan"}
                   {d.kind === "mashina" && <span className="muted small"> · bo'sh mashina</span>}
+                  {d.calledAt != null && <div className="small">📞 raqamni ochgan · {formatDateTime(d.calledAt)}</div>}
                   {!d.ok && <div className="text-critical small">⚠ yetmadi{d.error ? `: ${d.error}` : ""}</div>}
                 </span>
                 {d.link && <ExternalLink href={d.link}>E'lon</ExternalLink>}

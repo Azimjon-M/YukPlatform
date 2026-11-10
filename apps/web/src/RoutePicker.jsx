@@ -10,8 +10,11 @@ import { Chips, Notice, Spinner } from "./ui.jsx";
 export const hoursText = (hours) => (hours === 72 ? "3 kun" : `${hours} soat`);
 const countText = (n) => (n ? `${n} ta` : null);
 
-// profile — hozirgi (tanlangan joy belgilanadi); onSaved(me) — saqlangach; onCancel — yo'nalish bor bo'lsa «Bekor qilish»
-export function RoutePicker({ profile, hours, onSaved, onCancel, onAuthLost }) {
+// «Qayerdan?» da «🌐 Hamma joydan» yo'q (Azimjon, 2026-11-10: yuk bir vaqtda hamma joyda bo'lmaydi) — botdagidek;
+// «Qayerga?» da «🌐 Istalgan joyga» bor. Har ikki qadamda «🗺 Xaritadan tanlash» (RouteMapPage.jsx).
+// profile — hozirgi (tanlangan joy belgilanadi); onSaved(me) — saqlangach; onCancel — yo'nalish bor bo'lsa «Bekor qilish»;
+// onMap(from) — xaritani ochish («Qayerga?» qadamida — tanlangan «Qayerdan» bilan)
+export function RoutePicker({ profile, hours, onSaved, onCancel, onMap, onAuthLost }) {
   const [from, setFrom] = useState(null); // null — «Qayerdan?» qadami; { id, label } — «Qayerga?»
   const [state, setState] = useState({ data: null, error: null });
   const [attempt, setAttempt] = useState(0);
@@ -55,12 +58,10 @@ export function RoutePicker({ profile, hours, onSaved, onCancel, onAuthLost }) {
   const current = step === "from" ? routeSide(profile, "from") : routeSide(profile, "from") === fromId ? routeSide(profile, "to") : null;
   const ready = state.data && state.data.from === fromId; // eski qadamning sonlari ko'rinmasin
   const areas = ready ? state.data.areas.map((a) => ({ id: a.id, label: a.label, sub: countText(a.count) })) : [];
-  const anyOption = [
-    { id: ROUTE_ANY, label: step === "from" ? "🌐 Hamma joydan" : "🌐 Istalgan joyga", sub: ready ? countText(state.data.any) : null },
-  ];
+  const anyOption = step === "to" ? [{ id: ROUTE_ANY, label: "🌐 Istalgan joyga", sub: ready ? countText(state.data.any) : null }] : [];
   const pick = (id) => {
     if (step === "to") return pickTo(id);
-    setFrom({ id, label: id === ROUTE_ANY ? "hamma joy" : areas.find((a) => a.id === id)?.label ?? id });
+    setFrom({ id, label: areas.find((a) => a.id === id)?.label ?? id });
   };
 
   return (
@@ -101,9 +102,16 @@ export function RoutePicker({ profile, hours, onSaved, onCancel, onAuthLost }) {
       ) : (
         <fieldset className="plain" disabled={saving}>
           <Chips layout="grid" options={areas} selected={(id) => id === current} onPick={pick} />
-          <div className="route-any">
-            <Chips layout="list" options={anyOption} selected={(id) => id === current} onPick={pick} />
-          </div>
+          {anyOption.length > 0 && (
+            <div className="route-any">
+              <Chips layout="list" options={anyOption} selected={(id) => id === current} onPick={pick} />
+            </div>
+          )}
+          {onMap && (
+            <button type="button" className="more route-map-open" onClick={() => onMap(fromId)}>
+              🗺 Xaritadan tanlash
+            </button>
+          )}
         </fieldset>
       )}
 

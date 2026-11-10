@@ -58,3 +58,39 @@ export function createSessions(secret, { now = () => Date.now(), ttlS = SESSION_
     },
   };
 }
+
+// «📞 Telefon qilish» tugmasi uchun havola (2026-11-09). Telegram tugmasiga tel: qo'yib bo'lmaydi (faqat http(s):// va
+// tg://), shuning uchun tugma bizning sahifamizni ochadi (apps/api public.js: GET /pub/call?c=<token>), sahifa esa raqamni
+// telefonning qo'ng'iroq oynasiga uzatadi. Raqamning o'zi manzilda YO'Q: token = «qaysi yuk, nechanchi raqam, kimga
+// yuborilgan» + imzo. Imzosiz bo'lsa, birov yuk id'larini birma-bir terib, hamma raqamlarni yig'ib olardi.
+//
+//   "<yuk id>.<raqam tartibi>.<chat id>.<imzo>" — sonlar 36 lik sanoqda (qisqaroq), imzo 12 bayt (16 belgi)
+//
+// Muddati yo'q: haydovchi eski yukka ham bir necha kundan keyin qo'ng'iroq qilishi mumkin, raqam esa xabar matnida baribir bor.
+export function createCallLinks(secret) {
+  if (!secret) throw new Error("Qo'ng'iroq havolasi uchun data/secret.key kerak");
+  const key = hmac(secret, "yuk-call-link-v1"); // sessiya kalitidan boshqa: bir tokenni ikkinchisi o'rnida ishlatib bo'lmaydi
+  const sign = (body) => b64url(hmac(key, body).subarray(0, 12));
+  const whole = (n) => Number.isSafeInteger(n) && n >= 0;
+  return {
+    // → token; loadId — loads jadvalidagi id, phone — load.phones dagi tartib raqami (0 dan), chatId — kimga
+    make({ loadId, phone = 0, chatId }) {
+      if (!whole(loadId) || !whole(phone) || !Number.isSafeInteger(chatId)) throw new Error("createCallLinks: noto'g'ri son");
+      const body = [loadId, phone, chatId].map((n) => n.toString(36)).join(".");
+      return `${body}.${sign(body)}`;
+    },
+    // → { loadId, phone, chatId } yoki null (buzilgan yoki boshqa kalit bilan imzolangan)
+    read(token) {
+      if (typeof token !== "string" || token.length > 100) return null;
+      const parts = token.split(".");
+      if (parts.length !== 4) return null;
+      const body = parts.slice(0, 3).join(".");
+      const expected = Buffer.from(sign(body));
+      const given = Buffer.from(parts[3]);
+      if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+      const [loadId, phone, chatId] = parts.slice(0, 3).map((part) => (/^-?[0-9a-z]+$/.test(part) ? parseInt(part, 36) : NaN));
+      if (!whole(loadId) || !whole(phone) || !Number.isSafeInteger(chatId)) return null;
+      return { loadId, phone, chatId };
+    },
+  };
+}

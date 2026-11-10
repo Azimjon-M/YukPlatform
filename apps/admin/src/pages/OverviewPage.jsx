@@ -165,6 +165,12 @@ export function OverviewPage() {
                   {formatNumber(metrics.parsedBy.ai)} ta
                 </p>
               )}
+              {metrics.parsedBy?.noContact > 0 && (
+                <p className="muted small">
+                  📵 Oxirgi {metrics.hours} soatda {formatNumber(metrics.parsedBy.noContact)} ta e'lon aloqasiz (telefon raqami ham, lichkasi
+                  ham yo'q) — AI'ga ham, foydalanuvchilarga ham yuborilmadi
+                </p>
+              )}
               <Throughput metrics={metrics} />
             </Card>
 

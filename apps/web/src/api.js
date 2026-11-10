@@ -11,8 +11,18 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
     this.status = status;
-    this.code = code; // "auth" — qayta kirish, "no_profile" — sozlamalar kerak, "offline" — server bilan aloqa yo'q
+    this.code = code; // "auth" — qayta kirish, "no_profile" — sozlamalar kerak, "offline" — server bilan aloqa yo'q,
+    // "blocked" — boshqaruv markazidan bloklangan (App «Uzr, sizga xizmat ko'rsata olmaymiz!» ekranini ko'rsatadi)
   }
+}
+
+// Bloklangan javobi (403 "blocked") qaysi so'rovdan kelsa ham — App butun ilova o'rniga «Uzr...» ekranini qo'yadi
+let blockedHandler = null;
+export function onBlocked(handler) {
+  blockedHandler = handler;
+  return () => {
+    if (blockedHandler === handler) blockedHandler = null;
+  };
 }
 
 // Brauzer xotirasi: yopiq rejimda yoki taqiqlangan bo'lsa xato beradi — unda token faqat shu ochilishda yashaydi
@@ -81,6 +91,7 @@ export async function request(method, path, { body, token = tokenStore.get() } =
       { status: 404, code: "outdated" },
     );
   }
+  if (json?.code === "blocked") blockedHandler?.(json.error);
   if (json?.error) throw new ApiError(json.error, { status: response.status, code: json.code ?? null });
   // JSON emas (server yo'q, tunnel o'chiq, statik hosting 404 qaytardi)
   throw new ApiError("Server hozir ishlamayapti. Birozdan keyin qayta urinib ko'ring.", { status: response.status, code: "offline" });
@@ -136,6 +147,8 @@ export const setActive = (active) => request("PATCH", "/pub/me", { body: { activ
 export const signOut = () => request("POST", "/pub/me/logout");
 // Hisobni butunlay o'chirish (botdagi /ochirish → «Hammasini o'chirish» bilan bir xil) → { deleted: true }
 export const deleteMe = () => request("DELETE", "/pub/me");
+// Faqat o'z telefon raqamini o'chirish (sozlamalardagi «🗑 Raqamni o'chirish») → me (phone: null)
+export const deletePhone = () => request("DELETE", "/pub/me/phone");
 
 const query = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 
@@ -147,8 +160,10 @@ export const getTrucks = (params = {}) => request("GET", `/pub/trucks?${query(pa
 // Haydovchining yo'nalishi (botdagi «📋 Mos yuklar» bilan bir xil): { from, hours } → { areas: [{ id, label, count }], any }.
 // from yo'q — «Qayerdan?» tugmalari, bor — «Qayerga?» ("*" = hamma joydan)
 export const getRoute = (params = {}) => request("GET", `/pub/me/route?${query(params)}`);
-// "*" = istalgan joy → yangilangan me (bot ham yangi yuklarni shu yo'nalish bo'yicha yuboradi)
-export const saveRoute = (from, to) => request("PUT", "/pub/me/route", { body: { from, to } });
+// "*" = istalgan joy → yangilangan me (bot ham yangi yuklarni shu yo'nalish bo'yicha yuboradi).
+// notify — botdagi «🗺 Xaritadan tanlash» dan ochilgan: bot chatda «✅ Yo'nalish» va mos yuklar bilan javob beradi
+export const saveRoute = (from, to, { notify = false } = {}) =>
+  request("PUT", "/pub/me/route", { body: notify ? { from, to, notify: true } : { from, to } });
 
 // --- Admin («🛠 Boshqaruv»): server har safar admin ekanini tekshiradi, boshqalarga 403 ---
 export const getAdminOverview = () => request("GET", "/pub/admin/overview");

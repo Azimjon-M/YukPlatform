@@ -12,6 +12,7 @@ export const REASON_TEXT = {
   key: "kalit xato",
   model: "model topilmadi",
   network: "internet uzildi",
+  size: "e'lon bu modelga juda uzun — boshqa modelga berildi",
   error: "xato — e'lonlar boshqa modelga berildi",
 };
 const BROKEN = new Set(["key", "model"]); // odam tuzatmaguncha ishlamaydi — "Xato"

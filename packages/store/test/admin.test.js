@@ -76,6 +76,38 @@ test("manbalar: a'zolik (jonli) va qanday kelgani — via, o'rtacha kechikish", 
   assert.equal(stats.delaySec, 21, "(60 + 2 + 0) / 3; 3 soat kechikkan eski e'lon hisobga olinmaydi");
 });
 
+test("manbalar: collector navbati (oraliq, kuzatish usuli) va guruh faolligi", () => {
+  const { store } = fixture();
+  store.addSource("@a");
+  assert.deepEqual([store.listSources()[0].pollMs, store.listSources()[0].watch], [null, null], "collector hali yozmagan");
+  assert.equal(store.setSourceSchedule("@a", { pollMs: 25_000, watch: "poll" }), true);
+  assert.equal(store.setSourceSchedule("@yoq", { pollMs: 1, watch: "tops" }), false);
+  assert.deepEqual([store.listSources()[0].pollMs, store.listSources()[0].watch], [25_000, "poll"]);
+
+  // Faollik guruhda yozilgan vaqt bo'yicha (posted_at): 3 soatdan eski e'lon faqat kunlikka kiradi, takror ham sanaladi
+  store.addPost({ source: "@a", messageId: 8, text: "Collector to'xtab turganda yozilgan eski e'lon", postedAt: 100 * HOUR - 4 * HOUR });
+  assert.deepEqual(store.sourceActivity(), { "@a": { recent: 1, day: 2 }, "@b": { recent: 2, day: 2 } });
+});
+
+test("manbalar: a'zo bo'lish navbati va kunlik hisob", () => {
+  const { store, advance } = fixture();
+  for (const n of ["@a", "@b", "@c"]) store.addSource(n);
+  assert.equal(store.requestJoin("@yoq"), null);
+  assert.equal(store.requestJoin("@a"), "wanted");
+  assert.equal(store.cancelJoin("@a"), true);
+  assert.equal(store.cancelJoin("@a"), false, "navbatda emas");
+  store.setSourceMembership("@b", true);
+  assert.equal(store.requestJoin("@b"), "joined", "akkaunt allaqachon a'zo");
+  store.requestJoin("@a");
+  store.setJoinState("@a", "joined");
+  store.setJoinState("@c", "error", { error: "CHANNEL_PRIVATE" });
+  assert.equal(store.requestJoin("@c"), "wanted", "xatodan keyin qayta navbatga");
+  assert.deepEqual(store.listSources().map((s) => [s.name, s.joinState, s.joinError]), [["@a", "joined", null], ["@b", null, null], ["@c", "wanted", null]]);
+  assert.equal(store.joinsSince(0), 1);
+  advance(25 * HOUR);
+  assert.equal(store.joinsSince(100 * HOUR + HOUR), 0, "24 soatdan eskisi sanalmaydi");
+});
+
 test("ko'rsatkichlar: navbat, oxirgi soat, kechikish, soatma-soat", () => {
   const { store, advance } = fixture();
   const m = store.metrics();

@@ -1,6 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatContactPhone, isOwnContact, normalizeContactPhone, shouldAskPhone } from "../src/index.js";
+import { formatContactPhone, isOwnContact, normalizeContactPhone, senderLink, shouldAskPhone, telegramUsername } from "../src/index.js";
+
+test("jo'natuvchi username'i: @ olinadi, noto'g'ri ko'rinishdagisi — null; havola t.me ga", () => {
+  assert.equal(telegramUsername("@ish_beruvchi"), "ish_beruvchi");
+  assert.equal(telegramUsername(" Ali_99 "), "Ali_99");
+  assert.equal(telegramUsername("abcd"), "abcd", "4 belgi — Fragment username");
+  assert.equal(telegramUsername("abc"), null);
+  assert.equal(telegramUsername("9ali_99"), null, "raqam bilan boshlanmaydi");
+  assert.equal(telegramUsername('ali"><script>'), null);
+  assert.equal(telegramUsername("a".repeat(33)), null);
+  assert.equal(telegramUsername(null), null);
+  assert.equal(senderLink("@ish_beruvchi"), "https://t.me/ish_beruvchi");
+  assert.equal(senderLink("bad name"), null);
+});
 
 test("kontakt raqami: bitta ko'rinishga keltiriladi, noto'g'risi — null", () => {
   assert.equal(normalizeContactPhone("998901234567"), "+998901234567");

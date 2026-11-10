@@ -7,15 +7,16 @@
 // bot manzilga qo'ygan token (?t=), chunki Telegram u yerda initData bermaydi; saytda — «Telegram bilan kirish».
 // Birinchi marta (profil yo'q) sozlamalar qadamma-qadam ochiladi — ro'yxatdan o'tish (Steps.jsx). Server: apps/api public.js.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ROLES, decodeProfile, routeLabel, validRole, validRouteScope } from "@yuk/shared";
+import { BLOCKED_TEXT, ROLES, decodeProfile, routeLabel, validRole, validRouteScope } from "@yuk/shared";
 import { AccountCard } from "./AccountCard.jsx";
 import { AdminPage } from "./AdminPage.jsx";
-import { getConfig, logout, resume, setActive, setRole, signOut } from "./api.js";
+import { getConfig, logout, onBlocked, resume, setActive, setRole, signOut } from "./api.js";
 import { LoadsPage } from "./LoadsPage.jsx";
 import { LoginPage } from "./LoginPage.jsx";
 import { MapPage } from "./MapPage.jsx";
 import { PhoneCard } from "./PhoneCard.jsx";
 import { RolePage } from "./RolePage.jsx";
+import { RouteMapPage } from "./RouteMapPage.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { ShipperSettings } from "./ShipperSettings.jsx";
 import { closeApp, haptic, inTelegram, showAlert } from "./telegram.js";
@@ -40,9 +41,12 @@ const requestedTab = TAB_IDS.has(params.get("v")) ? params.get("v") : params.has
 // ?r= — bot bilgan rol; ?p= shu rolning profili (eski bot havolasida r= yo'q edi — u haydovchi profili)
 const roleHint = validRole(params.get("r"));
 const profileRole = roleHint ?? "haydovchi";
+// ?v=yonalish — botdagi «🗺 Xaritadan tanlash» (yo'nalish xaritada; &f= — «Qayerga?» qadamidan, tanlangan «Qayerdan»).
+// Telegram ichida saqlansa, bot chatda javob beradi (notify) va ilova yopiladi
+const routeMapRequest = params.get("v") === "yonalish" ? { from: params.get("f"), notify: inTelegram } : null;
 
 export function App() {
-  const [session, setSession] = useState({ status: "loading", me: null, error: null }); // loading | in | out | offline | signedOut | deleted
+  const [session, setSession] = useState({ status: "loading", me: null, error: null }); // loading | in | out | offline | signedOut | deleted | blocked
   const [config, setConfig] = useState(null);
   const [tab, setTab] = useState(requestedTab);
   const [view, setView] = useState("mine");
@@ -50,6 +54,8 @@ export function App() {
   const [offlineRole, setOfflineRole] = useState(roleHint); // server bilan aloqa yo'q paytda tanlangan rol
   const [changingRole, setChangingRole] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Yo'nalish xaritasi ochiqmi: { from, notify } yoki null (botdan — ?v=yonalish, «📋 Yuklar» dan — «🗺 Xaritadan tanlash»)
+  const [routeMap, setRouteMap] = useState(routeMapRequest);
   // Hisobdan chiqildi yoki o'chirildi — kechikkan so'rovning 401 i o'zi qayta kirmasin (kirish yangi hisob ochardi)
   const ended = useRef(false);
 
@@ -73,9 +79,21 @@ export function App() {
         if (!requestedTab) setTab("sozlamalar");
       }
     } catch (error) {
+      if (error.code === "blocked") return; // onBlocked allaqachon «Uzr...» ekranini qo'ydi
       setSession({ status: "offline", me: null, error });
     }
   }, []);
+
+  // Boshqaruv markazidan bloklangan: istalgan so'rov 403 "blocked" qaytarsa — butun ilova o'rniga «Uzr...» ekrani.
+  // Token o'chirilmaydi: blokdan chiqarilsa, keyingi ochilishda o'zi kiradi
+  useEffect(
+    () =>
+      onBlocked(() => {
+        ended.current = true;
+        setSession({ status: "blocked", me: null, error: null });
+      }),
+    [],
+  );
 
   useEffect(() => {
     connect();
@@ -135,7 +153,28 @@ export function App() {
     setToast(`🧭 Yo'nalish: ${routeLabel(saved.profile)}. Bot ham shu bo'yicha yuboradi.`);
   }, []);
 
+  // Xaritada yo'nalish saqlandi (saytda; Telegram'da botdan ochilgan bo'lsa ilova o'zi yopiladi) — «📋 Yuklar» ga
+  const onRouteMapDone = useCallback(
+    (saved) => {
+      setRouteMap(null);
+      setView("mine");
+      setTab("yuklar");
+      onRouteSaved(saved);
+      window.scrollTo(0, 0);
+    },
+    [onRouteSaved],
+  );
+  const onRouteMapCancel = useCallback(() => {
+    setRouteMap(null);
+    setTab("yuklar");
+  }, []);
+  const openRouteMap = useCallback((from) => {
+    setRouteMap({ from, notify: false });
+    window.scrollTo(0, 0);
+  }, []);
+
   const onSaved = useCallback((saved) => {
+    setRouteMap(null);
     setSession({ status: "in", me: saved, error: null });
     setView("mine");
     setTab(ROLE_TABS[saved.role]?.[0].id ?? "sozlamalar");
@@ -219,6 +258,22 @@ export function App() {
           Bot sizga endi yuk yubormaydi. Ma'lumotlaringiz saqlanib qoldi: qayta kirib rolingizni tanlasangiz, sozlamalaringiz
           tiklanadi.
         </Notice>
+      </div>
+    );
+  }
+  if (session.status === "blocked") {
+    return (
+      <div className="center">
+        <Notice
+          title={`⛔ ${BLOCKED_TEXT}`}
+          action={
+            inTelegram ? (
+              <button type="button" className="primary" onClick={closeApp}>
+                Yopish
+              </button>
+            ) : null
+          }
+        />
       </div>
     );
   }
@@ -315,8 +370,22 @@ export function App() {
     </div>
   ) : null;
 
+  // Xarita faqat transporti kiritilgan haydovchiga (aks holda — oddiy ilova: ro'yxatdan o'tish yoki rol)
+  const mapOpen = Boolean(routeMap) && online && role === "haydovchi" && Boolean(me.profile) && !changingRole;
+
   let page;
-  if (!role || changingRole) {
+  if (mapOpen) {
+    page = (
+      <RouteMapPage
+        profile={me.profile}
+        initialFrom={routeMap.from}
+        notify={routeMap.notify}
+        onDone={onRouteMapDone}
+        onCancel={routeMap.notify && inTelegram ? null : onRouteMapCancel}
+        onAuthLost={onAuthLost}
+      />
+    );
+  } else if (!role || changingRole) {
     page = <RolePage current={changingRole ? role : null} busy={busy} onPick={pickRole} onCancel={changingRole ? () => setChangingRole(false) : null} />;
   } else if (current === "sozlamalar") {
     const settingsKey = `${me?.chatId ?? "offline"}-${role}`;
@@ -328,9 +397,9 @@ export function App() {
         {online && !registering && (
           <PhoneCard
             me={me}
-            onChange={(updated) => {
+            onChange={(updated, kind) => {
               setSession((s) => ({ ...s, me: updated }));
-              setToast("✅ Raqamingiz saqlandi");
+              setToast(kind === "deleted" ? "✅ Raqamingiz o'chirildi" : "✅ Raqamingiz saqlandi");
             }}
           />
         )}
@@ -352,13 +421,14 @@ export function App() {
         onView={setView}
         profile={me?.profile ?? null}
         onRouteSaved={onRouteSaved}
+        onRouteMap={openRouteMap}
         onNeedProfile={onNeedProfile}
         onAuthLost={onAuthLost}
       />
     );
   }
 
-  const showTabs = online && role && !changingRole && !registering;
+  const showTabs = online && role && !changingRole && !registering && !mapOpen;
   return (
     <div className="app">
       <header className="top">

@@ -5,10 +5,10 @@
 import { existsSync, statSync } from "node:fs";
 import { createParser, createParserPool, envSeedEntries, resolveSettings } from "@yuk/parser";
 import { ROUTE_SCOPES, routeScopeFrom } from "@yuk/shared";
-import { acquireRunLock, createSessions, loadSecret, openStore, tunnelUrl } from "@yuk/store";
+import { acquireRunLock, createCallLinks, createSessions, loadSecret, openStore, tunnelUrl } from "@yuk/store";
 import { createBot } from "./bot.js";
 import { createIdleWatcher } from "./idle.js";
-import { readConfig, ruleParserOn } from "./config.js";
+import { readConfig, requireContactOn, ruleParserOn } from "./config.js";
 import { formatLoad } from "./format.js";
 import { createWorker, ruleParse } from "./pipeline.js";
 
@@ -95,6 +95,9 @@ async function check(config) {
       : `ℹ️  Yuklar kanalga joylanmaydi, faqat haydovchilarga (yoqish: .env ga CHANNEL_LOADS=1).`);
   }
   checkApps(config, store);
+  console.log(config.requiredChats.length
+    ? `✅ A'zolik: bot faqat ${config.requiredChats.join(" va ")} a'zolariga ishlaydi (bot ikkalasida admin bo'lishi kerak — yuqorida ogohlantirish bo'lmasa, admin).`
+    : "ℹ️  A'zolik tekshirilmaydi: bot hammaga ishlaydi (yoqish: .env ga REQUIRED_CHATS=@kanal,@guruh).");
   console.log(`✅ Yo'nalishlar: ${ROUTE_SCOPES[config.routeScope].title}.`);
   const ai = createAiPool(store).list();
   if (ai.length) console.log(`✅ AI: ${ai.length} ta ulanish (${ai.map((s) => s.label).join(", ")})`);
@@ -119,7 +122,8 @@ async function dryRun() {
     return true;
   };
   const rules = ruleParserOn() ? ruleParse : null;
-  const worker = createWorker({ parser, store, publish, deliver, rules, routeScope: routeScopeFrom() }, { log });
+  const requireContact = requireContactOn();
+  const worker = createWorker({ parser, store, publish, deliver, rules, requireContact, routeScope: routeScopeFrom() }, { log });
   while ((await worker.runOnce()) > 0);
   const s = store.stats();
   console.log(`\nTayyor. E'lonlar: ${Object.entries(s.posts).map(([k, v]) => `${k} ${v}`).join(", ")}; yangi yuk: ${s.loads24h.total}, bo'sh mashina: ${s.trucks24h.total}`);
@@ -139,14 +143,22 @@ async function main() {
   const appUrl = () => config.miniappUrl ?? tunnelUrl(store);
   // Pastki menyudagi Mini App tugmasi foydalanuvchini shu token bilan kiritadi (Telegram u yerda initData bermaydi).
   // Kalit — data/secret.key: haydovchilar serveri (apps/api) ham shuni o'qiydi va tokenni taniydi
-  const sessions = createSessions(loadSecret());
+  const secret = loadSecret();
+  const sessions = createSessions(secret);
   const linkToken = (chatId) => sessions.link(chatId);
-  const { bot, init, publish, deliver } = createBot({ token: config.token, store, config, log, appUrl, linkToken });
+  // «📞 Telefon qilish» tugmasi: imzolangan havola (raqamning o'zi emas) — sahifani haydovchilar serveri ochadi (/pub/call)
+  const calls = createCallLinks(secret);
+  const callLink = (link) => calls.make(link);
+  const { bot, init, publish, deliver, canReceive, commands, notices, sources } = createBot({ token: config.token, store, config, log, appUrl, linkToken, callLink });
   await init();
   const { routeScope, maxPostAgeMs } = config;
   // Oddiy e'lonlar AI'siz (qoidaviy parser), qolgani AI'ga — pipeline.js createWorker deps.rules
   const rules = config.ruleParser ? ruleParse : null;
-  const worker = createWorker({ pool, store, publish, deliver, rules, routeScope }, { log, maxAgeMs: maxPostAgeMs });
+  // canReceive — kanal va guruhga a'zomi (bot.js; a'zo emas — yuk o'rniga «a'zo bo'ling» eslatmasi)
+  const worker = createWorker(
+    { pool, store, publish, deliver, rules, requireContact: config.requireContact, routeScope, canReceive },
+    { log, maxAgeMs: maxPostAgeMs },
+  );
   // 24 soat kirmaganga — ogohlantirish, 48 soatda — pauza (idle.js; Azimjon, 2026-11-09)
   const idle = createIdleWatcher({ store, api: bot.api, log });
 
@@ -154,6 +166,9 @@ async function main() {
     log("To'xtatilyapti...");
     worker.stop();
     idle.stop();
+    commands.stop();
+    notices.stop();
+    sources.stop();
     await bot.stop();
     store.close();
     process.exit(0);
@@ -173,9 +188,21 @@ async function main() {
     : "Eski e'lonlar: cheklovsiz, hammasi AI'ga boradi (.env: POST_MAX_AGE_HOURS=0)");
   log(config.miniappUrl ? `Mini App: ${config.miniappUrl}` : "Mini App: tunnel manzili (tunnel o'chiq bo'lsa — sozlamalar chatda savol-javob)");
   log("Faollik: botga 24 soat kirmaganga ogohlantirish, 48 soatda avtomatik pauza (har 10 daqiqada tekshiriladi)");
+  log("Foydalanuvchi guruhlari: raqam ulashganlar «➕ Guruh qo'shish» bilan qo'shadi — collector oxirgi xabarlarini ko'radi, keyin 24 soat sinov (kamida 5 ta yuk e'loni)");
+  log(config.requiredChats.length
+    ? `A'zolik: bot faqat ${config.requiredChats.join(" va ")} a'zolariga ishlaydi (.env: REQUIRED_CHATS)`
+    : "A'zolik: tekshirilmaydi, bot hammaga ishlaydi (yoqish: .env ga REQUIRED_CHATS=@kanal,@guruh)");
   worker.start();
   idle.start();
-  await bot.start({ allowed_updates: ["message", "channel_post", "callback_query"] });
+  // «Menu» tugmasi faqat rol tanlaganlarda (commands.js): fonda — bot javob berishini kutib turmasin
+  commands.start();
+  // Server topshiriqlari (haydovchi web xaritasida yo'nalish tanladi → chatda javob): har 2 soniyada (notices.js)
+  notices.start();
+  // Foydalanuvchi qo'shgan guruhlar: natijani qo'shgan odamga yozish va 24 soatlik sinov (userSources.js)
+  sources.start();
+  // chat_member — kanal/guruhga kimdir qo'shilsa yoki chiqsa (bot u yerda admin bo'lsa keladi; a'zolik uchun)
+  const updates = ["message", "channel_post", "callback_query", ...(config.requiredChats.length ? ["chat_member"] : [])];
+  await bot.start({ allowed_updates: updates });
 }
 
 main().catch((error) => {

@@ -4,11 +4,14 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
+import { isAdmin, parseAdminIds } from "@yuk/shared";
 import { tunnelUrl } from "@yuk/store";
 import { createAiTools } from "./ai.js";
+import { createErrorLog } from "./errorLog.js";
 import { createLive, processMarks } from "./live.js";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+const SLOW_MS = 10_000; // API javobi bundan uzoq — «sekin» ogohlantirishi
 
 // "@guruh", "guruh", "t.me/guruh", "https://t.me/guruh/123" → "@guruh"; "-100123" → "-100123"; boshqasi → null
 export function normalizeSourceName(input) {
@@ -36,7 +39,13 @@ export function configInfo(env, { publicUrl = null, tunnel = null } = {}) {
     parser: {
       provider: env.PARSER_PROVIDER || "gemini",
       model: env.PARSER_MODEL || null,
-      keys: { gemini: Boolean(env.GEMINI_API_KEY), onepro: Boolean(env.ONEPRO_API_KEY), claude: Boolean(env.ANTHROPIC_API_KEY) },
+      keys: {
+        gemini: Boolean(env.GEMINI_API_KEY),
+        onepro: Boolean(env.ONEPRO_API_KEY),
+        groq: Boolean(env.GROQ_API_KEY),
+        openrouter: Boolean(env.OPENROUTER_API_KEY),
+        claude: Boolean(env.ANTHROPIC_API_KEY),
+      },
     },
   };
 }
@@ -66,14 +75,47 @@ const validLabel = (value) => (value == null || String(value).trim() === "" ? nu
 // ai — @yuk/parser bilan ishlaydigan yordamchilar (ai.js); secret — kalitlarni shifrlash kaliti (data/secret.key)
 // sessions — haydovchilar web'i tokenlari (telegramAuth.js), publicUrl — o'sha web manzili (server.js beradi)
 // live — jonli yangilanish (live.js); berilmasa shu yerda yaratiladi (bazadan + jarayonlardan belgilar)
-export function createApp({ store, processes, env = process.env, adminDist = null, ai = createAiTools(), secret = null, sessions = null, publicUrl = null, live = null }) {
+// errors — xatolar jurnali (errorLog.js): server.js jarayon loglarini ham shunga beradi
+// slowMs — API javobi shundan uzoq cho'zilsa, «Xatolar» ga ogohlantirish yoziladi
+export function createApp({
+  store,
+  processes,
+  env = process.env,
+  adminDist = null,
+  ai = createAiTools(),
+  secret = null,
+  sessions = null,
+  publicUrl = null,
+  live = null,
+  errors = createErrorLog(),
+  slowMs = SLOW_MS,
+}) {
   const app = express();
-  const changes = live ?? createLive({ marks: () => ({ ...store.changeMarks(), ...processMarks(processes) }) });
+  const changes = live ?? createLive({ marks: () => ({ ...store.changeMarks(), ...processMarks(processes), errors: String(errors.seq()) }) });
   app.locals.live = changes; // server.js to'xtaganda ochiq ulanishlarni yopadi
+  app.locals.errors = errors;
   app.disable("x-powered-by");
   app.use(express.json({ limit: "100kb" }));
 
   const api = express.Router();
+
+  // Sekin javob va kutmay uzilgan so'rov — «Xatolar» bo'limiga (server «osilib» qolganini shundan bilamiz).
+  // Brauzer GET so'rovni 20 s da tashlab ketadi (apps/admin api.js) — server tomonda u «kutmay uzildi» bo'lib ko'rinadi.
+  // /live — doim ochiq turadigan ulanish, u hisoblanmaydi.
+  api.use((req, res, next) => {
+    if (req.path === "/live") return next();
+    const started = Date.now();
+    res.on("close", () => {
+      const seconds = ((Date.now() - started) / 1000).toFixed(1);
+      const where = `${req.method} /api${req.path}`;
+      if (!res.writableFinished) {
+        errors.add({ source: "api", level: "warning", kind: "timeout", text: `${where}: brauzer javobni kutmay uzdi (${seconds} s)` });
+      } else if (Date.now() - started > slowMs) {
+        errors.add({ source: "api", level: "warning", kind: "slow", text: `${where}: javob ${seconds} s da berildi (sekin)` });
+      }
+    });
+    next();
+  });
 
   // Himoya: boshqa sayt brauzeringiz orqali localhost'ga so'rov yubora olmasin.
   // Host faqat localhost (DNS rebinding'ga qarshi); o'zgartiruvchi so'rovlarda maxsus sarlavha (CORS preflight'siz yuborib bo'lmaydi).
@@ -88,7 +130,36 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
   api.get("/live", (req, res) => changes.handler(req, res));
 
   api.get("/overview", (req, res) => {
-    res.json({ metrics: store.metrics(), processes: processes.list(), config: configInfo(env, { publicUrl, tunnel: tunnelUrl(store) }) });
+    res.json({
+      metrics: store.metrics(),
+      processes: processes.list(),
+      config: configInfo(env, { publicUrl, tunnel: tunnelUrl(store) }),
+      errors: errors.summary(), // yon paneldagi «Xatolar» soni uchun
+    });
+  });
+
+  // --- Xatolar jurnali (errorLog.js): jarayonlar loglaridagi va API'ning o'z xatolari ---
+  // ignored — «E'tiborsiz qoldirilganlar» (endi ko'rsatilmaydi, faqat sanaladi; «Qaytarish» bilan qaytadi)
+  api.get("/errors", (req, res) => res.json({ items: errors.list(), ignored: errors.ignoredList() }));
+  api.delete("/errors", (req, res) => {
+    errors.clear();
+    res.json({ ok: true });
+  });
+  // Bitta xato: «O'chirish» (yana chiqsa — qaytadi). Allaqachon yo'q bo'lsa ham ok (sahifa baribir yangilanadi)
+  api.delete("/errors/:id", (req, res) => {
+    res.json({ ok: true, removed: errors.remove(req.params.id) });
+  });
+  // «E'tiborsiz qoldirish»: shu xato endi ko'rsatilmaydi (yana chiqsa ham)
+  api.post("/errors/:id/ignore", (req, res) => {
+    const rule = errors.ignore(req.params.id);
+    if (!rule) return res.status(404).json({ error: "Bu xato jurnalda yo'q — sahifani yangilang" });
+    res.json({ ok: true, rule });
+  });
+  // «Qaytarish»: { key } — e'tiborsiz qoldirilgan xato yana ko'rsatiladi
+  api.post("/errors/unignore", (req, res) => {
+    const key = typeof req.body?.key === "string" ? req.body.key : "";
+    if (!errors.unignore(key)) return res.status(404).json({ error: "Bunday e'tiborsiz xato yo'q — sahifani yangilang" });
+    res.json({ ok: true });
   });
 
   // --- Yuklar va navbat ---
@@ -122,6 +193,9 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
     res.json({ ok: true });
   });
 
+  // { blocked } — bloklash / blokdan chiqarish (Azimjon, 2026-11-09). Blok shu odamning Telegram id, username va raqamiga
+  // qo'yiladi (store.banDriver): boshqa akkaunt o'sha username yoki raqam bilan kelsa ham bloklangan. Bot va web unga
+  // «Uzr, sizga xizmat ko'rsata olmaymiz!» deydi, yuk yuborilmaydi. Adminni bloklab bo'lmaydi (avval admin huquqini olish).
   // { isAdmin } — Mini App'dagi «🛠 Boshqaruv» huquqi. Admin belgisi FAQAT shu yerdan (localhost) qo'yiladi —
   // internetdagi ilova serveri buni qila olmaydi. Faol / pauza — bu yerdan emas (Azimjon, 2026-11-09: «buni faqat
   // foydalanuvchi hal qiladi»): o'zi botda ⏸ / ▶️, yoki 48 soat kirmasa bot o'zi pauza qiladi (apps/bot idle.js).
@@ -131,7 +205,16 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
     const driver = store.getDriver(chatId);
     if (!driver) throw httpError(404, "Haydovchi topilmadi");
     if ("active" in body) throw httpError(400, "Faol / pauzani faqat foydalanuvchining o'zi o'zgartiradi (botda ⏸ Pauza / ▶️ Davom ettirish)");
-    if (!("isAdmin" in body)) throw httpError(400, "isAdmin kerak");
+    if ("blocked" in body) {
+      const blocked = bool(body.blocked, "blocked");
+      if (blocked && isAdmin(driver, parseAdminIds(env.ADMIN_IDS))) throw httpError(409, "Adminni bloklab bo'lmaydi — avval admin huquqini oling");
+      if (blocked) store.banDriver(chatId);
+      else store.unbanDriver(chatId);
+      res.json({ ...store.getDriver(chatId), banned: store.banOf(store.getDriver(chatId)) });
+      return;
+    }
+    if (!("isAdmin" in body)) throw httpError(400, "isAdmin yoki blocked kerak");
+    if (body.isAdmin === true && store.banOf(driver)) throw httpError(409, "Bloklangan foydalanuvchini admin qilib bo'lmaydi — avval blokdan chiqaring");
     res.json(store.saveDriver(chatId, { isAdmin: bool(body.isAdmin, "isAdmin"), why: "admin" })); // tarixda: «boshqaruv markazidan»
   });
 
@@ -145,10 +228,24 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
   });
 
   // --- Manbalar (collector kuzatadigan guruhlar; o'zgarish keyingi aylanishda kuchga kiradi) ---
+  // Foydalanuvchi qo'shgan manbada (bot «➕ Guruh qo'shish», 2026-11-10): addedByUser — kim (ism, username), trial —
+  // sinov boshlanganidan beri nechta yuk e'loni (store.trialStats; faqat sinovdagilarda)
   api.get("/sources", (req, res) => {
     const stats = store.sourceStats();
     const empty = { posts: 0, duplicates: 0, loads: 0, lastPostAt: null, live: 0, delaySec: null };
-    res.json({ items: store.listSources().map((s) => ({ ...s, stats: stats[s.name] ?? empty })) });
+    const userOf = (chatId) => {
+      if (chatId == null) return null;
+      const user = store.getDriver(chatId);
+      return { chatId, name: user?.name ?? null, username: user?.username ?? null };
+    };
+    res.json({
+      items: store.listSources().map((s) => ({
+        ...s,
+        stats: stats[s.name] ?? empty,
+        addedByUser: userOf(s.addedBy),
+        trial: s.checkState === "trial" && store.trialStats ? store.trialStats(s.name, s.checkAt) : null,
+      })),
+    });
   });
 
   api.post("/sources", (req, res) => {
@@ -157,6 +254,29 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
     const note = typeof req.body?.note === "string" ? req.body.note.slice(0, 200) : null;
     const added = store.addSource(name, { note });
     res.status(added ? 201 : 200).json({ name, added });
+  });
+
+  // A'zo bo'lish navbati: collector 5 daqiqada bittadan, kuniga ko'pi bilan 15 ta qo'shiladi (apps/collector live.js)
+  // join-all — kuzatilayotgan, akkaunt a'zo bo'lmagan va hali navbatda / so'rovda bo'lmagan hamma guruh
+  // Sinovdagi foydalanuvchi manbasi kirmaydi: kuniga 15 talik a'zolik limiti sinovdan o'tmagan guruhga ketmasin
+  api.post("/sources/join-all", (req, res) => {
+    const names = store
+      .listSources()
+      .filter((s) => s.enabled && s.joined !== true && !["wanted", "requested", "joined"].includes(s.joinState) && !["probe", "trial"].includes(s.checkState))
+      .map((s) => s.name);
+    for (const name of names) store.requestJoin(name);
+    res.json({ queued: names.length });
+  });
+
+  api.post("/sources/:name/join", (req, res) => {
+    const state = store.requestJoin(req.params.name);
+    if (!state) throw httpError(404, "Manba topilmadi");
+    res.json({ state });
+  });
+
+  api.delete("/sources/:name/join", (req, res) => {
+    if (!store.cancelJoin(req.params.name)) throw httpError(409, "Bu guruh navbatda emas (collector allaqachon urinib bo'lgan bo'lishi mumkin)");
+    res.json({ ok: true });
   });
 
   api.patch("/sources/:name", (req, res) => {
@@ -287,8 +407,12 @@ export function createApp({ store, processes, env = process.env, adminDist = nul
 
   // eslint-disable-next-line no-unused-vars
   app.use((error, req, res, next) => {
-    const status = error.status ?? 500;
-    if (status >= 500) console.error(error);
+    // express.json buzilgan JSON uchun 400 beradi (error.status) — bu brauzer xatosi, server emas
+    const status = error.status ?? error.statusCode ?? 500;
+    if (status >= 500) {
+      console.error(error);
+      errors.add({ source: "api", level: "error", kind: "server", text: `${req.method} ${req.originalUrl.split("?")[0]}: ${error.message}`, details: error.stack });
+    }
     res.status(status).json({ error: status >= 500 ? `Server xatosi: ${error.message}` : error.message });
   });
 

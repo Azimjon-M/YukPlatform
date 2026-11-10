@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.js",
-    "./posts": "./src/posts.js"
+    "./posts": "./src/posts.js",
+    "./rules": "./src/rules/index.js"
   },
   "scripts": {
     "parse": "node --env-file-if-exists=../../.env src/cli.js",

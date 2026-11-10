@@ -46,6 +46,8 @@ export function throughput(lastHour = {}, queue = {}) {
 const KEY_ROWS = [
   { id: "gemini", label: "Gemini kaliti" },
   { id: "onepro", label: "1pro kaliti" },
+  { id: "groq", label: "Groq kaliti" },
+  { id: "openrouter", label: "OpenRouter kaliti" },
   { id: "claude", label: "Claude kaliti" },
 ];
 

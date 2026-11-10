@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { escapeHtml, formatLoad, placeText, priceText, weightText } from "../src/format.js";
+import { escapeHtml, formatLoad, formatTruck, placeText, priceText, weightText } from "../src/format.js";
 
 const LOAD = {
   fromCity: "Toshkent", fromPlace: "Chilonzor", fromRegion: "toshkent_sh", fromCountry: "O'zbekiston",
@@ -43,15 +43,27 @@ test("og'irlik va narx", () => {
   assert.equal(priceText({ price: null }), "narx yozilmagan");
 });
 
-test("to'liq xabar: yo'nalish, mashina, telefon, vaqt va manba", () => {
+test("to'liq xabar: yo'nalish, mashina, telefon va asl e'lon vaqti (guruh nomisiz)", () => {
   const post = { source: "@yuk_markazi_gruupa", link: "https://t.me/yuk_markazi_gruupa/123", postedAt: Date.UTC(2026, 10, 5, 9, 30) };
   const { text, url } = formatLoad(LOAD, post);
   assert.match(text, /<b>Toshkent \(Chilonzor\) → Navoiy<\/b>/);
   assert.match(text, /mebel · 6 t/);
   assert.match(text, /Isuzu · tent · ustidan/);
   assert.match(text, /\+998901234567/);
-  assert.match(text, /05\.11 14:30 · @yuk_markazi_gruupa/, "Toshkent vaqti (UTC+5)");
+  assert.match(text, /\n🕒 Asl e'lon: 05\.11 14:30$/, "Toshkent vaqti (UTC+5), oxirgi qator");
+  assert.ok(!text.includes("@yuk_markazi_gruupa"), "guruh nomi yozilmaydi (Azimjon, 2026-11-09)");
+  assert.ok(!text.includes("href"), "asl e'lon — tugmada, matnda emas");
   assert.equal(url, "https://t.me/yuk_markazi_gruupa/123");
+});
+
+test("jo'natuvchining lichkasi: telefondan keyin, vaqtdan oldin; username'siz — qator yo'q", () => {
+  const postedAt = Date.UTC(2026, 10, 5, 9, 30);
+  const { text } = formatLoad(LOAD, { link: "https://t.me/g/1", postedAt, sender: "ish_beruvchi" });
+  assert.match(text, /\+998901234567\n💬 <a href="https:\/\/t\.me\/ish_beruvchi">Lichkasi<\/a>\n🕒 Asl e'lon/);
+  assert.ok(!formatLoad(LOAD, { postedAt }).text.includes("Lichkasi"));
+  assert.ok(!formatLoad(LOAD, { postedAt, sender: '"><b>x' }).text.includes("Lichkasi"), "noto'g'ri username");
+  const truck = formatTruck({ fromCity: "Toshkent", phones: [] }, { postedAt, sender: "@haydovchi_1" });
+  assert.match(truck.text, /💬 <a href="https:\/\/t\.me\/haydovchi_1">Lichkasi<\/a>/);
 });
 
 test("e'londagi matn HTML sifatida buzilmaydi", () => {

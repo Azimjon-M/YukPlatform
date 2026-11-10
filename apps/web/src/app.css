@@ -905,6 +905,90 @@ fieldset.plain:disabled {
   font-size: 14px;
 }
 
+/* «🗺 Xaritadan tanlash» (RouteMapPage.jsx): viloyat / davlat doiralari, tanlangani to'q, «Qayerdan» — qora */
+.route-map-page h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.route-map-page .hint {
+  margin: 0 0 10px;
+}
+
+.map.route-map {
+  height: min(60vh, 560px);
+}
+
+path.route-dot {
+  stroke: var(--accent);
+  fill: var(--accent);
+  fill-opacity: 0.25;
+}
+
+path.route-dot.on {
+  fill-opacity: 0.8;
+}
+
+path.route-dot.start {
+  stroke: var(--text);
+  fill: var(--text);
+  fill-opacity: 0.55;
+}
+
+.leaflet-tooltip.route-label {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.leaflet-tooltip-top.route-label::before {
+  border-top-color: var(--line);
+}
+
+.leaflet-tooltip.route-label.on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.leaflet-tooltip-top.route-label.on::before {
+  border-top-color: var(--accent);
+}
+
+.route-extra {
+  margin: 0 0 10px;
+}
+
+.route-pick {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.route-actions .primary {
+  flex: 1 1 200px;
+}
+
+.route-picker .route-map-open {
+  width: 100%;
+  margin-top: 8px;
+}
+
 /* Sozlamalar ostidagi «👤 Hisob» (AccountCard.jsx): chiqish va hisobni o'chirish */
 .account-who {
   margin: 0 0 10px;

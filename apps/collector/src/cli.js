@@ -138,7 +138,10 @@ function liveSources(store) {
 }
 
 async function cmdLive() {
-  const intervalMs = Math.max(30, Number(args.interval)) * 1000; // 30 s dan tez so'rash — FLOOD_WAIT xavfi
+  // --interval — yangi guruhning (faolligi hali bilinmaydi) oralig'i; 30 s dan tez so'rash — FLOOD_WAIT xavfi.
+  // TG_POLL_BUDGET — Telegram'ga daqiqasiga taxminan nechta so'rov (standart 20; FLOOD_WAIT ko'p chiqsa kamaytiring)
+  const intervalMs = Math.max(30, Number(args.interval)) * 1000;
+  const budgetPerMin = Math.min(Math.max(Number(process.env.TG_POLL_BUDGET) || 20, 4), 30);
   const store = openStore();
   // Ikkinchi collector bitta Telegram sessiyasini ikki joyda ochadi — Telegram sessiyani bekor qilishi mumkin
   acquireRunLock("collector");
@@ -151,8 +154,8 @@ async function cmdLive() {
   const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
 
   console.log(
-    `${sources().length} ta guruh kuzatilyapti: akkaunt a'zo bo'lganlari jonli (~1 s), qolganlari har ${intervalMs / 1000} s. ` +
-      "E'lonlarni bot yuboradi (npm run bot). To'xtatish: Ctrl+C",
+    `${sources().length} ta guruh kuzatilyapti: har biri faolligiga qarab (tez yozadigani tez-tez), a'zo bo'linganlari — yangisi bo'lsa darhol; ` +
+      `daqiqasiga ~${budgetPerMin} ta so'rov. E'lonlarni bot yuboradi (npm run bot). To'xtatish: Ctrl+C`,
   );
   try {
     await runLive({
@@ -160,7 +163,10 @@ async function cmdLive() {
       reader: createReader(client),
       store,
       intervalMs,
+      budgetPerMin,
       backfill: Number(args.backfill),
+      // Bot aloqasiz e'lonni yubormaydi — foydalanuvchi qo'shgan guruhni tekshirishda ham ular sanalmaydi (REQUIRE_CONTACT=0 — sanaladi)
+      requireContact: !/^(0|yo'q|yoq|no|false|off)$/i.test(process.env.REQUIRE_CONTACT?.trim() ?? ""),
       log: (message) => console.log(`[${time()}] ${message}`),
       signal: controller.signal,
     });

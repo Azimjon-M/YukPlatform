@@ -103,11 +103,19 @@ export function createAdminQueries(db, now) {
     // Har foydalanuvchiga: oxirgi faollik (seenAt/seenVia) va olgan yuklari (deliveries: bugun — Toshkent vaqti bilan)
     listDrivers() {
       const time = now();
+      // Blok ro'yxati (bans): id, username yoki raqamdan biri mos kelsa — bloklangan. by — qaysi biri bo'yicha
+      const bans = new Map(db.prepare("SELECT kind, value, chat_id, created_at FROM bans").all().map((b) => [`${b.kind}:${b.value}`, b]));
+      const banned = (row) => {
+        const keys = [`id:${row.chat_id}`, row.username ? `username:${row.username.toLowerCase()}` : null, row.phone ? `phone:${row.phone}` : null];
+        const hit = keys.filter(Boolean).map((k) => bans.get(k)).find(Boolean);
+        return hit ? { by: hit.kind, value: hit.value, at: hit.created_at, chatId: hit.chat_id } : null;
+      };
       const sent = new Map(
         db
           .prepare(
             `SELECT chat_id, SUM(ok) AS total, SUM(ok = 1 AND sent_at >= ?) AS today, MAX(CASE WHEN ok = 1 THEN sent_at END) AS last_at,
-                    SUM(ok = 0) AS failed, MAX(CASE WHEN ok = 0 THEN id END) AS failed_id
+                    SUM(ok = 0) AS failed, MAX(CASE WHEN ok = 0 THEN id END) AS failed_id,
+                    SUM(called_at IS NOT NULL) AS called
              FROM deliveries GROUP BY chat_id`,
           )
           .all(tashkentDayStart(time))
@@ -120,7 +128,7 @@ export function createAdminQueries(db, now) {
       const failure = db.prepare("SELECT error, sent_at FROM deliveries WHERE id = ?");
       const deliveries = (chatId) => {
         const r = sent.get(chatId);
-        if (!r) return { today: 0, total: 0, lastAt: null, lastLoad: null, failed: 0, lastError: null, lastErrorAt: null };
+        if (!r) return { today: 0, total: 0, lastAt: null, lastLoad: null, failed: 0, lastError: null, lastErrorAt: null, called: 0 };
         const fail = r.failed_id ? failure.get(r.failed_id) : null;
         return {
           today: r.today ?? 0,
@@ -130,6 +138,8 @@ export function createAdminQueries(db, now) {
           failed: r.failed ?? 0,
           lastError: fail?.error ?? null,
           lastErrorAt: fail?.sent_at ?? null,
+          // Nechta yukda «📞 Telefon qilish» ni bosgan (2026-11-09 dan)
+          called: r.called ?? 0,
         };
       };
       return db
@@ -167,6 +177,12 @@ export function createAdminQueries(db, now) {
           pausedAt: row.paused_at ?? null,
           pausedBy: row.paused_by ?? null,
           idleWarnedAt: row.idle_warned_at ?? null,
+          // Kanal va guruhga a'zolik (bot tekshiradi): true | false | null — hali tekshirilmagan
+          subOk: row.sub_ok == null ? null : row.sub_ok === 1,
+          subMissing: parse(row.sub_missing) ?? [],
+          subCheckedAt: row.sub_checked_at ?? null,
+          // Boshqaruv markazidan bloklangan: { by: id | username | phone, value, at, chatId } yoki null
+          banned: banned(row),
           // Botdagi savol-javobda qaysi qadamda turibdi (ro'yxatdan o'tishni tugatmagan bo'lsa)
           draftStep: parse(row.draft)?.step ?? null,
           createdAt: row.created_at,
@@ -188,12 +204,20 @@ export function createAdminQueries(db, now) {
           .map((r) => ({ type: r.type, detail: parse(r.detail), at: r.at })),
         deliveries: db
           .prepare(
-            `SELECT d.ok, d.error, d.sent_at, l.data, l.kind, p.link FROM deliveries d
+            `SELECT d.ok, d.error, d.sent_at, d.called_at, l.data, l.kind, p.link FROM deliveries d
              LEFT JOIN loads l ON l.id = d.load_id LEFT JOIN posts p ON p.id = l.post_id
              WHERE d.chat_id = ? ORDER BY d.id DESC LIMIT ?`,
           )
           .all(chatId, sent)
-          .map((r) => ({ ok: r.ok === 1, error: r.error, at: r.sent_at, load: parse(r.data), kind: r.kind ?? "yuk", link: r.link ?? null })),
+          .map((r) => ({
+            ok: r.ok === 1,
+            error: r.error,
+            at: r.sent_at,
+            calledAt: r.called_at ?? null, // «📞 Telefon qilish» ni bosgan vaqt
+            load: parse(r.data),
+            kind: r.kind ?? "yuk",
+            link: r.link ?? null,
+          })),
       };
     },
 
@@ -204,11 +228,13 @@ export function createAdminQueries(db, now) {
       const one = (sql) => Object.values(db.prepare(sql).get()).join("|");
       const deliveries = one("SELECT MAX(id) FROM deliveries");
       return {
-        drivers: `${one("SELECT COUNT(*), MAX(updated_at), MAX(seen_at), SUM(active), SUM(is_admin) FROM drivers")}|${deliveries}|${one("SELECT MAX(id) FROM user_events")}`,
+        drivers: `${one("SELECT COUNT(*), MAX(updated_at), MAX(seen_at), SUM(active), SUM(is_admin), SUM(sub_ok), COUNT(sub_ok) FROM drivers")}|${one("SELECT COUNT(*), MAX(created_at) FROM bans")}|${deliveries}|${one("SELECT MAX(id) FROM user_events")}`,
         posts: one("SELECT MAX(id), MAX(done_at) FROM posts"),
         loads: `${one("SELECT MAX(id) FROM loads")}|${deliveries}`,
         ai: `${one("SELECT COUNT(*), MAX(updated_at) FROM ai_slots")}|${one("SELECT COUNT(*), MAX(id), SUM(enabled) FROM ai_keys")}`,
-        sources: one("SELECT COUNT(*), SUM(enabled), SUM(joined) FROM sources"),
+        sources: one(
+          "SELECT COUNT(*), SUM(enabled), SUM(joined), SUM(poll_ms), SUM(watch = 'tops'), SUM(join_state IS NOT NULL), MAX(join_at), MAX(check_at), COUNT(check_state) FROM sources",
+        ),
       };
     },
 
@@ -225,12 +251,74 @@ export function createAdminQueries(db, now) {
           // collector akkaunti a'zomi: true — jonli, false — so'rab turiladi, null — collector hali tekshirmagan
           joined: row.joined == null ? null : row.joined === 1,
           checkedAt: row.checked_at,
+          // collector navbati: necha ms da bir so'raladi va qanday kuzatiladi ("tops" | "poll"); null — hali yozilmagan
+          pollMs: row.poll_ms ?? null,
+          watch: row.watch ?? null,
+          // a'zo bo'lish navbati: wanted | joined | requested | error | null
+          joinState: row.join_state ?? null,
+          joinError: row.join_error ?? null,
+          joinAt: row.join_at ?? null,
+          // Foydalanuvchi qo'shgan bo'lsa (userSources.js): kim, guruh nomi, tekshiruv holati. Admin qo'shganda — null
+          addedBy: row.added_by ?? null,
+          title: row.title ?? null,
+          members: row.members ?? null,
+          chatType: row.chat_type ?? null,
+          checkState: row.check_state ?? null,
+          checkAt: row.check_at ?? null,
+          checkUntil: row.check_until ?? null,
+          checkNote: row.check_note ?? null,
+          checkStats: parse(row.check_stats),
         }));
+    },
+
+    // «A'zo bo'lish» tugmasi: navbatga qo'yadi (collector sekin, bittadan qo'shiladi).
+    // → "wanted" | "joined" (akkaunt allaqachon a'zo) | "requested" (so'rov allaqachon yuborilgan) | null (bunday manba yo'q)
+    requestJoin(name) {
+      const row = db.prepare("SELECT joined, join_state FROM sources WHERE name = ?").get(name);
+      if (!row) return null;
+      if (row.joined === 1) return "joined";
+      if (row.join_state === "requested" || row.join_state === "wanted") return row.join_state;
+      db.prepare("UPDATE sources SET join_state = 'wanted', join_error = NULL WHERE name = ?").run(name);
+      return "wanted";
+    },
+
+    // Navbatdan olib tashlash (faqat hali urinilmagan bo'lsa) → true / false
+    cancelJoin(name) {
+      return db.prepare("UPDATE sources SET join_state = NULL WHERE name = ? AND join_state = 'wanted'").run(name).changes > 0;
+    },
+
+    // Collector yozadi: natija va vaqti
+    setJoinState(name, state, { error = null } = {}) {
+      return db.prepare("UPDATE sources SET join_state = ?, join_error = ?, join_at = ? WHERE name = ?").run(state, error, now(), name).changes > 0;
+    },
+
+    // Oxirgi sinceMs dan beri nechta guruhga qo'shildi / so'rov yubordi (kunlik limit uchun; collector qayta yoqilsa ham saqlanadi)
+    joinsSince(since) {
+      return db.prepare("SELECT COUNT(*) AS n FROM sources WHERE join_at > ? AND join_state IN ('joined', 'requested')").get(since).n;
     },
 
     // Collector har 10 daqiqada yozadi. Ro'yxatda yo'q nom (terminaldan berilgan guruh) — e'tiborsiz
     setSourceMembership(name, joined) {
       return db.prepare("UPDATE sources SET joined = ?, checked_at = ? WHERE name = ?").run(joined ? 1 : 0, now(), name).changes > 0;
+    },
+
+    // Collector navbati o'zgarganda yozadi (boshqaruv markazidagi «har 25 s» belgisi uchun)
+    setSourceSchedule(name, { pollMs, watch }) {
+      return db.prepare("UPDATE sources SET poll_ms = ?, watch = ? WHERE name = ?").run(pollMs ?? null, watch ?? null, name).changes > 0;
+    },
+
+    // Har bir guruh qanchalik faol: oxirgi recentMs va dayMs ichida guruhda yozilgan e'lonlar soni (takrorlar ham —
+    // ularni ham o'qish kerak). Collector shundan so'rash oralig'ini hisoblaydi. → { "@guruh": { recent, day } }
+    // posted_at bo'yicha: collector o'chiq turgan payt yozilib, keyin olingan e'lonlar ham o'z vaqtiga tushadi
+    sourceActivity({ recentMs = 3 * HOUR, dayMs = 24 * HOUR } = {}) {
+      const time = now();
+      const rows = db
+        .prepare(
+          `SELECT source, SUM(posted_at > ?) AS recent, COUNT(*) AS day
+           FROM posts WHERE created_at > ? AND posted_at > ? GROUP BY source`,
+        )
+        .all(time - recentMs, time - dayMs - HOUR, time - dayMs);
+      return Object.fromEntries(rows.map((r) => [r.source, { recent: r.recent ?? 0, day: r.day }]));
     },
 
     // → true (qo'shildi) yoki false (allaqachon bor)
@@ -347,10 +435,12 @@ export function createAdminQueries(db, now) {
           loads: delays.length,
           medianDelayMin: delays.length ? Math.round((median(delays) / 60000) * 10) / 10 : null,
         },
-        // Kim tushundi (oxirgi hours soatda tugagan e'lonlar): AI'siz qoidaviy parser yoki AI
+        // Kim tushundi (oxirgi hours soatda tugagan e'lonlar): AI'siz qoidaviy parser yoki AI;
+        // noContact — telefon ham, lichka ham yo'q, shuning uchun hech kim tahlil qilmay yopilganlar (apps/bot pipeline.js NO_CONTACT)
         parsedBy: {
           rules: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'rules'", since),
           ai: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'ai'", since),
+          noContact: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND error LIKE 'Aloqasiz%'", since),
         },
         loads: { total: loads.total ?? 0, delivered: loads.delivered ?? 0, messages: loads.messages ?? 0 },
         trucks: { total: trucks.total ?? 0, delivered: trucks.delivered ?? 0, messages: trucks.messages ?? 0 },

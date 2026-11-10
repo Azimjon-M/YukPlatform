@@ -26,3 +26,18 @@ export function isOwnContact(contact, fromId) {
 export function shouldAskPhone(user) {
   return Boolean(user?.profile) && !user.phone && !user.phoneAskedAt;
 }
+
+// E'lonni guruhga yozgan odam (jo'natuvchi). Uning username'i bo'lsa, yuk xabarida «💬 Lichkasi» havolasi chiqadi:
+// https://t.me/<username> — bosganda o'sha odam bilan shaxsiy chat ochiladi.
+// Telegram username: harf bilan boshlanadi, lotin harf / raqam / «_», 4–32 belgi (4 talik — Fragment'da sotib olinganlar).
+// "@Ali_99" → "Ali_99"; noto'g'ri yoki bo'sh → null (xabarga hech narsa qo'shilmaydi)
+export function telegramUsername(value) {
+  const name = String(value ?? "").trim().replace(/^@/, "");
+  return /^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(name) ? name : null;
+}
+
+// Jo'natuvchining shaxsiy chati havolasi yoki null
+export function senderLink(username) {
+  const name = telegramUsername(username);
+  return name ? `https://t.me/${name}` : null;
+}

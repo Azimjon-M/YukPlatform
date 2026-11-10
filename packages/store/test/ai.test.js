@@ -60,6 +60,39 @@ test(".env kalitlari har provayder uchun alohida bir marta qo'shiladi (eski umum
   assert.deepEqual(ui.listAiKeys().map((k) => k.provider), ["onepro", "gemini"]);
 });
 
+test(".env dagi Groq va OpenRouter kalitlari (2026-11-09) ham bir marta qo'shiladi, kalit .env dan o'qiladi", () => {
+  const store = openStore({ file: ":memory:" });
+  const entries = [
+    { provider: "groq", models: ["openai/gpt-oss-120b"] },
+    { provider: "openrouter", models: ["a:free"] },
+  ];
+  // OpenRouter kaliti hali yozilmagan — belgilanmaydi, keyinroq yozilsa qo'shiladi
+  assert.equal(store.seedAiKeys(entries, { GROQ_API_KEY: "gsk_sinov_1234" }), 1);
+  assert.equal(store.seedAiKeys(entries, { GROQ_API_KEY: "gsk_sinov_1234", OPENROUTER_API_KEY: "sk-or-v1-sinov-5678" }), 1, "endi OpenRouter");
+  assert.equal(store.seedAiKeys(entries, { GROQ_API_KEY: "gsk_sinov_1234", OPENROUTER_API_KEY: "sk-or-v1-sinov-5678" }), 0);
+  const env3 = { GROQ_API_KEY: "gsk_sinov_1234", OPENROUTER_API_KEY: "sk-or-v1-sinov-5678" };
+  assert.deepEqual(
+    store.aiConnections({ secret, env: env3 }).map((c) => [c.provider, c.model, c.apiKey]),
+    [
+      ["groq", "openai/gpt-oss-120b", "gsk_sinov_1234"],
+      ["openrouter", "a:free", "sk-or-v1-sinov-5678"],
+    ],
+  );
+  assert.deepEqual(store.listAiKeys(access).map((k) => [k.provider, k.keyHint]), [
+    ["groq", "…1234"],
+    ["openrouter", "…5678"],
+  ]);
+
+  // enabled: false — ro'yxatda bor, lekin bot ishlatmaydi (aniqligi past provayder); yoqilsa — ulanish paydo bo'ladi
+  const off = openStore({ file: ":memory:" });
+  assert.equal(off.seedAiKeys([{ provider: "groq", models: ["openai/gpt-oss-120b"], enabled: false }], env3), 1);
+  const [row] = off.listAiKeys(access);
+  assert.equal(row.enabled, false);
+  assert.deepEqual(off.aiConnections({ secret, env: env3 }), []);
+  off.updateAiKey(row.id, { enabled: true });
+  assert.equal(off.aiConnections({ secret, env: env3 }).length, 1);
+});
+
 test("kalitlar: .env dan bir marta, qo'shish, takror, modellar = ulanishlar", () => {
   const store = openStore({ file: ":memory:" });
   assert.equal(store.seedAiKeys([{ provider: "gemini", models: ["flash-lite"] }], {}), 0, ".env da kalit yo'q");

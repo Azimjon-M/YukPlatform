@@ -1,6 +1,9 @@
 // Boshqaruv markazi: chapda menyu (tor ekranda — yuqorida), o'ngda tanlangan sahifa.
 import { useEffect, useState } from "react";
 import { get } from "./api.js";
+import { errorText, unseenCount } from "./errorInfo.js";
+import { onUncaughtError, useErrorsSeenAt, useLocalErrors } from "./errors.js";
+import { ErrorBoundary, ErrorScreen } from "./ErrorScreen.jsx";
 import { formatNumber, formatTime } from "./format.js";
 import { useApi, useLiveStatus } from "./hooks.js";
 import { Icon } from "./icons.jsx";
@@ -8,13 +11,14 @@ import { Link, usePathname } from "./navigation.jsx";
 import { OVERVIEW_INTERVAL_MS, OverviewContext } from "./overview.js";
 import { AiPage } from "./pages/AiPage.jsx";
 import { DriversPage } from "./pages/DriversPage.jsx";
+import { ErrorsPage } from "./pages/ErrorsPage.jsx";
 import { LoadsPage } from "./pages/LoadsPage.jsx";
 import { OverviewPage } from "./pages/OverviewPage.jsx";
 import { ProcessesPage } from "./pages/ProcessesPage.jsx";
 import { QueuePage } from "./pages/QueuePage.jsx";
 import { SourcesPage } from "./pages/SourcesPage.jsx";
 import { ROUTES, routeFor } from "./router.js";
-import { Empty, PageHeader, ToastProvider, useTitle } from "./ui.jsx";
+import { ToastProvider, useTitle, useToast } from "./ui.jsx";
 
 const PAGES = {
   overview: OverviewPage,
@@ -24,18 +28,27 @@ const PAGES = {
   sources: SourcesPage,
   processes: ProcessesPage,
   ai: AiPage,
+  errors: ErrorsPage,
 };
 
 function NotFound() {
   useTitle("Sahifa topilmadi");
-  return (
-    <>
-      <PageHeader title="Sahifa topilmadi" />
-      <Empty title="Bunday sahifa yo'q">
-        <Link to="/">Bosh sahifaga qaytish</Link>
-      </Empty>
-    </>
-  );
+  return <ErrorScreen kind="notfound" path={usePathname()} />;
+}
+
+// Tugma bosilganda / fonda chiqqan (ushlanmagan) xato — qizil xabarcha; batafsili «Xatolar» bo'limida
+function UncaughtToasts() {
+  const notify = useToast();
+  useEffect(() => onUncaughtError((error) => notify(`Kutilmagan xato: ${errorText(error)} — batafsil «Xatolar» bo'limida`, "critical", { record: false })), [notify]);
+  return null;
+}
+
+// Oxirgi marta «Xatolar» ochilgandan keyin chiqqan xatolar soni (server + brauzer; ogohlantirishlar sanalmaydi)
+function useUnseenErrors(overview) {
+  const seenAt = useErrorsSeenAt();
+  const local = useLocalErrors();
+  const server = overview.data?.errors?.errors ?? [];
+  return unseenCount(server, seenAt) + unseenCount(local.filter((e) => e.level === "error").map((e) => e.last), seenAt);
 }
 
 function Sidebar({ current, overview }) {
@@ -45,6 +58,7 @@ function Sidebar({ current, overview }) {
   const failed = overview.data?.metrics?.queue?.failed ?? 0;
   const online = overview.data && !overview.error;
   const live = useLiveStatus();
+  const unseen = useUnseenErrors(overview);
 
   return (
     <aside className={`sidebar ${open ? "is-open" : ""}`}>
@@ -77,6 +91,11 @@ function Sidebar({ current, overview }) {
                 {formatNumber(waiting)}
               </span>
             )}
+            {route.id === "errors" && unseen > 0 && (
+              <span className="nav-count has-failed" title={`Oxirgi ko'rganingizdan keyin ${unseen} ta yangi xato`}>
+                {formatNumber(unseen)}
+              </span>
+            )}
           </Link>
         ))}
       </nav>
@@ -89,7 +108,11 @@ function Sidebar({ current, overview }) {
         {online
           ? `${live === "live" ? "Jonli" : "Server ulangan"} · ${formatTime(overview.updatedAt, { seconds: true })}`
           : overview.error
-            ? "Server bilan aloqa yo'q"
+            ? overview.error.kind === "timeout"
+              ? "Server javob bermayapti"
+              : overview.error.kind === "server"
+                ? "Serverda xato"
+                : "Server bilan aloqa yo'q"
             : "Ulanmoqda…"}
       </div>
     </aside>
@@ -102,7 +125,7 @@ export function App() {
   const overview = useApi(() => get("/api/overview"), [], {
     interval: OVERVIEW_INTERVAL_MS,
     // Bosh sahifa va yon panel: hamma narsa shu so'rovda (og'irroq) — jonli, lekin 3 s da bir martadan ko'p emas
-    live: ["posts", "loads", "drivers", "ai", "processes"],
+    live: ["posts", "loads", "drivers", "ai", "processes", "errors"],
     liveGapMs: 3000,
   });
   const Page = route ? PAGES[route.id] : NotFound;
@@ -110,13 +133,17 @@ export function App() {
   return (
     <OverviewContext.Provider value={overview}>
       <ToastProvider>
+        <UncaughtToasts />
         <div className="app">
           <a className="skip-link" href="#main">
             Asosiy qismga o'tish
           </a>
           <Sidebar current={route} overview={overview} />
           <main id="main" className="main" tabIndex={-1}>
-            <Page key={route?.id ?? "404"} />
+            {/* Sahifa yiqilsa — faqat shu qism xato sahifasiga almashadi, menyu ishlab turadi; boshqa bo'limga o'tsangiz — qaytadan */}
+            <ErrorBoundary key={route?.id ?? "404"}>
+              <Page />
+            </ErrorBoundary>
           </main>
         </div>
       </ToastProvider>

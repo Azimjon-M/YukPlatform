@@ -90,9 +90,12 @@ export function isNetworkError(error) {
 }
 
 // Xato shu ulanishning muammosimi (limit, band, kalit, tarmoq) → { ms, reason, resetAt? } yoki null (noma'lum xato).
-// reason: minute | daily | busy | key | model | network. resetAt — kunlik limit qachon yangilanishi kutiladi
+// reason: minute | daily | busy | key | model | network | size. resetAt — kunlik limit qachon yangilanishi kutiladi
 export function pauseFor(provider, error, now = Date.now()) {
   if (isNetworkError(error)) return { ms: PAUSES.networkMs, reason: "network" };
+  // Bitta uzun e'lon so'rovi daqiqalik token limitiga sig'madi (Groq 413; guruh bo'lsa parse.js o'zi bo'ladi).
+  // Ulanish sog'lom — xato hisoblanmaydi; e'lon boshqa ulanishga beriladi, bu ulanish biroz dam oladi
+  if (provider.isTooLarge?.(error)) return { ms: PAUSES.errorMs, reason: "size" };
   const retry = provider.retryAfterMs?.(error);
   if (retry != null) return { ms: retry, reason: "minute" };
   if (provider.isDailyLimit?.(error)) {

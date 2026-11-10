@@ -47,6 +47,10 @@ export function planAllows(user, { kind, now } = {}) {
   return true;
 }
 
+// --- Blok (boshqaruv markazidan; Azimjon, 2026-11-09) ---
+// Bloklangan odam botga nima yozsa ham shu javob (bot.js), web/Mini App esa shu matnli ekran (apps/api public.js 403 "blocked")
+export const BLOCKED_TEXT = "Uzr, sizga xizmat ko'rsata olmaymiz!";
+
 // --- Admin ---
 // adminIds — .env dagi ADMIN_IDS (raqamlar ro'yxati). user.isAdmin — boshqaruv markazida yoqilgan belgi.
 export function isAdmin(user, adminIds = []) {

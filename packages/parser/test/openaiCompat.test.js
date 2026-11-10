@@ -199,6 +199,8 @@ test("Toshkent yarim tuni va .env dan qo'shiladigan provayderlar", () => {
   assert.deepEqual(entries, [
     { provider: "gemini", models: ["gemini-flash-lite-latest"] },
     { provider: "onepro", models: ["qwen3.8-flash"] },
+    { provider: "groq", models: [getProvider("groq").defaultModel], enabled: false },
+    { provider: "openrouter", models: [getProvider("openrouter").defaultModel] },
   ]);
   assert.ok(!entries.some((e) => e.provider === "claude"), "pullik Claude o'zi qo'shilmaydi");
 });

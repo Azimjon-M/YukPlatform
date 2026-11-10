@@ -10,6 +10,7 @@ import {
   durationMin,
   eventView,
   formatDateTime,
+  sourceCheckView,
   formatNumber,
   formatTime,
   loadView,
@@ -297,4 +298,15 @@ test("olgan yuklari: yo'nalish, xato sababi, hozir ham yetmayaptimi", () => {
   const shipper = deliveriesView({ role: "yuk_beruvchi", deliveries: { total: 1, lastAt: 1, lastLoad: { fromCity: "Andijon", fromRegion: "andijon" } } });
   assert.deepEqual([shipper.noun, shipper.lastRoute], ["mashina", "Andijon → istalgan joy"]);
   assert.deepEqual([deliveriesView({ role: "haydovchi" }).total, deliveriesView({ role: "haydovchi" }).lastRoute], [0, null]);
+});
+
+test("foydalanuvchi qo'shgan manba: tekshiruv belgisi", () => {
+  assert.equal(sourceCheckView({ checkState: null }), null, "admin qo'shgan");
+  assert.equal(sourceCheckView({ checkState: "probe" }).label, "Tekshirilyapti");
+  const trial = sourceCheckView({ checkState: "trial", trial: { loads: 3 }, checkUntil: Date.UTC(2026, 10, 11, 9, 30), checkNote: "50 tadan 20 tasi" }, { timeZone: "Asia/Tashkent" });
+  assert.equal(trial.label, "Sinovda: 3/5 yuk e'loni · 11.11 14:30 gacha");
+  assert.match(trial.title, /Tekshiruv: 50 tadan 20 tasi/);
+  assert.equal(sourceCheckView({ checkState: "failed", checkStats: { probe: {} } }).label, "Rad etildi");
+  assert.equal(sourceCheckView({ checkState: "failed", checkStats: { probe: {}, trial: {} } }).label, "Sinovdan o'tmadi");
+  assert.equal(sourceCheckView({ checkState: "ok" }).tone, "good");
 });

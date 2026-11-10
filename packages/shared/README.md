@@ -12,7 +12,7 @@ Faktlar manbai: [docs/haydovchi-suhbati.md](../../docs/haydovchi-suhbati.md).
 | `match.js` | Yuk haydovchining mashinasi va yo'nalishiga mos keladimi (`matchLoad` → `{ok, reasons}`), yuk kimlarga yuboriladi (`findDrivers`) |
 | `profile.js` | Haydovchi profili: sig'im/xalqaro variantlari, `sanitizeProfile` (Mini App'dan kelgan ma'lumotni tekshiradi), `encodeProfile` / `decodeProfile` (Mini App manzilidagi `?p=`), `routeChosen` / `withRoute` (yo'nalish «📋 Mos yuklar» da tanlanadi, forma saqlaganda eskisi qoladi) — bot va web bir xil qoidalar bilan ishlaydi |
 | `profileText.js` | Profil matni: bot xabari va web «Tekshiring» qatorlari bir manbadan |
-| `route.js` | Haydovchining yo'nalishi («📍 Qayerdan?» → «🏁 Qayerga?»): `routeAreas` (joylar «Qayerda ishlaysiz?» ga qarab), `routeCounts` (har tugmadagi mos yuklar soni), `applyRoute`, `validRouteArea`, `routeSide`. Bot tugmalari (`apps/bot/src/route.js`) va web server (`/pub/me/route`) shundan |
+| `route.js` | Haydovchining yo'nalishi («📍 Qayerdan?» → «🏁 Qayerga?»): `routeAreas` (joylar «Qayerda ishlaysiz?» ga qarab), `routeCounts` (har joydagi mos yuklar soni — faqat web'da; bot tugmalarida 2026-11-10 dan son yo'q), `applyRoute`, `validRouteArea`, `routeSide`. Bot tugmalari (`apps/bot/src/route.js`) va web server (`/pub/me/route`) shundan |
 | `loadText.js` | Joy, narx, transport, og'irlik matnlari (`weightText`: 1 tonnadan kami — kg, qolgani — «tonna») |
 | `dedupe.js` | Bitta yuk ko'p guruhda takrorlansa, uni bir marta yuborish uchun kalit (`loadKey`) va 3 kunlik xotira (`createDeduper`) |
 

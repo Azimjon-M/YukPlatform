@@ -303,6 +303,20 @@ export function eventView({ type, detail }) {
       return { icon: "🗑", text: `Hisobini o'chirdi${via}` };
     case "returned":
       return { icon: "↩️", text: `O'chirgandan keyin qaytdi${via} — boshidan boshladi` };
+    case "sub_left": {
+      const list = (d.missing ?? []).join(", ");
+      return d.first
+        ? { icon: "🔒", text: `Kanal/guruhga a'zo emas${list ? `: ${list}` : ""} — bot ishlamaydi` }
+        : { icon: "🔒", text: `Kanal/guruhdan chiqdi${list ? `: ${list}` : ""} — yuk yuborilmaydi` };
+    }
+    case "sub_joined":
+      return { icon: "🔓", text: "Kanal va guruhga a'zo bo'ldi — bot yana ishlaydi" };
+    case "banned": {
+      const keys = [d.username ? `@${d.username}` : null, d.phone ? formatContactPhone(d.phone) : null].filter(Boolean);
+      return { icon: "🚫", text: `Boshqaruv markazidan bloklandi${keys.length ? ` (${keys.join(", ")} ham)` : ""}` };
+    }
+    case "unbanned":
+      return { icon: "✅", text: "Blokdan chiqarildi" };
     default:
       return { icon: "•", text: type };
   }
@@ -310,7 +324,8 @@ export function eventView({ type, detail }) {
 
 // Oxirgi faollik: shu vaqt ichida bo'lsa — «● Hozir botda / web'da»
 export const ONLINE_MS = 2 * 60 * 1000;
-const SEEN_VIA = { bot: "botda", web: "web'da" };
+// call — yuk xabaridagi «📞 Telefon qilish» tugmasini bosgan (2026-11-09)
+const SEEN_VIA = { bot: "botda", web: "web'da", call: "📞 qo'ng'iroq tugmasida" };
 
 // seenAt — botga yozgan / tugma bosgan yoki web'ni ishlatgan vaqt (2026-11-09 dan yoziladi). Undan oldingilarda —
 // updatedAt (bot uni ham har xabarda yangilaydi, lekin boshqaruv markazidagi o'zgarish ham kiradi): taxminiy, «Hozir» yo'q
@@ -349,6 +364,7 @@ export function deliveriesView(driver) {
     lastAt: d.lastAt ?? null,
     lastRoute: load ? `${placeText(load, "from")} → ${to === "?" && noun === "mashina" ? "istalgan joy" : to}` : null,
     failed: d.failed ?? 0,
+    called: d.called ?? 0, // nechta yukda «📞 Telefon qilish» ni bosgan
     error: deliveryErrorText(d.lastError),
     errorAt: d.lastErrorAt ?? null,
     failing,
@@ -383,6 +399,33 @@ export function profileSummary(profile) {
     intl: INTL_OPTIONS[intlOption(profile)]?.label ?? null,
     mode: null,
   };
+}
+
+// --- Foydalanuvchi qo'shgan manba (bot «➕ Guruh qo'shish», 2026-11-10) ---
+// Tekshiruv holati belgisi: probe — collector oxirgi xabarlarini ko'ryapti; trial — 24 soatlik sinov (kamida 5 ta yuk
+// e'loni); ok — o'tdi; failed — rad etildi / o'tmadi (checkNote — nima uchun). Admin qo'shgan manbada — null
+export const TRIAL_MIN_LOADS = 5; // apps/bot userSources.js SOURCE_RULES.minLoads bilan bir xil
+export function sourceCheckView(source, { timeZone } = {}) {
+  const note = source.checkNote ?? undefined;
+  switch (source.checkState) {
+    case "probe":
+      return { tone: "info", icon: "🔎", label: "Tekshirilyapti", title: "Collector guruhning oxirgi 50 ta xabarini ko'rib chiqyapti (yuk e'loni bormi)" };
+    case "trial": {
+      const loads = source.trial?.loads ?? 0;
+      return {
+        tone: "warning",
+        icon: "🧪",
+        label: `Sinovda: ${loads}/${TRIAL_MIN_LOADS} yuk e'loni · ${formatDateTime(source.checkUntil, { timeZone })} gacha`,
+        title: `Shu vaqtgacha kamida ${TRIAL_MIN_LOADS} ta yuk e'loni chiqsa — doimiy qo'shiladi, chiqmasa — o'chiriladi.${note ? ` Tekshiruv: ${note}` : ""}`,
+      };
+    }
+    case "ok":
+      return { tone: "good", icon: "✅", label: "Sinovdan o'tgan", title: note };
+    case "failed":
+      return { tone: "critical", icon: "❌", label: source.checkStats?.trial ? "Sinovdan o'tmadi" : "Rad etildi", title: note };
+    default:
+      return null;
+  }
 }
 
 // --- Vaqt ---

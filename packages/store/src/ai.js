@@ -5,7 +5,13 @@
 import { decryptText, encryptText, keyHint } from "./secrets.js";
 
 // .env dagi kalit nomlari: kalit bazada emas, .env da turgan qatorlar uchun (key_enc = NULL)
-export const ENV_KEYS = { gemini: "GEMINI_API_KEY", onepro: "ONEPRO_API_KEY", claude: "ANTHROPIC_API_KEY" };
+export const ENV_KEYS = {
+  gemini: "GEMINI_API_KEY",
+  onepro: "ONEPRO_API_KEY",
+  groq: "GROQ_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  claude: "ANTHROPIC_API_KEY",
+};
 
 // Eski qoida (2026-11-06 gacha): bitta umumiy "ai_keys_seeded" belgisi — u bo'lsa, gemini va claude allaqachon hal qilingan
 const LEGACY_SEEDED = new Set(["gemini", "claude"]);
@@ -123,15 +129,16 @@ export function createAiQueries(db, now) {
       const mark = (key) => db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, String(now()));
       const legacy = has("ai_keys_seeded");
       let added = 0;
-      for (const { provider, models } of entries) {
+      // enabled: false — o'chirilgan holda qo'shiladi (envSeedEntries: aniqligi past provayder)
+      for (const { provider, models, enabled = true } of entries) {
         const flag = `ai_keys_seeded:${provider}`;
         if (has(flag) || (legacy && LEGACY_SEEDED.has(provider))) continue;
         // .env da kalit hali yo'q bo'lsa — belgilamaymiz: yozilgach keyingi ishga tushishda qo'shiladi
         const value = env?.[ENV_KEYS[provider]];
         if (!value) continue;
         if (!rows().some((row) => row.provider === provider)) {
-          db.prepare("INSERT INTO ai_keys (provider, label, key_enc, key_hint, models, enabled, created_at) VALUES (?, ?, NULL, ?, ?, 1, ?)")
-            .run(provider, ".env kaliti", keyHint(value), JSON.stringify(models), now());
+          db.prepare("INSERT INTO ai_keys (provider, label, key_enc, key_hint, models, enabled, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?)")
+            .run(provider, ".env kaliti", keyHint(value), JSON.stringify(models), enabled ? 1 : 0, now());
           added++;
         }
         mark(flag);

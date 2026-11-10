@@ -45,8 +45,9 @@ export function areaOptions(scope) {
   ];
 }
 
-// profile — foydalanuvchining sozlamalari (me.profile); onRouteSaved(me) — yo'nalish saqlangach (App yangilaydi)
-export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteSaved, onNeedProfile, onAuthLost }) {
+// profile — foydalanuvchining sozlamalari (me.profile); onRouteSaved(me) — yo'nalish saqlangach (App yangilaydi);
+// onRouteMap(from) — yo'nalishni xaritadan tanlash (App RouteMapPage ni ochadi)
+export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteSaved, onRouteMap, onNeedProfile, onAuthLost }) {
   const k = KINDS[kind];
   const [from, setFrom] = useState("");
   const [hours, setHours] = useState(24);
@@ -140,6 +141,7 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteS
           hours={hours}
           onSaved={routeSaved}
           onCancel={routeChosen(profile) ? () => setPicking(false) : null}
+          onMap={onRouteMap}
           onAuthLost={onAuthLost}
         />
       ) : error?.code === "no_profile" ? (

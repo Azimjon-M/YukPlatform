@@ -11,8 +11,10 @@ import {
   LOADING_SIDES,
   PAYMENT_TYPES,
   REGIONS,
+  POST_TYPE_IDS,
   TASHKENT_DISTRICTS,
 } from "@yuk/shared";
+import { LOAD_PROPERTIES } from "./schema.js";
 
 const aliasText = (aliases = {}) =>
   Object.entries(aliases)
@@ -134,3 +136,18 @@ The message contains several posts. Each post starts with a header line "=== POS
 - Parse every post on its own, exactly as if it were the only post, with all the rules above. Never move or copy anything (places, cargo, weight, price, vehicle, date) from one post to another, even when posts look alike or one seems to continue another.
 - Return one item in "posts" for every post, in the same order, with "id" = the number <n> from its header. Never skip, merge or split posts: a post that is not about cargo still gets its item (postType boshqa, empty loads).
 `;
+
+// Qisqa javob (Groq va OpenRouter, 2026-11-09): JSON sxema so'rovga qo'shilmaydi — Groq'ning bepul tarifida daqiqasiga
+// 8 000 token, sxema esa ~900 token oladi. Maydon nomlari ko'rsatmada yo'q (ular sxemada edi), shuning uchun shu yerda
+// qisqa ro'yxat beriladi. Model bo'sh maydonlarni yozmaydi (javob 2–3 barobar qisqa) — parse.js dagi conformPost
+// ularni null / false / [] qilib to'ldiradi. Ko'rsatma OXIRIGA qo'shiladi: boshi o'zgarmaydi (kesh uchun).
+export function compactOutputRules({ batch = false } = {}) {
+  const shape = batch ? '{"posts": [{"id": <n>, "postType": "...", "loads": [{...}]}]}' : '{"postType": "...", "loads": [{...}]}';
+  return `
+## Output format
+Answer with one JSON object and nothing else: ${shape}
+- postType: ${POST_TYPE_IDS.join(" | ")}.
+- Load fields (use exactly these names and the ids listed above): ${Object.keys(LOAD_PROPERTIES).join(", ")}.
+- Write only the fields that have a value. Leave out every field that would be null, false or an empty list.
+`;
+}

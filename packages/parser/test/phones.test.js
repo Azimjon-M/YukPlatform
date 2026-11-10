@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractPhones, maskPhones } from "../src/phones.js";
+import { extractPhones, maskPhones, hasContact } from "../src/phones.js";
 
 const UZ = "+998901234567";
 
@@ -78,4 +78,12 @@ test("narx, og'irlik, sana va karta raqami telefon deb olinmaydi", () => {
   ]) {
     assert.deepEqual(extractPhones(text), [], text);
   }
+});
+
+test("hasContact: telefon raqami yoki yozgan odamning username'i — aloqa bor; ikkalasi ham yo'q — aloqasiz", () => {
+  assert.equal(hasContact({ text: "Toshkentdan Samarqandga 20 tonna, tel 90 000 00 01" }), true);
+  assert.equal(hasContact({ text: "Toshkentdan Samarqandga 20 tonna, aloqa saytda", sender: "ali_logist" }), true);
+  assert.equal(hasContact({ text: "Toshkentdan Samarqandga 20 tonna, narxi 4 500 000 so'm, aloqa @yukbor_bot orqali" }), false);
+  assert.equal(hasContact({ text: "+998*********" }), false, "yashirilgan raqam — raqam emas");
+  assert.equal(hasContact({}), false);
 });

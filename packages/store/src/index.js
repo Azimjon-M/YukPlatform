@@ -7,12 +7,13 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { createAdminQueries } from "./admin.js";
+import { createUserSourceQueries } from "./userSources.js";
 import { userEvents } from "./history.js";
 import { createAiQueries } from "./ai.js";
 
 export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR } from "./lock.js";
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
-export { createSessions, LINK_PERIOD_S, SESSION_TTL_S } from "./sessions.js";
+export { createCallLinks, createSessions, LINK_PERIOD_S, SESSION_TTL_S } from "./sessions.js";
 export { TUNNEL_URL_KEY, tunnelUrl } from "./tunnel.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -126,6 +127,28 @@ CREATE TABLE IF NOT EXISTS user_events (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS user_events_chat ON user_events (chat_id, id);
+
+-- Blok ro'yxati (2026-11-09, Azimjon: boshqaruv markazidan bloklash «username va tel raqamga»). Bitta odam — 3 tagacha
+-- qator: kind id (Telegram id), username (kichik harf, @siz), phone (+998...). Shulardan biri mos kelsa — bloklangan:
+-- boshqa akkaunt o'sha username yoki raqam bilan kelsa ham. chat_id — kimni bloklaganda qo'shilgani
+CREATE TABLE IF NOT EXISTS bans (
+  kind TEXT NOT NULL,
+  value TEXT NOT NULL,
+  chat_id INTEGER,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (kind, value)
+);
+CREATE INDEX IF NOT EXISTS bans_chat ON bans (chat_id);
+
+-- Botga topshiriq (2026-11-10): server (apps/api) — boshqa jarayon, u chatga bot kabi to'liq javob bera olmaydi
+-- (mos yuklar ro'yxati, tugmalar bot kodida). Server shu yerga yozadi, bot har 2 soniyada olib bajaradi.
+-- kind: route — haydovchi web'dagi xaritada yo'nalish tanladi → bot chatda «✅ Yo'nalish …» va mos yuklarni ko'rsatadi
+CREATE TABLE IF NOT EXISTS bot_notices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 `;
 
 // Eski bazaga yangi ustunlar (CREATE TABLE IF NOT EXISTS mavjud jadvalni o'zgartirmaydi)
@@ -138,10 +161,40 @@ function migrate(db) {
   if (!columns.includes("via")) db.exec("ALTER TABLE posts ADD COLUMN via TEXT");
   // parsed_by (2026-11-09) — e'lonni kim tushundi: rules (AI'siz qoidaviy parser, @yuk/parser parseByRules) | ai | NULL (eski / xato)
   if (!columns.includes("parsed_by")) db.exec("ALTER TABLE posts ADD COLUMN parsed_by TEXT");
+  // sender (2026-11-09) — e'lonni guruhga yozgan odamning Telegram username'i, @ siz («💬 Lichkasi» havolasi uchun).
+  // NULL — username'i yo'q, kanal nomidan yozilgan, bot yoki eski e'lon
+  if (!columns.includes("sender")) db.exec("ALTER TABLE posts ADD COLUMN sender TEXT");
   // Manbalar: collector akkaunti guruhga a'zomi (a'zo — jonli), qachon tekshirilgan. NULL — hali tekshirilmagan
   const sourceColumns = db.prepare("PRAGMA table_info(sources)").all().map((c) => c.name);
   if (!sourceColumns.includes("joined")) db.exec("ALTER TABLE sources ADD COLUMN joined INTEGER");
   if (!sourceColumns.includes("checked_at")) db.exec("ALTER TABLE sources ADD COLUMN checked_at INTEGER");
+  // Collector navbati (2026-11-09): poll_ms — guruh hozir qancha oraliqda so'ralyapti (faolligiga qarab);
+  // watch — "tops": yangisi borligini bitta umumiy so'rov bilan bilib turadi, "poll": o'z navbati bilan so'raladi
+  if (!sourceColumns.includes("poll_ms")) db.exec("ALTER TABLE sources ADD COLUMN poll_ms INTEGER");
+  if (!sourceColumns.includes("watch")) db.exec("ALTER TABLE sources ADD COLUMN watch TEXT");
+  // A'zo bo'lish navbati (2026-11-09): join_state — wanted (navbatda) | joined (collector qo'shildi) | requested (guruh
+  // adminiga so'rov yuborildi) | error (join_error — nima uchun); join_at — oxirgi urinish (kunlik limit shundan sanaladi)
+  if (!sourceColumns.includes("join_state")) db.exec("ALTER TABLE sources ADD COLUMN join_state TEXT");
+  if (!sourceColumns.includes("join_error")) db.exec("ALTER TABLE sources ADD COLUMN join_error TEXT");
+  if (!sourceColumns.includes("join_at")) db.exec("ALTER TABLE sources ADD COLUMN join_at INTEGER");
+  // Foydalanuvchi qo'shgan manba (2026-11-10, userSources.js): added_by — kim (chat id), title/members/chat_type — Bot API
+  // getChat dan; check_state — probe | trial | ok | failed (NULL — boshqaruv markazidan qo'shilgan, tekshirilmaydi);
+  // check_until — sinov tugaydigan vaqt; check_note — natija matni; check_stats — sonlar (JSON); check_notified —
+  // qo'shgan odamga oxirgi aytilgan holat
+  for (const [name, type] of [
+    ["added_by", "INTEGER"],
+    ["title", "TEXT"],
+    ["members", "INTEGER"],
+    ["chat_type", "TEXT"],
+    ["check_state", "TEXT"],
+    ["check_at", "INTEGER"],
+    ["check_until", "INTEGER"],
+    ["check_note", "TEXT"],
+    ["check_stats", "TEXT"],
+    ["check_notified", "TEXT"],
+  ]) {
+    if (!sourceColumns.includes(name)) db.exec(`ALTER TABLE sources ADD COLUMN ${name} ${type}`);
+  }
 
   // Rollar (2026-11-06): role — haydovchi | yuk_beruvchi | NULL (hali tanlamagan);
   // plan — obuna (hozircha hammasi "free", pullik obuna keyin); is_admin — faqat boshqaruv markazidan yoqiladi
@@ -185,10 +238,28 @@ function migrate(db) {
   if (!users.includes("paused_at")) db.exec("ALTER TABLE drivers ADD COLUMN paused_at INTEGER");
   if (!users.includes("paused_by")) db.exec("ALTER TABLE drivers ADD COLUMN paused_by TEXT");
   if (!users.includes("idle_warned_at")) db.exec("ALTER TABLE drivers ADD COLUMN idle_warned_at INTEGER");
+  // Kanal va guruhga a'zolik (2026-11-09, Azimjon: bot faqat @Yuk_Ekspert va @Yuk_Ekspert_chat a'zolariga ishlaydi).
+  // sub_ok — 1 a'zo | 0 a'zo emas | NULL hali tekshirilmagan; sub_missing — qaysilariga a'zo emas (JSON ["@Yuk_Ekspert"]);
+  // sub_checked_at — oxirgi tekshiruv; sub_reminded_at — «a'zo bo'ling, yuk yuborilmadi» eslatmasi yuborilgan vaqt
+  if (!users.includes("sub_ok")) db.exec("ALTER TABLE drivers ADD COLUMN sub_ok INTEGER");
+  if (!users.includes("sub_missing")) db.exec("ALTER TABLE drivers ADD COLUMN sub_missing TEXT");
+  if (!users.includes("sub_checked_at")) db.exec("ALTER TABLE drivers ADD COLUMN sub_checked_at INTEGER");
+  if (!users.includes("sub_reminded_at")) db.exec("ALTER TABLE drivers ADD COLUMN sub_reminded_at INTEGER");
+  // commands_on — shu chatda Telegram'ning «Menu» tugmasi (buyruqlar ro'yxati) o'rnatilganmi (2026-11-10, Azimjon: rol
+  // tanlanmaguncha ko'rinmasin). Bot apps/bot commands.js: rol bor — qo'yadi, yo'q — olib tashlaydi va shu yerga yozadi
+  if (!users.includes("commands_on")) db.exec("ALTER TABLE drivers ADD COLUMN commands_on INTEGER NOT NULL DEFAULT 0");
+  // route_msg_id — chatdagi oxirgi «📍 Qayerdan?» / «🏁 Qayerga?» xabari (2026-11-10). Yo'nalish web xaritasida tanlansa,
+  // bot o'sha xabarni «✅ Yo'nalish: …» ga almashtiradi (eski tugmalar chatda osilib qolmasin)
+  if (!users.includes("route_msg_id")) db.exec("ALTER TABLE drivers ADD COLUMN route_msg_id INTEGER");
 
   // kind — yuk (yuk bor, mashina kerak) | mashina (mashina bo'sh, yuk kerak — yuk beruvchilarga)
   const loads = db.prepare("PRAGMA table_info(loads)").all().map((c) => c.name);
   if (!loads.includes("kind")) db.exec("ALTER TABLE loads ADD COLUMN kind TEXT NOT NULL DEFAULT 'yuk'");
+
+  // called_at — haydovchi yuk xabaridagi «📞 Telefon qilish» tugmasini birinchi bosgan vaqt (2026-11-09).
+  // Qo'ng'iroq qilganini bilmaymiz (u telefonda), faqat raqamni qo'ng'iroq oynasiga ochganini
+  const sent = db.prepare("PRAGMA table_info(deliveries)").all().map((c) => c.name);
+  if (!sent.includes("called_at")) db.exec("ALTER TABLE deliveries ADD COLUMN called_at INTEGER");
 
   // control — boshqaruv markazining buyruqlari (JSON): { wakeAt, healthResetAt }. Bot faqat o'qiydi, data ni esa bot yozadi
   const slots = db.prepare("PRAGMA table_info(ai_slots)").all().map((c) => c.name);
@@ -248,10 +319,30 @@ function driverRow(row) {
     pausedAt: row.paused_at ?? null,
     pausedBy: row.paused_by ?? null,
     idleWarnedAt: row.idle_warned_at ?? null,
+    // Kanal va guruhga a'zolik: true | false | null (tekshirilmagan); subMissing — a'zo bo'lmaganlari (["@Yuk_Ekspert"])
+    // (blok — driverRow da yo'q: store.banOf / listDrivers().banned)
+    subOk: row.sub_ok == null ? null : row.sub_ok === 1,
+    subMissing: parse(row.sub_missing) ?? [],
+    subCheckedAt: row.sub_checked_at ?? null,
+    subRemindedAt: row.sub_reminded_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
+
+// Blok kalitlari: Telegram id, username (kichik harf, @siz), raqam. Bo'sh qiymatlar tashlanadi
+export function banKeys({ chatId = null, username = null, phone = null } = {}) {
+  const keys = [];
+  if (chatId != null) keys.push({ kind: "id", value: String(chatId) });
+  const name = String(username ?? "").replace(/^@/, "").trim().toLowerCase();
+  if (name) keys.push({ kind: "username", value: name });
+  if (phone) keys.push({ kind: "phone", value: String(phone) });
+  return keys;
+}
+
+// SQL: drivers qatori bloklanganmi (activeUsers — bloklanganga yuk va «24 soat» ogohlantirishi bormaydi)
+const NOT_BANNED = `NOT EXISTS (SELECT 1 FROM bans b WHERE (b.kind = 'id' AND b.value = CAST(drivers.chat_id AS TEXT))
+  OR (b.kind = 'username' AND b.value = lower(drivers.username)) OR (b.kind = 'phone' AND b.value = drivers.phone))`;
 
 // touchDriver vaqtni shundan tez-tez yozmaydi (har xabarda bazaga yozish shart emas — «hozir faol» uchun yetarli)
 export const SEEN_EVERY_MS = 15_000;
@@ -269,6 +360,7 @@ function queuedPost(row) {
     // e'lon navbatga o'rtacha 40 s kechikib keladi (2026-11-05 o'lchovi)
     queuedAt: row.created_at,
     via: row.via, // live — a'zo bo'lingan guruhdan jonli kelgan (bot uni tezroq AI'ga yuboradi)
+    sender: row.sender ?? null, // e'lonni yozgan odamning username'i («💬 Lichkasi»)
   };
 }
 
@@ -283,8 +375,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
   const q = {
     insertPost: db.prepare(
-      `INSERT OR IGNORE INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via, sender)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     recentSameText: db.prepare("SELECT id FROM posts WHERE text_key = ? AND posted_at > ? LIMIT 1"),
     newPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY id LIMIT ?"),
@@ -306,7 +398,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, kind, created_at) VALUES (?, ?, ?, ?, ?)"),
     loadDelivery: db.prepare("UPDATE loads SET sent_to = ?, channel_message_id = ? WHERE id = ?"),
     recentLoads: db.prepare(
-      `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at
+      `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at, p.sender
        FROM loads l JOIN posts p ON p.id = l.post_id
        WHERE l.created_at > ? AND l.kind = ? ORDER BY l.id DESC LIMIT ?`,
     ),
@@ -316,7 +408,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     ),
     // Rolsiz eski yozuv profili bilan — haydovchi (driverRow dagi qoida bilan bir xil)
     activeUsers: db.prepare(
-      "SELECT * FROM drivers WHERE active = 1 AND profile IS NOT NULL AND COALESCE(role, 'haydovchi') = ?",
+      `SELECT * FROM drivers WHERE active = 1 AND profile IS NOT NULL AND COALESCE(role, 'haydovchi') = ? AND ${NOT_BANNED}`,
     ),
     getCursor: db.prepare("SELECT last_message_id FROM cursors WHERE source = ?"),
     setCursor: db.prepare(
@@ -335,17 +427,20 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     db,
     // Boshqaruv markazi uchun: listLoads, listPosts, listDrivers, sources, metrics (admin.js)
     ...createAdminQueries(db, now),
+    // Foydalanuvchi qo'shgan guruh/kanallar: tekshirish va 24 soatlik sinov (userSources.js)
+    ...createUserSourceQueries(db, now),
     // AI kalitlari va ulanishlar holati (ai.js)
     ...createAiQueries(db, now),
 
     // --- E'lonlar navbati ---
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.
-    // → { id, status } yoki null (bu xabar allaqachon bor). via — live | poll (collector), qolganlari null
-    addPost({ source, messageId, link = null, text, postedAt = now(), via = null }, { dedupeWindowMs } = {}) {
+    // → { id, status } yoki null (bu xabar allaqachon bor). via — live | poll (collector), qolganlari null.
+    // sender — e'lonni yozgan odamning username'i, @ siz (@yuk/shared telegramUsername tekshirgan; bo'lmasa null)
+    addPost({ source, messageId, link = null, text, postedAt = now(), via = null, sender = null }, { dedupeWindowMs } = {}) {
       const key = textKey(text);
       const same = dedupeWindowMs ? q.recentSameText.get(key, postedAt - dedupeWindowMs) : null;
       const status = same ? "duplicate" : "new";
-      const result = q.insertPost.run(source, messageId, link, text, key, postedAt, status, now(), via);
+      const result = q.insertPost.run(source, messageId, link, text, key, postedAt, status, now(), via, sender);
       if (result.changes === 0) return null;
       return { id: Number(result.lastInsertRowid), status };
     },
@@ -396,14 +491,29 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     },
 
     // Oxirgi yuklar, eng yangisi birinchi ("📋 Mos yuklar" / "🚚 Bo'sh mashinalar" tugmalari uchun).
-    // → [{ id, load, post: { source, link, postedAt }, createdAt }]
+    // → [{ id, load, post: { source, link, postedAt, sender }, createdAt }]
     recentLoads({ sinceMs = 24 * 60 * 60 * 1000, limit = 500, kind = "yuk" } = {}) {
       return q.recentLoads.all(now() - sinceMs, kind, limit).map((row) => ({
         id: row.id,
         load: JSON.parse(row.data),
-        post: { source: row.source, link: row.link, postedAt: row.posted_at },
+        post: { source: row.source, link: row.link, postedAt: row.posted_at, sender: row.sender ?? null },
         createdAt: row.created_at,
       }));
+    },
+
+    // Bitta yuk id bo'yicha («📞 Telefon qilish» sahifasi raqamni shundan oladi) → { id, kind, load, post } yoki null
+    getLoad(id) {
+      const row = db
+        .prepare("SELECT l.id, l.data, l.kind, l.created_at, p.source, p.link, p.posted_at FROM loads l JOIN posts p ON p.id = l.post_id WHERE l.id = ?")
+        .get(id);
+      if (!row) return null;
+      return {
+        id: row.id,
+        kind: row.kind ?? "yuk",
+        load: JSON.parse(row.data),
+        post: { source: row.source, link: row.link, postedAt: row.posted_at },
+        createdAt: row.created_at,
+      };
     },
 
     // --- Haydovchilar ---
@@ -556,6 +666,107 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       this.logEvent(chatId, "idle_warned");
     },
 
+    // Kanal va guruhga a'zolik tekshirildi (apps/bot members.js). Faqat bor foydalanuvchiga, updated_at o'zgarmaydi.
+    // Holat o'zgarsa — tarixga: sub_left (chiqdi yoki hali a'zo emas, qaysilariga) / sub_joined (hammasiga a'zo bo'ldi).
+    // Birinchi tekshiruvda a'zo chiqsa — yozilmaydi (hamma eski foydalanuvchi uchun bir xil keraksiz qator bo'lardi)
+    setSubscription(chatId, { ok, missing = [] }) {
+      const before = db.prepare("SELECT sub_ok, sub_missing FROM drivers WHERE chat_id = ?").get(chatId);
+      if (!before) return false;
+      const list = ok ? [] : [...missing];
+      db.prepare("UPDATE drivers SET sub_ok = ?, sub_missing = ?, sub_checked_at = ? WHERE chat_id = ?").run(ok ? 1 : 0, json(list), now(), chatId);
+      const was = before.sub_ok == null ? null : before.sub_ok === 1;
+      if (!ok && (was !== false || before.sub_missing !== json(list))) this.logEvent(chatId, "sub_left", { missing: list, first: was == null });
+      else if (ok && was === false) this.logEvent(chatId, "sub_joined");
+      return true;
+    },
+
+    // --- Blok (boshqaruv markazidan; bot va web bloklanganga «Uzr, sizga xizmat ko'rsata olmaymiz!» deydi) ---
+    // Bloklanganmi: id, username yoki raqamdan biri ro'yxatda bo'lsa → { kind, value, chatId, at } (birinchi mos), yo'q — null.
+    // username — Telegram'dan kelgan hozirgisi (bazadagi eskirgan bo'lishi mumkin), phone — bazadagi (o'zi ulashgan)
+    banOf({ chatId = null, username = null, phone = null } = {}) {
+      const order = { id: 0, username: 1, phone: 2 };
+      const found = banKeys({ chatId, username, phone })
+        .map((key) => db.prepare("SELECT kind, value, chat_id, created_at FROM bans WHERE kind = ? AND value = ?").get(key.kind, key.value))
+        .filter(Boolean)
+        .sort((a, b) => order[a.kind] - order[b.kind])[0];
+      return found ? { kind: found.kind, value: found.value, chatId: found.chat_id, at: found.created_at } : null;
+    },
+
+    // Bloklash: shu foydalanuvchining id, username va raqami ro'yxatga. → banOf natijasi (yo'q foydalanuvchi — null)
+    banDriver(chatId) {
+      const user = this.getDriver(chatId);
+      if (!user) return null;
+      const keys = banKeys(user);
+      const add = db.prepare("INSERT OR IGNORE INTO bans (kind, value, chat_id, created_at) VALUES (?, ?, ?, ?)");
+      const time = now();
+      for (const key of keys) add.run(key.kind, key.value, chatId, time);
+      this.logEvent(chatId, "banned", { username: user.username ?? null, phone: user.phone ?? null });
+      return this.banOf(user);
+    },
+
+    // Blokdan chiqarish: shu qatorni bloklab turgan hamma yozuv (o'zi bloklanganda qo'shilgani va username / raqami bo'yicha
+    // mos kelgani). Boshqa odam bloklanganda qo'shilgan id yozuvi qoladi — u odam bloklangan bo'lib qoladi. → o'chgan soni
+    unbanDriver(chatId) {
+      const user = this.getDriver(chatId) ?? { chatId };
+      let removed = db.prepare("DELETE FROM bans WHERE chat_id = ?").run(chatId).changes;
+      const drop = db.prepare("DELETE FROM bans WHERE kind = ? AND value = ?");
+      for (const key of banKeys(user)) removed += drop.run(key.kind, key.value).changes;
+      if (removed) this.logEvent(chatId, "unbanned");
+      return removed;
+    },
+
+    // «Menu» tugmasi (bot commands.js): kerakli holati (want — rol tanlangan: role yoki eski profil bor) Telegram'dagidan
+    // (commands_on) farq qiladigan chatlar. chatId — faqat shu odam. Rol web'da, botda yoki boshqaruv markazida o'zgarsa —
+    // shu ro'yxatga tushadi. → [{ chatId, want }]
+    commandsToSync({ chatId = null, limit = 50 } = {}) {
+      const want = "(role IS NOT NULL OR profile IS NOT NULL)";
+      const where = chatId == null ? "" : "AND chat_id = ?";
+      return db
+        .prepare(`SELECT chat_id, ${want} AS want FROM drivers WHERE ${want} != commands_on ${where} LIMIT ?`)
+        .all(...(chatId == null ? [] : [chatId]), limit)
+        .map((row) => ({ chatId: row.chat_id, want: Boolean(row.want) }));
+    },
+
+    setCommandsOn(chatId, on) {
+      db.prepare("UPDATE drivers SET commands_on = ? WHERE chat_id = ?").run(on ? 1 : 0, chatId);
+    },
+
+    // Buyruqlar ro'yxatining o'zi o'zgarganda (yangi buyruq qo'shildi): «o'rnatilgan» deb yozilgan hamma chat qaytadan
+    // farqli bo'lib qoladi — keyingi tekshiruv ularga yangi ro'yxatni qo'yadi. → nechta chat
+    resetCommandsOn() {
+      return Number(db.prepare("UPDATE drivers SET commands_on = 0 WHERE commands_on = 1").run().changes);
+    },
+
+    // Chatdagi yo'nalish tanlash xabari (bot): ko'rsatilganda — id, tanlab bo'lingach — null
+    setRouteMessage(chatId, messageId) {
+      db.prepare("UPDATE drivers SET route_msg_id = ? WHERE chat_id = ?").run(messageId ?? null, chatId);
+    },
+
+    routeMessage(chatId) {
+      return db.prepare("SELECT route_msg_id FROM drivers WHERE chat_id = ?").get(chatId)?.route_msg_id ?? null;
+    },
+
+    // Botga topshiriq (bot_notices jadvali): server yozadi, bot oladi. Bir odamning bir xil topshirig'i navbatda bir marta
+    addBotNotice(chatId, kind) {
+      const waiting = db.prepare("SELECT 1 FROM bot_notices WHERE chat_id = ? AND kind = ?").get(chatId, kind);
+      if (!waiting) db.prepare("INSERT INTO bot_notices (chat_id, kind, created_at) VALUES (?, ?, ?)").run(chatId, kind, now());
+    },
+
+    // Navbatdagilarni olib, o'chiradi (bot har 2 soniyada). maxAgeMs dan eskisi (bot uzoq o'chiq turgan) — bajarilmaydi,
+    // faqat o'chiriladi: odam 10 daqiqa oldingi tanlovi uchun kutilmagan xabar olmasin
+    takeBotNotices({ limit = 20, maxAgeMs = 10 * 60 * 1000 } = {}) {
+      const rows = db.prepare("SELECT id, chat_id, kind, created_at FROM bot_notices ORDER BY id LIMIT ?").all(limit);
+      const drop = db.prepare("DELETE FROM bot_notices WHERE id = ?");
+      for (const row of rows) drop.run(row.id);
+      const since = now() - maxAgeMs;
+      return rows.filter((row) => row.created_at >= since).map((row) => ({ id: row.id, chatId: row.chat_id, kind: row.kind, createdAt: row.created_at }));
+    },
+
+    // «A'zo bo'ling — yuk yuborilmadi» eslatmasi yuborildi (bot members.js, kuniga ko'pi bilan bir marta)
+    markSubReminded(chatId) {
+      db.prepare("UPDATE drivers SET sub_reminded_at = ? WHERE chat_id = ?").run(now(), chatId);
+    },
+
     // Bot har bir shaxsiy yuk xabaridan keyin yozadi (pipeline): ok — Telegram qabul qildimi, error — nega yo'q
     addDelivery({ loadId, chatId, ok, error = null }) {
       db.prepare("INSERT INTO deliveries (load_id, chat_id, ok, error, sent_at) VALUES (?, ?, ?, ?, ?)").run(
@@ -564,6 +775,19 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
         ok ? 1 : 0,
         ok ? null : String(error ?? "xato").slice(0, 200),
         now(),
+      );
+    },
+
+    // «📞 Telefon qilish» bosildi: shu odamga yuborilgan shu yukka birinchi bosilgan vaqt yoziladi (keyingilari — yo'q).
+    // «📋 Mos yuklar» ro'yxatidan bosilganda deliveries qatori bo'lmasligi mumkin — unda hech narsa o'zgarmaydi
+    markCalled({ loadId, chatId }) {
+      return (
+        db
+          .prepare(
+            `UPDATE deliveries SET called_at = ? WHERE id = (
+               SELECT id FROM deliveries WHERE load_id = ? AND chat_id = ? AND ok = 1 AND called_at IS NULL ORDER BY id DESC LIMIT 1)`,
+          )
+          .run(now(), loadId, chatId).changes > 0
       );
     },
 

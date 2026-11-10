@@ -13,8 +13,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { envSeedEntries, resolveSettings } from "@yuk/parser";
 import { routeScopeFrom } from "@yuk/shared";
-import { loadSecret, openStore } from "@yuk/store";
+import { createCallLinks, loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
+import { createErrorLog } from "./errorLog.js";
 import { createProcessManager } from "./processes.js";
 import { createPublicApp } from "./public.js";
 import { createBotMessenger } from "./botMessage.js";
@@ -43,9 +44,26 @@ if (seeded) log(`Manbalar: .env dagi TG_SOURCES dan ${seeded} ta guruh olindi`);
 // AI kalitlari: .env dagi kalitlar (GEMINI_API_KEY, ONEPRO_API_KEY) «AI» bo'limiga bir marta o'zi qo'shiladi (bot ham shunday qiladi)
 const seededAi = store.seedAiKeys(envSeedEntries(resolveSettings()), process.env);
 if (seededAi) log(`AI: .env dagi ${seededAi} ta kalit ro'yxatga qo'shildi`);
-// Bot va collector loglari shu oynada ham chiqadi: [bot] ..., [collector] ...
+// Xatolar jurnali — boshqaruv markazining «Xatolar» bo'limi (errorLog.js): jarayonlar loglaridan va ikkala serverdan.
+// Jurnalning o'zi xotirada, «E'tiborsiz qoldirish» qoidalari esa bazada (settings.errors_ignored) — server qayta yoqilsa ham qoladi
+const IGNORED_SETTING = "errors_ignored";
+function readIgnored() {
+  try {
+    return JSON.parse(store.getSetting(IGNORED_SETTING) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+const errors = createErrorLog({
+  ignored: readIgnored(),
+  onIgnoredChange: (rules) => store.setSetting(IGNORED_SETTING, JSON.stringify(rules)),
+});
+// Bot va collector loglari shu oynada ham chiqadi: [bot] ..., [collector] ... Xato qatorlari jurnalga ham yoziladi
 const processes = createProcessManager({
-  onLine: (name, line) => (line.stream === "err" ? console.error : console.log)(`[${name}] ${line.text}`),
+  onLine: (name, line) => {
+    (line.stream === "err" ? console.error : console.log)(`[${name}] ${line.text}`);
+    errors.fromProcessLine(name, line);
+  },
 });
 const secret = loadSecret();
 const sessions = createSessions(secret);
@@ -56,13 +74,16 @@ const app = createApp({
   secret,
   sessions,
   publicUrl: PUBLIC_LOCAL_URL,
+  errors,
 });
 const publicApp = createPublicApp({
   store,
   sessions,
+  calls: createCallLinks(secret), // «📞 Telefon qilish» sahifasi (/pub/call) — bot bilan bir kalit
   scope: routeScopeFrom(),
   webDist: path.join(ROOT, "apps/web/dist"),
   notify: createBotMessenger(process.env.BOT_TOKEN?.trim()), // web'dan hisob o'chirilsa — chatdagi menyuni olib tashlash
+  errors,
 });
 
 function failed(port, name) {

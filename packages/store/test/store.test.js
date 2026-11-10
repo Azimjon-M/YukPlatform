@@ -45,6 +45,16 @@ test("takeNewPosts: joylangan va navbatga tushgan vaqt alohida (bot batch kutish
   const [post] = store.takeNewPosts();
   assert.equal(post.postedAt, 30_000);
   assert.equal(post.queuedAt, 90_000);
+  assert.equal(post.sender, null);
+});
+
+test("e'lonni yozgan odam (sender) navbatdagi e'londa va «Mos yuklar» ro'yxatida bor", () => {
+  const store = openStore({ file: ":memory:" });
+  const { id } = store.addPost({ source: "@a", messageId: 1, text: "Toshkentdan Samarqandga 20 t", postedAt: Date.now(), sender: "ish_beruvchi" });
+  const [post] = store.takeNewPosts();
+  assert.equal(post.sender, "ish_beruvchi");
+  store.addLoad({ postId: id, key: "k1", load: { fromCity: "Toshkent" } });
+  assert.equal(store.recentLoads()[0].post.sender, "ish_beruvchi");
 });
 
 test("boshqa guruhga tashlangan o'sha matn AI'ga bormaydi (duplicate)", () => {
@@ -251,12 +261,29 @@ test("batafsil: ikkala rolning sozlamalari, yuborilgan yuklar (yo'nalish, xato, 
   store.addDelivery({ loadId, chatId: 7, ok: true });
   clock.advance(1_000);
   store.addDelivery({ loadId, chatId: 7, ok: false, error: "Forbidden: bot was blocked by the user" });
+  // «📞 Telefon qilish» bosildi — yetib borgan xabarga yoziladi (yetmagani bosilishi mumkin emas), faqat birinchi marta
+  clock.advance(1_000);
+  assert.equal(store.markCalled({ loadId, chatId: 7 }), true);
+  clock.advance(1_000);
+  assert.equal(store.markCalled({ loadId, chatId: 7 }), false, "ikkinchi bosish — vaqt o'zgarmaydi");
+  assert.equal(store.markCalled({ loadId, chatId: 8 }), false, "unga yuborilmagan");
   const details = store.driverDetails(7);
   assert.deepEqual(details.profiles, { haydovchi: { fromAreas: [] } });
   assert.deepEqual(details.deliveries, [
-    { ok: false, error: "Forbidden: bot was blocked by the user", at: 2_000, load: { fromCity: "Samarqand" }, kind: "mashina", link: "https://t.me/a/1" },
-    { ok: true, error: null, at: 1_000, load: { fromCity: "Samarqand" }, kind: "mashina", link: "https://t.me/a/1" },
+    { ok: false, error: "Forbidden: bot was blocked by the user", at: 2_000, calledAt: null, load: { fromCity: "Samarqand" }, kind: "mashina", link: "https://t.me/a/1" },
+    { ok: true, error: null, at: 1_000, calledAt: 3_000, load: { fromCity: "Samarqand" }, kind: "mashina", link: "https://t.me/a/1" },
   ]);
+  assert.equal(store.listDrivers().find((d) => d.chatId === 7).deliveries.called, 1);
+
+  // Bitta yuk id bo'yicha (qo'ng'iroq sahifasi)
+  assert.deepEqual(store.getLoad(loadId), {
+    id: loadId,
+    kind: "mashina",
+    load: { fromCity: "Samarqand" },
+    post: { source: "@a", link: "https://t.me/a/1", postedAt: 5 },
+    createdAt: 1_000,
+  });
+  assert.equal(store.getLoad(loadId + 100), null);
 });
 
 test("switchRole: har rolning sozlamalari alohida saqlanadi, qaytganda tiklanadi", () => {
@@ -430,9 +457,10 @@ test("olgan yuklari: bugun (Toshkent vaqti) / jami, oxirgisi yo'nalishi bilan, o
     failed: 1,
     lastError: "Forbidden: bot was blocked by the user",
     lastErrorAt: clock.now(),
+    called: 0,
   });
   assert.deepEqual(store.listDrivers().find((d) => d.chatId === 8).deliveries, {
-    today: 0, total: 0, lastAt: null, lastLoad: null, failed: 0, lastError: null, lastErrorAt: null,
+    today: 0, total: 0, lastAt: null, lastLoad: null, failed: 0, lastError: null, lastErrorAt: null, called: 0,
   });
 
   // Jonli belgilar: yangi yuborish — drivers va loads o'zgaradi, posts — yo'q
@@ -471,7 +499,7 @@ test("oxirgi yuklar: eng yangisi birinchi, muddatdan eskisi tushmaydi", () => {
   store.addLoad({ postId: post.id, key: "k2", load: { fromCity: "Andijon" } });
   const all = store.recentLoads({ sinceMs: 60_000 });
   assert.deepEqual(all.map((r) => r.load.fromCity), ["Andijon", "Toshkent"]);
-  assert.deepEqual(all[0].post, { source: "@a", link: "https://t.me/a/1", postedAt: 5 });
+  assert.deepEqual(all[0].post, { source: "@a", link: "https://t.me/a/1", postedAt: 5, sender: null });
   assert.deepEqual(store.recentLoads({ sinceMs: 5_000 }).map((r) => r.load.fromCity), ["Andijon"]);
   assert.equal(store.recentLoads({ sinceMs: 60_000, limit: 1 }).length, 1);
 });
@@ -487,5 +515,93 @@ test("takeNewPostsAfter: id'dan keyingi yangi e'lonlar; finishPost kim tushungan
   assert.deepEqual(store.takeNewPostsAfter(0).map((p) => p.messageId), [3], "tugaganlari olinmaydi");
   const byId = Object.fromEntries(store.listPosts().items.map((p) => [p.messageId, p.parsedBy]));
   assert.deepEqual(byId, { 1: "rules", 2: null, 3: null });
+  store.close();
+});
+
+test("kanal va guruhga a'zolik: holat, tarix (o'zgarganda) va eslatma vaqti; updated_at o'zgarmaydi", () => {
+  const clock = fakeClock(1_000);
+  const store = openStore({ file: ":memory:", now: clock.now });
+  assert.equal(store.setSubscription(42, { ok: false, missing: ["@k"] }), false, "yo'q foydalanuvchi — yozilmaydi");
+  store.saveDriver(42, { name: "Ali" });
+  store.saveDriver(43, { name: "Vali" });
+  assert.deepEqual([store.getDriver(42).subOk, store.getDriver(42).subMissing], [null, []]);
+
+  clock.advance(1_000);
+  store.setSubscription(43, { ok: true });
+  store.setSubscription(42, { ok: false, missing: ["@k", "@g"] });
+  store.setSubscription(42, { ok: false, missing: ["@k", "@g"] });
+  store.setSubscription(42, { ok: false, missing: ["@g"] });
+  store.setSubscription(42, { ok: true, missing: ["@g"] });
+  store.markSubReminded(42);
+  const user = store.getDriver(42);
+  assert.deepEqual([user.subOk, user.subMissing, user.subCheckedAt, user.subRemindedAt, user.updatedAt], [true, [], 2_000, 2_000, 1_000]);
+  assert.deepEqual(
+    store.driverDetails(42).events.filter((e) => e.type.startsWith("sub_")).map((e) => [e.type, e.detail]),
+    [["sub_joined", null], ["sub_left", { missing: ["@g"], first: false }], ["sub_left", { missing: ["@k", "@g"], first: true }]],
+  );
+  assert.equal(store.driverDetails(43).events.filter((e) => e.type.startsWith("sub_")).length, 0, "birinchi tekshiruvda a'zo — tarixga yozilmaydi");
+  const row = store.listDrivers().find((d) => d.chatId === 42);
+  assert.deepEqual([row.subOk, row.subMissing, row.subCheckedAt], [true, [], 2_000]);
+
+  const before = store.changeMarks().drivers;
+  store.setSubscription(43, { ok: false, missing: ["@k"] });
+  assert.notEqual(store.changeMarks().drivers, before, "boshqaruv markazi jonli yangilanadi");
+});
+
+test("blok: id, username va raqamga; boshqa akkaunt o'sha username / raqam bilan ham bloklangan; yuk ro'yxatidan chiqadi; blokdan chiqarish", () => {
+  const store = openStore({ file: ":memory:" });
+  const profile = { fromAreas: [] };
+  store.saveDriver(1, { name: "Ali", username: "Ali_Haydovchi", phone: "+998901112233", role: "haydovchi", profile, active: true });
+  store.saveDriver(2, { name: "Ikkinchi akkaunt", username: "ali_haydovchi", role: "haydovchi", profile, active: true });
+  store.saveDriver(3, { name: "Vali", phone: "+998901112233" });
+  store.saveDriver(4, { name: "Begona", username: "begona", role: "haydovchi", profile, active: true });
+  assert.equal(store.banOf({ chatId: 1 }), null);
+  assert.equal(store.banDriver(99), null, "yo'q foydalanuvchi");
+
+  assert.deepEqual(store.banDriver(1), { kind: "id", value: "1", chatId: 1, at: store.banOf({ chatId: 1 }).at });
+  assert.equal(store.banOf({ chatId: 2, username: "ALI_haydovchi" }).kind, "username", "username katta-kichik harfsiz");
+  assert.equal(store.banOf({ chatId: 3, phone: "+998901112233" }).kind, "phone");
+  assert.equal(store.banOf({ chatId: 4, username: "@begona" }), null);
+  assert.deepEqual(store.activeUsers("haydovchi").map((u) => u.chatId), [4], "bloklanganlarga yuk va ogohlantirish bormaydi");
+  const rows = Object.fromEntries(store.listDrivers().map((d) => [d.chatId, d.banned?.by ?? null]));
+  assert.deepEqual(rows, { 1: "id", 2: "username", 3: "phone", 4: null });
+
+  // 2-akkauntni blokdan chiqarish — faqat uni bloklab turgan username yozuvi o'chadi, 1 bloklangan qoladi
+  assert.equal(store.unbanDriver(2), 1);
+  assert.equal(store.banOf({ chatId: 2, username: "ali_haydovchi" }), null);
+  assert.equal(store.banOf({ chatId: 1 }).kind, "id");
+  assert.equal(store.unbanDriver(1), 2);
+  assert.equal(store.banOf({ chatId: 3, phone: "+998901112233" }), null);
+  assert.equal(store.unbanDriver(1), 0);
+  assert.deepEqual(
+    store.driverDetails(1).events.filter((e) => /banned/.test(e.type)).map((e) => [e.type, e.detail]),
+    [["unbanned", null], ["banned", { username: "Ali_Haydovchi", phone: "+998901112233" }]],
+  );
+  const before = store.changeMarks().drivers;
+  store.banDriver(4);
+  assert.notEqual(store.changeMarks().drivers, before, "boshqaruv markazi jonli yangilanadi");
+});
+
+test("botga topshiriqlar (bot_notices): bir odamga bittadan, olingach o'chadi, 10 daqiqadan eskisi bajarilmaydi; yo'nalish xabari", () => {
+  const clock = fakeClock();
+  const store = openStore({ file: ":memory:", now: clock.now });
+  store.addBotNotice(42, "route");
+  store.addBotNotice(42, "route");
+  store.addBotNotice(7, "route");
+  assert.deepEqual(store.takeBotNotices().map((n) => [n.chatId, n.kind]), [[42, "route"], [7, "route"]]);
+  assert.deepEqual(store.takeBotNotices(), []);
+
+  store.addBotNotice(42, "route");
+  clock.advance(11 * 60 * 1000); // bot o'chiq turdi
+  assert.deepEqual(store.takeBotNotices(), [], "eski topshiriq tashlanadi");
+  assert.deepEqual(store.takeBotNotices(), [], "va o'chirilgan");
+
+  store.saveDriver(42, { name: "Ali" });
+  assert.equal(store.routeMessage(42), null);
+  store.setRouteMessage(42, 555);
+  assert.equal(store.routeMessage(42), 555);
+  store.setRouteMessage(42, null);
+  assert.equal(store.routeMessage(42), null);
+  assert.equal(store.routeMessage(999), null, "yo'q odam");
   store.close();
 });
