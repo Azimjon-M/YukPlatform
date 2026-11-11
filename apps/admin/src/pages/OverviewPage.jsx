@@ -165,6 +165,11 @@ export function OverviewPage() {
                   {formatNumber(metrics.parsedBy.ai)} ta
                 </p>
               )}
+              {metrics.parsedBy?.shipper > 0 && (
+                <p className="muted small">
+                  📦 Oxirgi {metrics.hours} soatda yuk beruvchilarning o'zi {formatNumber(metrics.parsedBy.shipper)} ta yuk yubordi («📦 Yuk berish»)
+                </p>
+              )}
               {metrics.parsedBy?.noContact > 0 && (
                 <p className="muted small">
                   📵 Oxirgi {metrics.hours} soatda {formatNumber(metrics.parsedBy.noContact)} ta e'lon aloqasiz (telefon raqami ham, lichkasi

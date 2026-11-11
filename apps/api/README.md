@@ -152,6 +152,8 @@ Kirgandan keyin server o'z tokenini beradi (30 kun). Ilova uni har so'rovda `Aut
 | `PUT /pub/me/route {from, to, notify?}` | yo'nalishni saqlash (`*` = istalgan) — botdagi «📋 Mos yuklar» bilan bir xil (`fromAreas`/`toAreas`/`routeAt`); bot ham yangi yuklarni shu bo'yicha yuboradi. `notify: true` (botdagi «🗺 Xaritadan tanlash») — bazaga botga topshiriq (`bot_notices`): bot chatda «✅ Yo'nalish» va mos yuklar bilan javob beradi |
 | `GET /pub/loads?view=mine\|all&from&to&hours&limit&offset` | yuklar, e'lon vaqti bo'yicha eng yangisi birinchi; `mine` — bot yuboradigan mos yuklar (faqat haydovchiga, boshqasiga 409 `role`) |
 | `GET /pub/trucks?...` | xuddi shunday — bo'sh mashinalar; `mine` — yuk beruvchiga mos (`matchTruck`) |
+| `GET /pub/me/load-form` | «📦 Yuk berish» (faqat yuk beruvchi): `{ draft, phones, used, limit }` — botdagi qoralama (`?d=1`), oxirgi raqamlar, 24 soatda nechta yubordi |
+| `POST /pub/loads` | `{ load, fromDraft? }` — yukni yuborish: `sanitizeShipperLoad` (400 `{ error, field }`), 24 soatda 20 ta (429 `limit`), navbatga (`posts.shipper`); bot ishchisi darhol mos haydovchilarga yuboradi va natijani chatga yozadi → 201 `{ ok, id, load }` |
 | `GET /pub/admin/overview` | **faqat adminlar** (`ADMIN_IDS` yoki boshqaruv markazidagi belgi; boshqalarga 403 `forbidden`): navbat, yuklar, foydalanuvchilar, AI ulanishlari (kalitsiz) |
 | `GET /pub/admin/users?q&role` | adminlar: foydalanuvchilar (ism, @username, rol, holat, `signedOut` + `signedOutRole`; telefon yo'q), 200 tagacha |
 | `PATCH /pub/admin/users/:id {role}` | adminlar: rolni almashtirish (`active` → 400 — faol / pauza faqat foydalanuvchining o'zi; ro'yxatda `pausedBy`) (sozlamalari saqlanadi, qaytsa tiklanadi). Admin qilish va obuna bu yerdan **mumkin emas** |

@@ -499,7 +499,7 @@ test("oxirgi yuklar: eng yangisi birinchi, muddatdan eskisi tushmaydi", () => {
   store.addLoad({ postId: post.id, key: "k2", load: { fromCity: "Andijon" } });
   const all = store.recentLoads({ sinceMs: 60_000 });
   assert.deepEqual(all.map((r) => r.load.fromCity), ["Andijon", "Toshkent"]);
-  assert.deepEqual(all[0].post, { source: "@a", link: "https://t.me/a/1", postedAt: 5, sender: null });
+  assert.deepEqual(all[0].post, { source: "@a", link: "https://t.me/a/1", postedAt: 5, sender: null, fromShipper: false });
   assert.deepEqual(store.recentLoads({ sinceMs: 5_000 }).map((r) => r.load.fromCity), ["Andijon"]);
   assert.equal(store.recentLoads({ sinceMs: 60_000, limit: 1 }).length, 1);
 });

@@ -12,5 +12,6 @@ export * from "./loadText.js";
 export * from "./profileText.js";
 export * from "./route.js";
 export * from "./idle.js";
+export * from "./shipperLoad.js";
 export * from "./geo.js";
 export { CITY_COORDS, COUNTRY_COORDS, REGION_COORDS } from "./geoData.js";

@@ -28,7 +28,9 @@ function postRow(row) {
     error: row.error,
     createdAt: row.created_at,
     doneAt: row.done_at ?? null,
-    parsedBy: row.parsed_by ?? null, // rules — AI'siz qoidaviy parser tushundi, ai — AI
+    parsedBy: row.parsed_by ?? null, // rules — AI'siz qoidaviy parser tushundi, ai — AI, shipper — yuk beruvchining o'zi
+    via: row.via ?? null, // yuk beruvchida: bot (oddiy xabar) | web (forma)
+    fromShipper: row.shipper != null, // «📦 Yuk berish» — guruhdan emas, yuk egasining o'zi yubordi
   };
 }
 
@@ -441,6 +443,8 @@ export function createAdminQueries(db, now) {
           rules: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'rules'", since),
           ai: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'ai'", since),
           noContact: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND error LIKE 'Aloqasiz%'", since),
+          // «📦 Yuk berish» — yuk beruvchilarning o'zi yuborgan (botga yozib yoki formadan)
+          shipper: count("SELECT COUNT(*) AS n FROM posts WHERE created_at > ? AND shipper IS NOT NULL", since),
         },
         loads: { total: loads.total ?? 0, delivered: loads.delivered ?? 0, messages: loads.messages ?? 0 },
         trucks: { total: trucks.total ?? 0, delivered: trucks.delivered ?? 0, messages: trucks.messages ?? 0 },

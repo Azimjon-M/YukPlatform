@@ -36,6 +36,8 @@ const NO_CONTACT_SKIPPED = `${NO_CONTACT} — AI'ga yuborilmadi`;
 //         routeScope — @yuk/shared ROUTE_SCOPES kodi (.env dagi ROUTE_SCOPE; standart "qoshni"),
 //         canReceive?(user) → Promise<boolean> — kanal va guruhga a'zomi (bot.js; yo'q bo'lsa — hammaga),
 //         requireContact — aloqasiz e'lonning yuklari saqlanmaydi va yuborilmaydi (.env REQUIRE_CONTACT, standart yoqiq) }
+// Yuk beruvchining o'z yuki (post.shipper, result.by === "shipper") ham shu yo'ldan o'tadi: takror bo'lsa — yuborilmaydi,
+// mos haydovchilarga — darhol. Natijani yuk beruvchiga createWorker yozdiradi (deps.onDirect)
 export async function handleParsed(post, result, deps) {
   const { store, windowMs = DEFAULT_DEDUPE_WINDOW_MS, routeScope = DEFAULT_ROUTE_SCOPE } = deps;
   if (!result.ok) {
@@ -52,7 +54,7 @@ export async function handleParsed(post, result, deps) {
 
   // Telefon ham, lichka ham yo'q — bog'lanib bo'lmaydi: yuk saqlanmaydi va hech kimga yuborilmaydi.
   // Odatda bunday e'lon AI'gacha yopiladi (createWorker), bu — oxirgi to'siq (masalan, processPost yo'li)
-  if (deps.requireContact && !post.sender && result.loads.every((load) => !load.phones?.length)) {
+  if (deps.requireContact && post.shipper == null && !post.sender && result.loads.every((load) => !load.phones?.length)) {
     store.finishPost(post.id, "done", NO_CONTACT, by);
     return { status: "skipped", reason: "contact", kind };
   }
@@ -148,6 +150,9 @@ function formatHours(ms) {
 // (standart: PARSER_LIVE_WAIT, 30 s): guruh to'lishini 90 s kutsak, jonli rejimning foydasi yo'qoladi.
 // Guruhdagi har e'lonning o'z muddati bor; birortasiniki o'tsa — guruh ketadi (qolganlari unga qo'shilib ketadi).
 // maxParallel — bir vaqtda nechta AI so'rovi (standart: .env dagi PARSER_PARALLEL yoki 8).
+// Yuk beruvchining o'z yuki (post.direct — tayyor yuklar, «📦 Yuk berish»: web forma yoki botga yozilgan matn) AI'ga
+// bormaydi va eskirmaydi: quick() uni birinchi bo'lib yuborish navbatiga qo'yadi. Yuborib bo'lgach —
+// deps.onDirect(post, outcome) (bot.js: yuk beruvchiga «✅ N ta haydovchiga yuborildi»). poke() — kutmasdan darhol ko'rish.
 // deps.rules(text) → natija | null — AI'siz qoidaviy parser (main.js: @yuk/parser parseByRules). Har yangi e'lon avval
 // shundan o'tadi: ishonchli bo'lsa — AI'ni kutmasdan darhol yuborishga ketadi (AI limiti ham tejaladi), null bo'lsa —
 // e'lon navbatda qoladi va AI oladi. deps.rules yo'q bo'lsa (RULE_PARSER=0, testlar) — hammasi AI'da, avvalgidek.
@@ -217,7 +222,6 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
   let ruleCount = 0;
   // Aloqasiz e'lonlar ham shu yerda (qoidaviy parserdan oldin) yopiladi.
   function quick() {
-    if (!deps.rules && !deps.requireContact) return 0;
     let handled = 0;
     for (;;) {
       const posts = store.takeNewPostsAfter(ruleCursor, 50);
@@ -226,6 +230,13 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
       for (const post of posts) {
         ruleCursor = Math.max(ruleCursor, post.id);
         if (claimed.has(post.id)) continue; // AI allaqachon olgan
+        // Yuk beruvchining o'zi yuborgan yuk — tayyor, tekshirilgan: AI ham, qoidaviy parser ham kerak emas
+        if (post.direct) {
+          claimed.add(post.id);
+          ready.push(post);
+          results.push({ ok: true, postType: "yuk_bor", loads: post.direct, by: "shipper" });
+          continue;
+        }
         if (maxAgeMs > 0 && post.postedAt < now() - maxAgeMs) continue; // eskirgan — expire() yopadi
         if (contactless(post)) continue;
         if (!deps.rules) continue; // aloqasi bor — AI kutadi
@@ -253,7 +264,8 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
   function take(fill, lease, live = Math.min(liveWait, fill)) {
     const n = Math.min(size, lease?.batchSize || size);
     // quick() aloqasizlarni odatda oldinroq yopadi; bu — o'rtada kelib qolgani uchun (collector boshqa jarayon)
-    const posts = store.takeNewPosts(n, { newest: true, exclude: [...claimed] }).filter((post) => !contactless(post));
+    // Yuk beruvchining yuki (direct) — AI'ga emas, quick() ga (u keyingi aylanishda oladi)
+    const posts = store.takeNewPosts(n, { newest: true, exclude: [...claimed] }).filter((post) => !post.direct && !contactless(post));
     if (posts.length === 0) return [];
     if (posts.length < n && fill > 0) {
       // Eng erta tugaydigan muddat: jonli e'lon — navbatga tushganidan live ms, qolganlari — fill ms
@@ -321,14 +333,15 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
     delivery = delivery.then(async () => {
       for (const [post, result] of ready) {
         bounces.delete(post.id);
+        let outcome = null;
         try {
           // To'xtatilsa — qolganlari "new" bo'lib qoladi va keyingi safar qayta tahlil qilinadi
           if (controller.signal.aborted) continue;
-          const outcome = await handleParsed(post, result, deps);
+          outcome = await handleParsed(post, result, deps);
           if (outcome.status === "done") {
             const other = outcome.outOfScope ? ` (+${outcome.outOfScope} tasi boshqa yo'nalish)` : "";
             const [what, whom] = outcome.kind === "mashina" ? ["bo'sh mashina", "yuk beruvchiga"] : ["yuk", "haydovchiga"];
-            const fast = result.by === "rules" ? " ⚡ AI'siz" : "";
+            const fast = result.by === "rules" ? " ⚡ AI'siz" : result.by === "shipper" ? " 📦 yuk beruvchidan" : "";
             log(`#${post.id} ${post.source}: ${outcome.fresh}/${outcome.loads} yangi ${what}${other}, ${outcome.sent} ta ${whom}${fast}`);
           }
           else if (outcome.status === "failed") log(`#${post.id}: xato — ${outcome.error}`);
@@ -336,9 +349,18 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
           const message = error.description ?? error.message;
           log(`#${post.id}: yuborishda xato — ${message}`);
           store.finishPost(post.id, "failed", message);
+          outcome = { status: "failed", error: message };
         } finally {
           claimed.delete(post.id);
           waiting--;
+        }
+        // Yuk beruvchiga natija (nechta haydovchiga ketdi). Uning xatosi yuborish navbatini to'xtatmasin
+        if (post.shipper != null && outcome) {
+          try {
+            await deps.onDirect?.(post, outcome);
+          } catch (error) {
+            log(`#${post.id}: yuk beruvchiga natija yozilmadi — ${error.description ?? error.message}`);
+          }
         }
       }
     });
@@ -392,6 +414,10 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
 
   return {
     runOnce,
+    // Yuk beruvchi yuk yubordi — ishchi uyqudan darhol uyg'onadi (aks holda 5 s gacha kutardi)
+    poke() {
+      wake();
+    },
     async start() {
       const lanes = new Set();
       let notice = null; // bir xil ogohlantirish qayta-qayta yozilmasin

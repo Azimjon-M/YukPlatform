@@ -148,7 +148,7 @@ test("config: bot username va doira; CORS va OPTIONS", async () => {
 test("kirish: Mini App initData → token; haydovchi bazaga yoziladi; xato imzo — 401", async () => {
   const { token, me } = await login();
   assert.ok(token);
-  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false, phone: null, phoneAt: null });
+  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false, phone: null, phoneAt: null, loadPhones: [] });
   assert.equal(store.getDriver(555).name, "Ali Valiyev");
 
   const bad = await call("POST", "/pub/auth", { body: { initData: "user=%7B%22id%22%3A1%7D&auth_date=1&hash=00" } });
@@ -629,4 +629,76 @@ test("blok: boshqaruv markazidan bloklangan — /pub/auth va eski token 403 «Uz
   assert.equal(refused.status, 409);
   assert.match(refused.body.error, /Adminni bloklab bo'lmaydi/);
   assert.equal((await patchDriver(778, { blocked: "ha" })).status, 400);
+});
+
+// --- «📦 Yuk berish» formasi (yuk beruvchi). Raqamlar soxta ---
+test("yuk berish: faqat yuk beruvchi; forma tekshiriladi; navbatga tushadi; raqamlar eslab qolinadi; 24 soatda 20 ta", async () => {
+  const shipper = { id: 600, first_name: "Yukchi", username: "yukchi_ali" };
+  const initData = signWebAppData({ auth_date: nowS - 10, user: shipper }, BOT_TOKEN);
+  const { token } = (await call("POST", "/pub/auth", { body: { initData } })).body;
+  const FORM = { from: "andijon", fromCity: "Asaka", to: "toshkent_sh", cargo: "un", weight: "20", weightUnit: "tonna", phones: ["90 000 00 01"] };
+
+  // Rol yo'q / haydovchi — 409
+  assert.equal((await call("POST", "/pub/loads", { token, body: { load: FORM } })).body.code, "no_role");
+  store.saveDriver(600, { role: "haydovchi" });
+  const asDriver = await call("POST", "/pub/loads", { token, body: { load: FORM } });
+  assert.deepEqual([asDriver.status, asDriver.body.code], [409, "role"]);
+  assert.equal((await call("GET", "/pub/me/load-form", { token })).status, 409);
+
+  // Yuk beruvchi — sozlamalarsiz ham (profil shart emas); o'zi ulashgan raqam formada tayyor turadi
+  store.saveDriver(600, { role: "yuk_beruvchi", profile: null, phone: "+998900000009" });
+  let form = await call("GET", "/pub/me/load-form", { token });
+  assert.equal(form.status, 200);
+  assert.deepEqual(form.body, { draft: null, phones: ["+998900000009"], used: 0, limit: 20 });
+
+  // Xato maydon — 400 va qaysi maydon
+  const bad = await call("POST", "/pub/loads", { token, body: { load: { ...FORM, phones: ["12 345"] } } });
+  assert.deepEqual([bad.status, bad.body.field], [400, "phones"]);
+  assert.match(bad.body.error, /noto'g'ri/);
+  const far = await call("POST", "/pub/loads", { token, body: { load: { ...FORM, to: "Rossiya" } } });
+  assert.deepEqual([far.status, far.body.field], [400, "to"]);
+
+  // To'g'ri — navbatga (guruh e'loni kabi), bot yuboradi
+  const sent = await call("POST", "/pub/loads", { token, body: { load: { ...FORM, phones: ["90 000 00 01", "+998 90 000 00 02"] } } });
+  assert.equal(sent.status, 201);
+  assert.equal(sent.body.load.fromCity, "Asaka");
+  const [post] = store.shipperPosts(600);
+  assert.equal(post.id, sent.body.id);
+  assert.equal(post.via, "web");
+  assert.equal(post.status, "new");
+  assert.match(post.text, /^Andijon, Asaka → Toshkent shahri · un · 20 tonna/);
+  assert.deepEqual(post.direct[0].phones, ["+998900000001", "+998900000002"]);
+  form = await call("GET", "/pub/me/load-form", { token });
+  assert.deepEqual(form.body.phones, ["+998900000001", "+998900000002"], "keyingi yukda oxirgi raqamlar");
+  assert.equal(form.body.used, 1);
+  assert.deepEqual((await call("GET", "/pub/me", { token })).body.loadPhones, ["+998900000001", "+998900000002"]);
+
+  // Botdagi qoralama («✏️ Formada tuzatish») — formaga to'ldirilib keladi; yuborilsa (fromDraft) — o'chiriladi
+  store.setLoadDraft(600, { text: "...", loads: [{ ...sent.body.load, weightT: 0.5 }], at: NOW - 60_000, stage: "confirm" });
+  form = await call("GET", "/pub/me/load-form", { token });
+  assert.equal(form.body.draft.from, "andijon");
+  assert.deepEqual([form.body.draft.weight, form.body.draft.weightUnit], ["500", "kg"]);
+  await call("POST", "/pub/loads", { token, body: { load: FORM, fromDraft: true } });
+  assert.equal(store.loadDraft(600), null);
+  // Eskirgan qoralama (1 soatdan oshgan) — berilmaydi
+  store.setLoadDraft(600, { text: "...", loads: [sent.body.load], at: NOW - 2 * HOUR, stage: "confirm" });
+  assert.equal((await call("GET", "/pub/me/load-form", { token })).body.draft, null);
+
+  // Chegara: 24 soatda 20 ta
+  for (let i = 0; i < 18; i++) store.addDirectPost({ chatId: 600, text: `yuk ${i}`, loads: [sent.body.load] });
+  const limit = await call("POST", "/pub/loads", { token, body: { load: FORM } });
+  assert.deepEqual([limit.status, limit.body.code], [429, "limit"]);
+  assert.match(limit.body.error, /24 soatda 20 ta yuk/);
+});
+
+test("yuk beruvchining yuki haydovchilar ro'yxatida: «yuk egasidan» belgisi bor, uning chat id'si yo'q", async () => {
+  const post = store.addDirectPost({ chatId: 601, text: "Andijon → Toshkent", loads: [], via: "web" });
+  store.addLoad({ postId: post.id, key: "direct-601", load: { fromRegion: "andijon", fromCity: "Andijon", toRegion: "toshkent_sh", weightT: 20, phones: ["+998900000011"] } });
+  const { token } = await login();
+  const { body } = await call("GET", "/pub/loads?view=all", { token });
+  const item = body.items.find((i) => i.load.phones?.[0] === "+998900000011");
+  assert.equal(item.post.fromShipper, true);
+  assert.equal(item.post.source, null);
+  assert.equal(item.post.link, null);
+  assert.doesNotMatch(JSON.stringify(body), /601/);
 });

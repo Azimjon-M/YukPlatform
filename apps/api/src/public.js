@@ -20,6 +20,11 @@
 //                              notify: true (botdagi «🗺 Xaritadan tanlash») — bot chatda javob beradi va mos yuklarni yuboradi
 //   GET  /pub/loads            ?view=mine|all&from&to&hours&limit&offset — yuklar (haydovchiga), eng yangisi birinchi
 //   GET  /pub/trucks           xuddi shunday — bo'sh mashinalar (yuk beruvchiga)
+//   --- «📦 Yuk berish» (faqat yuk beruvchi; bot shipperLoads.js bilan bir qoida) ---
+//   GET  /pub/me/load-form     forma uchun: botda tushunilgan qoralama (d=1 — «✏️ Formada tuzatish»), oxirgi raqamlari,
+//                              24 soatda nechta yubordi va chegara
+//   POST /pub/loads            { load, fromDraft? } — yukni yuborish: tekshiriladi (sanitizeShipperLoad), navbatga tushadi,
+//                              bot uni darhol mos haydovchilarga yuboradi va natijani chatga yozadi
 //   --- faqat adminlar (Mini App'dagi «🛠 Boshqaruv»), boshqalarga 403 ---
 //   GET  /pub/admin/overview   ko'rsatkichlar (navbat, yuklar, foydalanuvchilar) va AI ulanishlari holati
 //   GET  /pub/admin/users      ?q&role — foydalanuvchilar ro'yxati
@@ -32,6 +37,7 @@ import {
   BLOCKED_TEXT,
   KIND_MATCHERS,
   KIND_ROLE,
+  SHIPPER_LOAD_LIMIT,
   applyRoute,
   formatContactPhone,
   isAdmin,
@@ -43,6 +49,10 @@ import {
   routeInScope,
   sameArea,
   sanitizeProfileFor,
+  sanitizeShipperLoad,
+  shipperLoadForm,
+  shipperLoadText,
+  telegramUsername,
   truckPlaceText,
   validRole,
   validRouteArea,
@@ -225,7 +235,8 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     profile: driver.profile,
     active: driver.active,
     // phoneAt — qachon ulashgan: «Raqamni almashtirish» da o'sha raqamni qayta ulashsa ham ilova saqlanganini ko'radi
-    ...(withPhone ? { phone: driver.phone ?? null, phoneAt: driver.phoneAt ?? null } : {}),
+    // loadPhones — yuk beruvchining oxirgi yukidagi raqamlar («📦 Yuk berish» formasi shular bilan ochiladi)
+    ...(withPhone ? { phone: driver.phone ?? null, phoneAt: driver.phoneAt ?? null, loadPhones: driver.loadPhones ?? [] } : {}),
   });
 
   const pub = express.Router();
@@ -440,6 +451,47 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   pub.get("/loads", listing("yuk"));
   pub.get("/trucks", listing("mashina"));
 
+  // --- «📦 Yuk berish» ---
+  // Yuk beruvchi sozlamalarini to'ldirmagan bo'lsa ham yuk bera oladi (Azimjon, 2026-11-10: «Shart emas» — sozlamalar
+  // faqat bo'sh mashina e'lonlari uchun). Rol esa kerak: haydovchi yuk bersa — boshqa narsa
+  const shipperOnly = (driver) => {
+    const role = roleOf(driver);
+    if (!role) throw httpError(409, NEED_ROLE, "no_role");
+    if (role !== "yuk_beruvchi") throw httpError(409, "Yuk berish — yuk beruvchilar uchun", "role");
+  };
+
+  // Formani ochganda: draft — botga yozgan, tasdiqlanmagan yuk (bot uni «✏️ Formada tuzatish» bilan shu yerga yuboradi);
+  // phones — oxirgi yukdagi raqamlar, bo'lmasa o'zi ulashgan raqam; used — 24 soatda nechta yubordi
+  pub.get("/me/load-form", (req, res) => {
+    shipperOnly(req.driver);
+    const { chatId } = req.driver;
+    const draft = store.loadDraft(chatId);
+    const fresh = draft?.loads?.length && now() - (draft.at ?? 0) < HOUR ? draft : null;
+    const phones = req.driver.loadPhones?.length ? req.driver.loadPhones : req.driver.phone ? [req.driver.phone] : [];
+    res.json({
+      draft: fresh ? shipperLoadForm(fresh.loads[0], scope) : null,
+      phones,
+      used: store.shipperPostCount(chatId),
+      limit: SHIPPER_LOAD_LIMIT,
+    });
+  });
+
+  // Yukni yuborish. Navbatga yoziladi (posts jadvali, guruh e'loni kabi) — haydovchilarga bot ishchisi yuboradi (u boshqa
+  // jarayon: bu server uni chaqira olmaydi, ishchi navbatni har 5 soniyada ko'radi). Natijani bot chatga yozadi
+  pub.post("/loads", (req, res) => {
+    shipperOnly(req.driver);
+    const { chatId } = req.driver;
+    if (store.shipperPostCount(chatId) >= SHIPPER_LOAD_LIMIT) {
+      throw httpError(429, `24 soatda ${SHIPPER_LOAD_LIMIT} ta yuk yubordingiz — bu chegara. Keyingisini birozdan keyin yuboring`, "limit");
+    }
+    const { load, error, field } = sanitizeShipperLoad(req.body?.load, { scope });
+    if (error) return res.status(400).json({ error, field: field ?? null });
+    const { id } = store.addDirectPost({ chatId, text: shipperLoadText(load), loads: [load], via: "web", sender: telegramUsername(req.driver.username) });
+    store.setLoadPhones(chatId, load.phones);
+    if (req.body?.fromDraft === true) store.setLoadDraft(chatId, null); // botdagi qoralama formada tuzatib yuborildi
+    res.status(201).json({ ok: true, id, load });
+  });
+
   // --- Admin ---
   // Admin — .env dagi ADMIN_IDS yoki boshqaruv markazida (localhost) yoqilgan belgi. Bu server internetga chiqadi,
   // shuning uchun har bir so'rovda shu yerda tekshiriladi (web'dagi tugmani yashirish — himoya emas).
@@ -556,7 +608,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
       errors?.add({ source: "web", level: "error", kind: "server", text: `${req.method} ${req.originalUrl.split("?")[0]}: ${error.message}`, details: error.stack });
     }
     // code — web nima qilishini biladi: auth → qayta kirish, no_profile → sozlamalarga, no_role → rol tanlash
-    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked"].includes(error.code) ? { code: error.code } : {};
+    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit"].includes(error.code) ? { code: error.code } : {};
     res.status(status).json({ error: status >= 500 ? "Server xatosi" : error.message, ...code });
   });
 

@@ -7,10 +7,11 @@ export const API_URL = (import.meta.env?.VITE_API_URL ?? "").replace(/\/+$/, "")
 const TOKEN_KEY = "yuk-token";
 
 export class ApiError extends Error {
-  constructor(message, { status = 0, code = null } = {}) {
+  constructor(message, { status = 0, code = null, field = null } = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.field = field; // forma xatosi: qaysi maydon (masalan «📦 Yuk berish» da "phones") — sahifa o'sha joyni ko'rsatadi
     this.code = code; // "auth" — qayta kirish, "no_profile" — sozlamalar kerak, "offline" — server bilan aloqa yo'q,
     // "blocked" — boshqaruv markazidan bloklangan (App «Uzr, sizga xizmat ko'rsata olmaymiz!» ekranini ko'rsatadi)
   }
@@ -92,7 +93,7 @@ export async function request(method, path, { body, token = tokenStore.get() } =
     );
   }
   if (json?.code === "blocked") blockedHandler?.(json.error);
-  if (json?.error) throw new ApiError(json.error, { status: response.status, code: json.code ?? null });
+  if (json?.error) throw new ApiError(json.error, { status: response.status, code: json.code ?? null, field: json.field ?? null });
   // JSON emas (server yo'q, tunnel o'chiq, statik hosting 404 qaytardi)
   throw new ApiError("Server hozir ishlamayapti. Birozdan keyin qayta urinib ko'ring.", { status: response.status, code: "offline" });
 }
@@ -164,6 +165,12 @@ export const getRoute = (params = {}) => request("GET", `/pub/me/route?${query(p
 // notify — botdagi «🗺 Xaritadan tanlash» dan ochilgan: bot chatda «✅ Yo'nalish» va mos yuklar bilan javob beradi
 export const saveRoute = (from, to, { notify = false } = {}) =>
   request("PUT", "/pub/me/route", { body: notify ? { from, to, notify: true } : { from, to } });
+
+// «📦 Yuk berish» (yuk beruvchi): forma uchun — oxirgi raqamlar, 24 soatda nechta yuborgani, botdagi qoralama →
+// { draft, phones, used, limit }
+export const getLoadForm = () => request("GET", "/pub/me/load-form");
+// Yukni yuborish → { ok, id, load }. Xato maydon — ApiError.field. fromDraft — botdagi qoralama tuzatib yuborildi
+export const postLoad = (load, { fromDraft = false } = {}) => request("POST", "/pub/loads", { body: fromDraft ? { load, fromDraft: true } : { load } });
 
 // --- Admin («🛠 Boshqaruv»): server har safar admin ekanini tekshiradi, boshqalarga 403 ---
 export const getAdminOverview = () => request("GET", "/pub/admin/overview");

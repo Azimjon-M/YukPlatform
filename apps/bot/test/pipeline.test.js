@@ -717,3 +717,45 @@ test("aloqasiz: AI natijasidagi yuklarda telefon yo'q va lichka yo'q — saqlanm
   assert.equal(postsById(store)[1].error, NO_CONTACT);
   assert.equal(postsById(store)[1].parsedBy, "ai");
 });
+
+// --- Yuk beruvchining o'z yuki («📦 Yuk berish»: post.direct) ---
+test("yuk beruvchi yuki: AI'siz, eskirmasdan darhol mos haydovchilarga; natija yuk beruvchiga (onDirect)", async () => {
+  const { store, deps, delivered } = setup([]);
+  deps.pool = { size: () => 0, acquire: () => null, nextReadyIn: () => null, batchSize: 10 };
+  deps.requireContact = true;
+  let aiCalls = 0;
+  deps.rules = () => (aiCalls++, null);
+  const told = [];
+  deps.onDirect = async (post, outcome) => told.push([post.shipper, outcome]);
+  store.saveDriver(9, { role: "yuk_beruvchi" });
+  const { id } = store.addDirectPost({ chatId: 9, text: "Toshkentdan Samarqandga 20 tonna", loads: [LOAD], via: "bot" });
+  const logs = [];
+  const worker = createWorker(deps, { log: (m) => logs.push(m), maxAgeMs: 1 }); // 1 ms — oddiy e'lon bo'lsa eskirgan bo'lardi
+  assert.equal(await worker.runOnce(), 1);
+  assert.equal(aiCalls, 0, "qoidaviy parser ham ko'rmadi");
+  assert.deepEqual(delivered, [1], "Isuzu va pauzadagi haydovchiga yo'q");
+  assert.deepEqual(told, [[9, { status: "done", kind: "yuk", loads: 1, outOfScope: 0, fresh: 1, sent: 1 }]]);
+  const post = store.listPosts().items.find((p) => p.id === id);
+  assert.equal(post.status, "done");
+  assert.equal(post.parsedBy, "shipper");
+  assert.ok(logs.some((m) => / 📦 yuk beruvchidan$/.test(m)));
+  assert.equal(store.shipperPosts(9)[0].sent, 1);
+
+  // Xuddi o'sha yuk qayta yuborilsa — takror: haydovchiga ikkinchi marta bormaydi, yuk beruvchiga aytiladi
+  store.addDirectPost({ chatId: 9, text: "yana o'sha", loads: [LOAD], via: "web" });
+  await worker.runOnce();
+  assert.deepEqual(delivered, [1]);
+  assert.equal(told[1][1].fresh, 0);
+});
+
+test("yuk beruvchi yuki AI navbatiga tushmaydi: take() uni o'tkazib yuboradi", async () => {
+  const { store, deps, add } = setup([{ ok: true, postType: "yuk_bor", loads: [LOAD] }]);
+  store.addDirectPost({ chatId: 9, text: "Toshkentdan Samarqandga 20 tonna", loads: [LOAD] });
+  add(2);
+  let seen = 0;
+  const parse = deps.parser.parse;
+  deps.parser.parse = (...args) => (seen++, parse(...args));
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.equal(seen, 1, "AI faqat guruh e'lonini ko'rdi");
+  assert.equal(store.takeNewPosts().length, 0);
+});

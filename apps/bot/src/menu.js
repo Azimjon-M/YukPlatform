@@ -9,6 +9,7 @@ import { Keyboard } from "grammy";
 import { encodeProfile, roleOf } from "@yuk/shared";
 
 export const MENU = {
+  giveLoad: "📦 Yuk berish", // yuk beruvchida birinchi qator: web forma (Mini App) yoki — forma yo'q bo'lsa — oddiy tugma (shipperLoads.js)
   loads: "📋 Mos yuklar",
   trucks: "🚚 Bo'sh mashinalar",
   settings: "⚙️ Sozlamalar",
@@ -71,6 +72,7 @@ export const matchesLabel = (driver) => (roleOf(driver) === "yuk_beruvchi" ? MEN
 // Bot bu menyuni faqat rol tanlangan odamga yuboradi (bot.js menu(): rol yo'q — remove_keyboard)
 // Tartib (Azimjon, 2026-11-10): 1 Mos yuklar, 2 Pauza/Davom ettirish, 3 Rolni almashtirish, 4 Raqam ulashish
 // (raqami bo'lsa — Guruh qo'shish), 5 Yordam, 6 Sozlamalar, keyin qolganlari (Boshqaruv) — har qatorda ikkitadan:
+//   [📦 Yuk berish]  — faqat yuk beruvchida (bitta, keng)
 //   [📋 Mos yuklar]        [⏸ Pauza]
 //   [🔄 Rolni almashtirish] [📱 Raqam ulashish] / [➕ Guruh qo'shish]
 //   [❓ Yordam]             [⚙️ Sozlamalar]
@@ -81,21 +83,30 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   // Rol tanlanmagan bo'lsa — oddiy tugma (bot uni ko'rsatmaydi, lekin funksiya baribir xato bermasin)
   const url = role ? miniAppUrl(miniappUrl, driver?.profile ?? null, scope, { role, token }) : null;
   const settingsButton = (keyboard) => (url ? keyboard.webApp(label, url) : keyboard.text(label));
+  // Yuk beruvchi: «📦 Yuk berish» — alohida, birinchi qatorda (Azimjon, 2026-11-10: rol tanlanishi bilan, ro'yxatdan
+  // o'tmasdan ham). Forma — web ilovaning «📦 Yuk berish» bo'limi (?v=yuk); manzil yo'q bo'lsa — oddiy tugma (bot
+  // «shu yerga oddiy xabar qilib yozing» deydi)
+  const loadUrl = role === "yuk_beruvchi" ? miniAppUrl(miniappUrl, null, scope, { view: "yuk", role, token }) : null;
+  const loadRow = (keyboard) => {
+    if (role !== "yuk_beruvchi") return keyboard;
+    return (loadUrl ? keyboard.webApp(MENU.giveLoad, loadUrl) : keyboard.text(MENU.giveLoad)).row();
+  };
 
   // Rol tanlangan, lekin ro'yxatdan o'tmagan (forma hali to'ldirilmagan) — FAQAT 3 tugma (Azimjon, 2026-11-10):
+  //   [📦 Yuk berish]   ← faqat yuk beruvchida: yuk berish uchun ro'yxat shart emas (Azimjon, 2026-11-10: «Shart emas»)
   //   [🚚 Ro'yxatdan o'tish]
   //   [🔄 Rolni almashtirish] [❓ Yordam]
   // Mos yuklar, pauza, raqam, Boshqaruv — formadan keyin (bu bosqichda ular ishlamaydi yoki chalg'itadi; raqam formadan
   // keyin baribir so'raladi). Yashirin tugmalarning matni yozib yuborilsa ham bot tushunadi (hears) — buzilmaydi.
   if (!driver?.profile) {
-    const keyboard = settingsButton(new Keyboard()).row();
+    const keyboard = settingsButton(loadRow(new Keyboard())).row();
     if (role) keyboard.text(MENU.role);
     keyboard.text(MENU.help);
     return keyboard.resized().placeholder("Menyudan tanlang");
   }
 
   const paused = Boolean(driver?.profile) && driver.active === false;
-  const keyboard = new Keyboard().text(matchesLabel(driver)).text(paused ? MENU.resume : MENU.pause).row();
+  const keyboard = loadRow(new Keyboard()).text(matchesLabel(driver)).text(paused ? MENU.resume : MENU.pause).row();
   // Rolni almashtirish (haydovchi ↔ yuk beruvchi) — /rol bilan bir xil. Odamda bugun yuk, ertaga bo'sh mashina bo'lishi
   // mumkin, /rol ni esa hamma ham topavermaydi. Rol tanlanmagan bo'lsa tugma yo'q
   if (role) keyboard.text(MENU.role);

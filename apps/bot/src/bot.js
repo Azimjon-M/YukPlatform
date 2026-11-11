@@ -15,6 +15,7 @@ import {
   ROLES,
   ROLE_IDS,
   ROLE_KIND,
+  SHIPPER_LOAD_LIMIT,
   formatContactPhone,
   isAdmin,
   isOwnContact,
@@ -23,6 +24,8 @@ import {
   roleOf,
   routeChosen,
   sanitizeProfileFor,
+  sanitizeShipperLoad,
+  shipperLoadText,
   shouldAskPhone,
   telegramUsername,
   validRole,
@@ -35,6 +38,7 @@ import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, rem
 import { MENU, PHONE, mainMenu, matchesLabel, miniAppUrl, phoneKeyboard, settingsLabel } from "./menu.js";
 import { createNoticeLoop } from "./notices.js";
 import { ANY, applyRoute, chosenText, fromStep, toStep, validArea } from "./route.js";
+import { LOAD_CALLBACKS, LOAD_TEXT, createLoadDesk, loadIntro, resultText } from "./shipperLoads.js";
 import { ADD_GROUP_TEXT, INTAKE, LINK_RE, createSourceIntake, createSourceWatcher, parseSourceLink } from "./userSources.js";
 import { applyAction, applyText, describeProfile, newDraft, profileFromDraft, renderStep } from "./wizard.js";
 
@@ -107,6 +111,8 @@ const ROLE_QUESTION = "Iltimos, rolingizni tanlang 👇";
 
 // Rolga qarab so'zlar: nima keladi, sozlamalarda nima so'raladi.
 // chosen — rol tanlangach (sozlamalar hali yo'q): haydovchinikini Azimjon yozgan (2026-11-10), yuk beruvchiniki — unga o'xshatib
+// Yuk beruvchida «📦 Yuk berish» (2026-11-10) — yuk yuborish asosiy ish, bo'sh mashina e'lonlari esa ixtiyoriy
+// (Azimjon: ro'yxatdan o'tish shart emas). chosen — rol tanlangach birinchi qator, ostida loadIntro (shipperLoads.js)
 const ROLE_TEXT = {
   haydovchi: {
     chosen: "🚚 Haydovchisiz. Sizga to'g'ri keladigan yuk e'lonlarini (transportingiz va yo'nalishingizga mos) yo'naltiramiz.",
@@ -117,7 +123,9 @@ const ROLE_TEXT = {
     setup: "transportingizni",
   },
   yuk_beruvchi: {
-    chosen: "📦 Yuk beruvchisiz. Sizga to'g'ri keladigan bo'sh mashina e'lonlarini (yo'nalishingiz va kerakli transportga mos) yo'naltiramiz.",
+    chosen: "📦 Yuk beruvchisiz.",
+    // Ro'yxatdan o'tish (sozlamalar) nima beradi — yuk beruvchida u ixtiyoriy
+    register: "bo'sh mashina e'lonlari ham kerak bo'lsa: yo'nalishingiz va qanday mashina kerakligi (1 daqiqalik forma)",
     one: "bo'sh mashina",
     many: "bo'sh mashinalar",
     matches: "oxirgi 24 soatdagi mos bo'sh mashinalar",
@@ -140,6 +148,8 @@ function helpText(driver) {
   // Menyudagi tartibda (menu.js mainMenu). Ro'yxatdan o'tmaguncha menyuda faqat 3 tugma — ro'yxat ham shular.
   // Matnlar — Azimjon (2026-11-10; ro'yxatdan o'tmagan haydovchining /start ekrani bo'yicha, umumiy qatorlar hammaga)
   const roleLine = `${MENU.role} — haydovchi va yuk beruvchi`;
+  // Yuk beruvchida birinchi qator — «📦 Yuk berish» (menu.js)
+  const loadLine = role === "yuk_beruvchi" ? [`${MENU.giveLoad} — yukingizni haydovchilarga yuborish: forma yoki shu yerga oddiy xabar`] : [];
   const menuLines = driver?.profile
     ? [
         `${matchesLabel(driver)} — ${t.matches}`,
@@ -150,11 +160,12 @@ function helpText(driver) {
           : `${MENU.phone} — raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi va joyidan davom etasiz`,
         `${settingsLabel(driver)} — ${t.settings}`,
       ]
-    : [`${settingsLabel(driver)} — sizga qanday e'lonlar yo'naltirishimiz haqida`, roleLine]; // «1 daqiqalik forma» — /start oxirida
+    : [`${settingsLabel(driver)} — ${t.register ?? "sizga qanday e'lonlar yo'naltirishimiz haqida"}`, roleLine]; // «1 daqiqalik forma» — /start oxirida
   return [
     INTRO,
     "",
     "<b>Pastdagi menyu:</b>",
+    ...loadLine,
     ...menuLines,
     "",
     `Siz: ${ROLES[role].icon} ${ROLES[role].name}siz.`, // «Haydovchisiz» / «Yuk beruvchisiz»
@@ -224,6 +235,8 @@ export function postFromMessage(chat, message) {
 // manzil o'zgaradi — shuning uchun har safar shu funksiyadan so'raladi, ishga tushganda bir marta emas.
 // linkToken(chatId) — Mini App tugmasiga qo'shiladigan kirish tokeni (main.js: @yuk/store sessions.link; bir hafta bir xil)
 // callLink({ loadId, phone, chatId }) — «📞 Telefon qilish» sahifasi tokeni (main.js: @yuk/store createCallLinks); null — tugma yo'q
+// parseLoad(text) — yuk beruvchi chatga yozgan yukni tushunish (main.js: qoidaviy parser, bo'lmasa AI; null — AI band);
+// onLoadQueued() — yuk beruvchining yuki navbatga tushdi (main.js: ishchi darhol uyg'onadi)
 export function createBot({
   token,
   store,
@@ -233,6 +246,8 @@ export function createBot({
   appUrl = () => config.miniappUrl,
   linkToken = () => null,
   callLink = () => null,
+  parseLoad = async () => null,
+  onLoadQueued = () => {},
 }) {
   const bot = new Bot(token, botInfo ? { botInfo } : undefined);
   // Telegram "juda tez" (429) desa, aytilgan vaqtcha kutib qayta yuboradi
@@ -358,6 +373,19 @@ export function createBot({
     if (from) url.searchParams.set("f", from);
     return url.href;
   };
+
+  // «📦 Yuk berish» formasi (web ilovaning «yuk» bo'limi). Inline «✏️ Formada tuzatish» tugmasi uchun — tokensiz
+  // (routeMapUrl dagidek: inline tugmadan ochilganda Telegram kimlikni o'zi beradi), d=1 — botdagi qoralama bilan ochiladi.
+  // Pastki menyudagi «📦 Yuk berish» tugmasi — menu.js (u yerda token bilan). Faqat https
+  const loadFormUrl = ({ draft = false } = {}) => {
+    const base = appUrl();
+    if (!base?.startsWith("https://")) return null;
+    const url = new URL(miniAppUrl(base, null, scope, { view: "yuk", role: "yuk_beruvchi" }));
+    if (draft) url.searchParams.set("d", "1");
+    return url.href;
+  };
+  // Botga yozilgan yuk: tushunish → raqam (yo'q bo'lsa) → tasdiqlash → navbat (shipperLoads.js)
+  const desk = createLoadDesk({ store, parse: parseLoad, scope, onQueued: () => onLoadQueued(), editUrl: () => loadFormUrl({ draft: true }) });
 
   function rememberUser(ctx) {
     const from = ctx.from;
@@ -544,6 +572,12 @@ export function createBot({
       );
       return;
     }
+    // Yuk beruvchi (2026-11-10): darhol «📦 Yuk berish» — forma yoki oddiy xabar; bo'sh mashinalar uchun ro'yxatdan o'tish ixtiyoriy
+    if (role === "yuk_beruvchi") {
+      const t = ROLE_TEXT[role];
+      await ctx.reply(`${t.chosen}\n\n${loadIntro({ form: Boolean(loadFormUrl()) })}\n\n«${settingsLabel(driver)}» — ${t.register}.`, html(driver));
+      return;
+    }
     // Rol tanlandi, sozlamalar hali yo'q (Azimjon matni, 2026-11-10): nima keladi + «Ro'yxatdan o'tish» tugmasi
     const next = appUrl() ? `\n\n👇 Endi pastdagi «${settingsLabel(driver)}» tugmasini bosing — 1 daqiqalik forma.` : "";
     await ctx.reply(`${ROLE_TEXT[role].chosen}${next}`, html(driver));
@@ -690,6 +724,11 @@ export function createBot({
       await ctx.reply(`${hello}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describeProfile(driver.profile, scope, role))}`, html(driver));
       // Raqam so'rash paydo bo'lishidan oldin ro'yxatdan o'tganlar — bir marta shu yerda so'raladi
       if (shouldAskPhone(driver)) await askPhone(ctx, driver);
+      return;
+    }
+    // Yuk beruvchi: ro'yxatdan o'tish shart emas — «📦 Yuk berish» (forma yoki oddiy xabar)
+    if (role === "yuk_beruvchi") {
+      await ctx.reply(`${hello}\n\n${loadIntro({ form: Boolean(loadFormUrl()) })}`, html(driver));
       return;
     }
     if (appUrl()) {
@@ -839,6 +878,81 @@ export function createBot({
   privateChat.hears(MENU.role, switchRolePrompt);
   privateChat.hears(MENU.help, showHelp);
 
+  // --- «📦 Yuk berish» (yuk beruvchi; shipperLoads.js, 2026-11-10) ---
+  // Pastki menyudagi tugma odatda formani ochadi (Mini App) va chatga hech narsa yubormaydi. Forma manzili yo'q bo'lsa —
+  // oddiy tugma: bosilganda «shu yerga oddiy xabar qilib yozing»
+  privateChat.hears(MENU.giveLoad, async (ctx) => {
+    const driver = rememberUser(ctx);
+    if (roleOf(driver) !== "yuk_beruvchi") return showStart(ctx);
+    await ctx.reply(loadIntro({ form: Boolean(loadFormUrl()) }), html(driver));
+  });
+
+  // Desk ko'rinishi ({ text, keyboard? }) → xabar. Tugmali xabarda pastki menyu bo'lmaydi (Telegram: bitta xabar — bitta
+  // markup), tugmasizida — menyu
+  async function showLoadView(ctx, view, driver, { edit = false } = {}) {
+    const markup = view.keyboard ? { reply_markup: view.keyboard } : menu(driver);
+    await render(ctx, view.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup }, edit);
+  }
+
+  // Yuk beruvchi chatga oddiy xabar yozdi — yuk deb o'qiymiz (AI bir necha soniya o'ylashi mumkin: «yozmoqda...» belgisi)
+  async function readLoad(ctx, driver) {
+    await ctx.replyWithChatAction("typing").catch(() => {});
+    const view = await desk.read(ctx.chat.id, ctx.message.text, driver, { form: Boolean(loadFormUrl()) });
+    await showLoadView(ctx, view, driver);
+  }
+
+  // Formadan (web) kelgan yuk — server bilan aloqa bo'lmaganda Mini App uni sendData bilan shu yerga yuboradi
+  // (odatda forma serverga — POST /pub/loads — yuboradi). Ma'lumotga ishonmaymiz: sanitizeShipperLoad
+  async function loadFromForm(ctx, driver, data) {
+    if (roleOf(driver) !== "yuk_beruvchi") return ctx.reply("⚠️ Yuk berish — faqat yuk beruvchilar uchun. Rolni almashtirish: /rol", menu(driver));
+    if (store.shipperPostCount(ctx.chat.id) >= SHIPPER_LOAD_LIMIT) return ctx.reply(LOAD_TEXT.limit(SHIPPER_LOAD_LIMIT), menu(driver));
+    const { load, error } = sanitizeShipperLoad(data?.load, { scope });
+    if (error) return ctx.reply(`⚠️ Yuborilmadi: ${error}. Formani qaytadan oching.`, menu(driver));
+    store.addDirectPost({ chatId: ctx.chat.id, text: shipperLoadText(load), loads: [load], via: "web", sender: telegramUsername(ctx.from.username) });
+    store.setLoadPhones(ctx.chat.id, load.phones);
+    if (data.fromDraft) store.setLoadDraft(ctx.chat.id, null);
+    onLoadQueued();
+    await ctx.reply("📤 Yukingiz qabul qilindi — natijasini hozir yozaman.", menu(driver));
+  }
+
+  // [✅ Yuborish] — navbatga; ishchi yuboradi va natijani alohida xabarda yozadi (directDone)
+  bot.callbackQuery(LOAD_CALLBACKS.send, async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    const driver = rememberUser(ctx);
+    const sent = roleOf(driver) === "yuk_beruvchi" ? desk.send(ctx.chat.id, driver, { sender: telegramUsername(ctx.from.username) }) : { ok: false, reason: "stale" };
+    if (!sent.ok) {
+      const text = sent.reason === "limit" ? `24 soatda ${SHIPPER_LOAD_LIMIT} ta yuk — chegara. Birozdan keyin yuboring.` : sent.reason === "phone" ? "Avval raqamni yozing" : LOAD_TEXT.stale;
+      await ctx.answerCallbackQuery({ text, show_alert: true });
+      if (sent.reason === "stale") await ctx.editMessageReplyMarkup().catch(() => {});
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: "📤 Yuborildi" });
+    const shown = sent.loads.map((load) => formatLoad(load, {}).text).join("\n\n");
+    await ctx.editMessageText(`${LOAD_TEXT.sending}\n\n${shown}`, { parse_mode: "HTML", link_preview_options: { is_disabled: true } }).catch(() => {});
+  });
+
+  // [❌ Bekor qilish]
+  bot.callbackQuery(LOAD_CALLBACKS.cancel, async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    desk.cancel(ctx.chat.id);
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(LOAD_TEXT.cancelled).catch(() => {});
+  });
+
+  // [📞 +998 …] — oldin yozgan raqami bilan
+  bot.callbackQuery(LOAD_CALLBACKS.phone, async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    const driver = rememberUser(ctx);
+    const view = desk.pickPhone(ctx.chat.id, Number(ctx.match[1]), driver);
+    if (!view) {
+      await ctx.answerCallbackQuery({ text: LOAD_TEXT.stale, show_alert: true });
+      await ctx.editMessageReplyMarkup().catch(() => {});
+      return;
+    }
+    await ctx.answerCallbackQuery();
+    await showLoadView(ctx, view, driver, { edit: true });
+  });
+
   // Mini App formasi "Saqlash" bosilganda: { type: "profile", role?, profile }. Ma'lumotga ishonmaymiz — tekshiramiz.
   // role bo'lmasa (eski forma) — bazadagi rol; forma boshqa rolni yuborsa — rol ham almashadi.
   privateChat.on("message:web_app_data", async (ctx) => {
@@ -849,6 +963,7 @@ export function createBot({
     } catch {
       // buzilgan JSON — pastda xato deb javob beriladi
     }
+    if (data?.type === "load") return loadFromForm(ctx, driver, data); // «📦 Yuk berish» formasi (server bilan aloqa yo'q edi)
     const role = validRole(data?.role) ?? roleOf(driver);
     const { profile, error } = data?.type === "profile" ? sanitizeProfileFor(role, data.profile, { scope }) : { error: "noma'lum ma'lumot keldi" };
     if (error) {
@@ -990,6 +1105,9 @@ export function createBot({
   privateChat.on("message:text", async (ctx) => {
     const driver = rememberUser(ctx);
     if (!roleOf(driver)) return showStart(ctx); // menyu yo'q — avval rol
+    // Yuk beruvchi oddiy xabar yozdi — bu uning yuki («📦 Yuk berish», shipperLoads.js). Chatdagi sozlamalar savol-javobi
+    // (draft) ochiq bo'lsa — avval u
+    if (!driver.draft && roleOf(driver) === "yuk_beruvchi") return readLoad(ctx, driver);
     if (!driver.draft) {
       await ctx.reply("Pastdagi menyudan tanlang 👇", menu(driver));
       return;
@@ -1080,6 +1198,14 @@ export function createBot({
     }
   }
 
+  // Yuk beruvchining yuki yuborib bo'lindi (pipeline.js createWorker deps.onDirect) — nechta haydovchiga ketgani.
+  // Botdan ham, web formadan ham — natija chatga keladi. Hisobini o'chirgan bo'lsa — yozilmaydi
+  async function directDone(post, outcome) {
+    const driver = store.getDriver(post.shipper);
+    if (!driver || driver.deletedAt) return;
+    await bot.api.sendMessage(post.shipper, resultText(outcome), html(driver));
+  }
+
   // Bot profilidagi matn faqat o'zgargan bo'lsa yangilanadi (Telegram bu so'rovlarni cheklaydi)
   async function syncProfileTexts() {
     const current = await bot.api.getMyDescription().catch(() => null);
@@ -1102,5 +1228,6 @@ export function createBot({
 
   // notices — server (apps/api) qo'ygan topshiriqlar (xaritada yo'nalish tanlandi): main.js notices.start()
   // sources — foydalanuvchi qo'shgan guruhlar kuzatuvchisi: main.js sources.start()
-  return { bot, init, publish, deliver, canReceive, members, commands, notices, sources };
+  // directDone — yuk beruvchiga natija (main.js worker deps.onDirect)
+  return { bot, init, publish, deliver, canReceive, directDone, members, commands, notices, sources };
 }

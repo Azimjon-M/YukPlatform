@@ -16,10 +16,21 @@ const CHANNEL = { id: -1009876543210, type: "channel", title: "Yuk Ekspert", use
 
 // fail(method, payload) → true (403 «bloklagan») yoki Telegram javobi obyekti (masalan 400) — shu so'rov xato bilan qaytadi
 // answer(method, payload) → Telegram javobidagi result (masalan getChatMember uchun { status }) yoki undefined — standart
-function setup({ fail, answer, config: extra = {}, appUrl, linkToken, callLink } = {}) {
+function setup({ fail, answer, config: extra = {}, appUrl, linkToken, callLink, parseLoad, onLoadQueued } = {}) {
   const store = openStore({ file: ":memory:" });
   const config = { channel: "@Yuk_Ekspert", channelId: CHANNEL.id, admins: [], miniappUrl: null, ...extra };
-  const { bot, init, publish, deliver, canReceive, notices, sources } = createBot({ token: `123456:${"x".repeat(35)}`, store, config, log: () => {}, botInfo: BOT_INFO, appUrl, linkToken, callLink });
+  const { bot, init, publish, deliver, canReceive, directDone, notices, sources } = createBot({
+    token: `123456:${"x".repeat(35)}`,
+    store,
+    config,
+    log: () => {},
+    botInfo: BOT_INFO,
+    appUrl,
+    linkToken,
+    callLink,
+    parseLoad,
+    onLoadQueued,
+  });
   const calls = [];
   let messageId = 100;
   bot.api.config.use(async (_prev, method, payload) => {
@@ -40,7 +51,7 @@ function setup({ fail, answer, config: extra = {}, appUrl, linkToken, callLink }
   const press = (data) =>
     send({ callback_query: { id: String(++updateId), from: USER, chat_instance: "x", data, message: { message_id: 101, date: 0, chat: PRIVATE, text: "..." } } });
   const webAppData = (data) => message(PRIVATE, undefined, { web_app_data: { data, button_text: MENU.settings } });
-  return { store, calls, send, message, command, press, webAppData, init, publish, deliver, canReceive, notices, sources };
+  return { store, calls, send, message, command, press, webAppData, init, publish, deliver, canReceive, directDone, notices, sources };
 }
 
 const ROLE_QUESTION = /^Iltimos, rolingizni tanlang/;
@@ -259,8 +270,9 @@ test("pastki menyudagi «🔄 Rolni almashtirish» — /rol bilan bir xil: hozir
   await press("r:yuk_beruvchi");
   assert.equal(store.getDriver(42).role, "yuk_beruvchi");
   const rows = () => lastMarkup(calls).keyboard.map((row) => row.map((b) => b.text));
-  // Yuk beruvchi sifatida hali ro'yxatdan o'tmagan — faqat 3 tugma (admin bo'lsa ham)
-  assert.deepEqual(rows(), [[MENU.register], [MENU.role, MENU.help]]);
+  // Yuk beruvchi sifatida hali ro'yxatdan o'tmagan — «📦 Yuk berish» + 3 tugma (admin bo'lsa ham). Ro'yxat shart emas
+  // (Azimjon, 2026-11-10: forma faqat bo'sh mashina e'lonlari uchun)
+  assert.deepEqual(rows(), [[MENU.giveLoad], [MENU.register], [MENU.role, MENU.help]]);
   // Haydovchiga qaytdi — sozlamalari tiklandi, to'liq menyu. Tartib (Azimjon, 2026-11-10): mos yuklar, pauza, rol, raqam,
   // yordam, sozlamalar; admin tugmasi alohida pastda
   await press("r:haydovchi");
@@ -582,10 +594,15 @@ test("tunnel manzili o'zgarsa: «📞 Telefon qilish» va pastki menyu yangi man
   assert.ok(buttons(markup).some((b) => b.text === MENU.settings));
 });
 
-test("yuk beruvchi: rol → savol-javob → saqlash; menyuda «🚚 Bo'sh mashinalar»", async () => {
+test("yuk beruvchi: rol → «Yuk berish» haqida; «Ro'yxatdan o'tish» → savol-javob → saqlash; menyuda «🚚 Bo'sh mashinalar»", async () => {
   const { store, calls, command, press, message } = setup();
   await command("/start");
   await press("r:yuk_beruvchi");
+  // Rol tanlangach savol-javob boshlanmaydi: yuk berish uchun ro'yxat shart emas (Azimjon, 2026-11-10: «Shart emas»)
+  assert.match(texts(calls).at(-1), /^📦 Yuk beruvchisiz\.[\s\S]*Yuk berish[\s\S]*oddiy xabar[\s\S]*\n«🚚 Ro'yxatdan o'tish» — bo'sh mashina e'lonlari ham kerak bo'lsa/);
+  assert.equal(store.getDriver(42).draft, null);
+  assert.deepEqual(buttons(lastMarkup(calls)).map((b) => b.text), [MENU.giveLoad, MENU.register, MENU.role, MENU.help]);
+  await message(PRIVATE, MENU.register);
   assert.match(texts(calls).at(-1), /Yukingiz qayerda yuklanadi/);
   for (const data of ["w:from:t.samarqand", "w:from:ok", "w:to:ok", "w:classes:t.fura", "w:classes:ok", "w:bodies:ok", "w:intl:yoq"]) {
     await press(data);
@@ -599,7 +616,7 @@ test("yuk beruvchi: rol → savol-javob → saqlash; menyuda «🚚 Bo'sh mashin
   assert.equal(texts(calls).at(-2), "✅ Saqlandi.");
   assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi/);
   await message(PRIVATE, PHONE.later);
-  assert.deepEqual(buttons(lastMarkup(calls)).map((b) => b.text), [MENU.trucks, MENU.pause, MENU.role, MENU.phone, MENU.help, MENU.settings]);
+  assert.deepEqual(buttons(lastMarkup(calls)).map((b) => b.text), [MENU.giveLoad, MENU.trucks, MENU.pause, MENU.role, MENU.phone, MENU.help, MENU.settings]);
   assert.doesNotMatch(texts(calls).at(-1), /qayerdan qayerga/, "yuk beruvchidan yo'nalish so'ralmaydi — formada bor");
   // Qayta saqlash — sozlamalar ro'yxati bilan
   await command("/sozlamalar");
@@ -633,12 +650,12 @@ test("/rol: boshqa rolga o'tsa sozlamalari saqlanadi, qaytsa tiklanadi; o'sha ro
   assert.match(texts(calls).at(-1), /hech narsa o'zgarmadi/);
   assert.deepEqual(store.getDriver(42).profile, PROFILE);
 
-  // Yuk beruvchi — bu rolda hali sozlama yo'q, savol-javob boshlanadi
+  // Yuk beruvchi — bu rolda hali sozlama yo'q; savol-javob boshlanmaydi (yuk berish uchun shart emas)
   await press("r:yuk_beruvchi");
   let user = store.getDriver(42);
   assert.equal(user.role, "yuk_beruvchi");
   assert.equal(user.profile, null);
-  assert.equal(user.draft.step, "from");
+  assert.equal(user.draft, null);
   assert.equal(store.activeUsers("haydovchi").length, 0, "endi unga yuk bormaydi");
 
   // Haydovchiga qaytdi — mashinasi va yo'nalishi qaytadan so'ralmaydi
@@ -1260,4 +1277,146 @@ test("guruh qo'shish: natija qo'shgan odamga bir marta, pastki menyu bilan; sino
   await createSourceWatcher({ store, send: (chatId, text) => calls.push({ method: "sendMessage", payload: { chat_id: chatId, text } }), log: () => {} }).runOnce();
   assert.equal(store.findSource("@Yangi_Guruh").checkState, "ok");
   assert.equal(texts(calls).at(-1), "✅ <b>Yangi guruh</b> (@Yangi_Guruh) doimiy qo'shildi: sinov paytida 5 ta yuk e'loni chiqdi. Rahmat!");
+});
+
+// --- «📦 Yuk berish»: yuk beruvchi botga oddiy xabar yozadi (shipperLoads.js, 2026-11-10). Raqamlar soxta ---
+const LOAD = { fromCity: "Andijon", fromRegion: "andijon", fromCountry: "O'zbekiston", toCity: "Toshkent", toRegion: "toshkent_sh", toCountry: "O'zbekiston", cargo: "un", weightT: 20, truckClass: "fura", bodyType: "tent", phones: [] };
+const shipperSetup = (result, extra = {}) => {
+  const queued = [];
+  const parsed = [];
+  const parseLoad = async (text) => {
+    parsed.push(text);
+    return typeof result === "function" ? result(text) : result;
+  };
+  const env = setup({ parseLoad, onLoadQueued: () => queued.push(1), ...extra });
+  env.store.saveDriver(42, { role: "yuk_beruvchi", active: true, phoneAskedAt: 1 });
+  return { ...env, queued, parsed };
+};
+const lastSent = (calls) => calls.filter((c) => c.method === "sendMessage" || c.method === "editMessageText").at(-1).payload;
+const callbacks = (payload) => payload.reply_markup.inline_keyboard.flat().map((b) => b.callback_data ?? b.text);
+
+test("yuk beruvchi oddiy xabar yozdi: raqamli — darhol ko'rinish, «✅ Yuborish» → navbatga, natija chatga", async () => {
+  const { store, calls, message, press, queued, parsed, directDone } = shipperSetup({ ok: true, postType: "yuk_bor", loads: [{ ...LOAD, phones: ["+998900000001"] }], by: "rules" });
+  await message(PRIVATE, "Andijondan Toshkentga 20 tonna un, tent fura kerak. 90 000 00 01");
+  assert.deepEqual(parsed, ["Andijondan Toshkentga 20 tonna un, tent fura kerak. 90 000 00 01"]);
+  assert.ok(calls.some((c) => c.method === "sendChatAction"), "«yozmoqda...» belgisi");
+  const shown = lastSent(calls);
+  assert.match(shown.text, /^📋 <b>Haydovchilarga shunday boradi:<\/b>[\s\S]*Andijon → Toshkent[\s\S]*\+998900000001[\s\S]*Hammasi to'g'rimi\?$/);
+  assert.deepEqual(callbacks(shown), ["yb:send", "yb:no"], "forma manzili yo'q — «Formada tuzatish» ham yo'q");
+  assert.equal(store.shipperPosts(42).length, 0, "tasdiqlanmaguncha navbatga tushmaydi");
+
+  await press("yb:send");
+  assert.equal(queued.length, 1, "ishchi darhol uyg'otildi");
+  const [post] = store.shipperPosts(42);
+  assert.equal(post.via, "bot");
+  assert.equal(post.status, "new");
+  assert.deepEqual(post.direct[0].phones, ["+998900000001"]);
+  assert.deepEqual(store.getDriver(42).loadPhones, ["+998900000001"], "keyingi safar tugma bo'lib turadi");
+  assert.match(lastSent(calls).text, /^📤 <b>Yuborildi<\/b>[\s\S]*Andijon → Toshkent/);
+  // Ikkinchi bosish — qoralama yo'q
+  await press("yb:send");
+  assert.match(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, /eskirgan yoki allaqachon yuborilgan/);
+  assert.equal(store.shipperPosts(42).length, 1);
+
+  // Ishchi yubordi — natija yuk beruvchiga
+  await directDone({ shipper: 42 }, { status: "done", fresh: 1, sent: 3 });
+  assert.match(texts(calls).at(-1), /^✅ Yukingiz 3 ta mos haydovchiga yuborildi\. Ular sizga o'zlari qo'ng'iroq qilishadi\./);
+  await directDone({ shipper: 42 }, { status: "done", fresh: 1, sent: 0 });
+  assert.match(texts(calls).at(-1), /Hozircha unga mos haydovchi topilmadi/);
+  await directDone({ shipper: 42 }, { status: "done", fresh: 0, sent: 0 });
+  assert.match(texts(calls).at(-1), /allaqachon yuborilgan/);
+  // Hisobini o'chirgan — yozilmaydi
+  store.deleteDriver(42);
+  const before = calls.length;
+  await directDone({ shipper: 42 }, { status: "done", fresh: 1, sent: 3 });
+  assert.equal(calls.length, before);
+});
+
+test("yuk beruvchi: matnda raqam yo'q — «Qaysi raqamga?»: oldingi raqami tugmada yoki yozib yuboradi; «❌» — bekor", async () => {
+  const { store, calls, message, press } = shipperSetup({ ok: true, postType: "yuk_bor", loads: [LOAD], by: "ai" });
+  store.saveDriver(42, { phone: "+998900000005" });
+  await message(PRIVATE, "Andijondan Toshkentga 20 tonna un bor");
+  let shown = lastSent(calls);
+  assert.match(shown.text, /Haydovchilar qaysi raqamga qo'ng'iroq qilsin/);
+  assert.deepEqual(callbacks(shown), ["yb:ph:0", "yb:no"]);
+  assert.match(shown.reply_markup.inline_keyboard[0][0].text, /\+998 90 000 00 05/);
+  // «Yuborish» hali yo'q — raqamsiz yuk yuborilmaydi
+  await press("yb:send");
+  assert.equal(store.shipperPosts(42).length, 0);
+  // Qisqa, raqam emas — «tushunmadim»
+  await message(PRIVATE, "salom");
+  assert.match(lastSent(calls).text, /Raqamni tushunmadim/);
+  // Yozdi — ikkita raqam
+  await message(PRIVATE, "90 000 00 01, 90 000 00 02");
+  shown = lastSent(calls);
+  assert.match(shown.text, /\+998900000001, \+998900000002/);
+  assert.deepEqual(callbacks(shown), ["yb:send", "yb:no"]);
+  await press("yb:no");
+  assert.equal(lastSent(calls).text, "❌ Bekor qilindi.");
+  assert.equal(store.loadDraft(42), null);
+
+  // Yana yozdi — endi tugmadagi raqam bilan
+  await message(PRIVATE, "Andijondan Toshkentga 20 tonna un bor");
+  await press("yb:ph:0");
+  assert.match(lastSent(calls).text, /\+998900000005/);
+  await press("yb:send");
+  assert.deepEqual(store.shipperPosts(42)[0].direct[0].phones, ["+998900000005"]);
+});
+
+test("yuk beruvchi: tushunilmadi / bo'sh mashina / boshqa yo'nalish / AI band / chegara; haydovchi xabari yuk emas", async () => {
+  let result = { ok: true, postType: "boshqa", loads: [] };
+  const { store, calls, message } = shipperSetup(() => result);
+  const reply = async (text) => {
+    await message(PRIVATE, text);
+    return lastSent(calls).text;
+  };
+  assert.match(await reply("salom"), /Bu xabardan yukni tushunmadim/);
+  result = { ok: true, postType: "mashina_bor", loads: [LOAD] };
+  assert.match(await reply("bo'sh fura bor"), /bo'sh mashina e'loniga o'xshaydi/);
+  result = { ok: true, postType: "yuk_bor", loads: [{ ...LOAD, toCity: "Moskva", toRegion: "xorij", toCountry: "Rossiya", phones: ["+998900000001"] }] };
+  assert.match(await reply("Andijondan Moskvaga 20 tonna"), /Bu yo'nalish hozircha qo'llanmaydi: Andijon → Rossiya, Moskva./);
+  result = null;
+  assert.match(await reply("Andijondan Toshkentga 20 tonna"), /AI band/);
+  // 24 soatda 20 ta — keyingisi qabul qilinmaydi
+  for (let i = 0; i < 20; i++) store.addDirectPost({ chatId: 42, text: `yuk ${i}`, loads: [{ ...LOAD, phones: ["+998900000001"] }] });
+  result = { ok: true, postType: "yuk_bor", loads: [{ ...LOAD, phones: ["+998900000001"] }] };
+  assert.match(await reply("Andijondan Toshkentga 20 tonna"), /24 soatda 20 ta yuk yubordingiz/);
+
+  // Haydovchi oddiy matn yozsa — yuk deb o'qilmaydi
+  const driver = shipperSetup(result);
+  driver.store.saveDriver(42, { role: "haydovchi", profile: PROFILE });
+  await driver.message(PRIVATE, "Andijondan Toshkentga 20 tonna");
+  assert.deepEqual(driver.parsed, []);
+  assert.equal(texts(driver.calls).at(-1), "Pastdagi menyudan tanlang 👇");
+});
+
+test("«📦 Yuk berish» tugmasi: forma bor — Mini App (?v=yuk); formadan kelgan yuk (sendData) — tekshirilib navbatga", async () => {
+  const { store, calls, webAppData, command, queued } = shipperSetup(null, { config: { miniappUrl: MINIAPP } });
+  await command("/start");
+  const give = buttons(lastMarkup(calls)).find((b) => b.text === MENU.giveLoad);
+  const url = new URL(give.web_app.url);
+  assert.equal(url.searchParams.get("v"), "yuk");
+  assert.equal(url.searchParams.get("r"), "yuk_beruvchi");
+  // Tasdiqlash xabarida «✏️ Formada tuzatish» — qoralama bilan
+  const desk = shipperSetup({ ok: true, postType: "yuk_bor", loads: [{ ...LOAD, phones: ["+998900000001"] }] }, { config: { miniappUrl: MINIAPP } });
+  await desk.message(PRIVATE, "Andijondan Toshkentga 20 tonna un. 90 000 00 01");
+  const edit = lastSent(desk.calls).reply_markup.inline_keyboard.flat().find((b) => b.web_app);
+  assert.equal(edit.text, "✏️ Formada tuzatish");
+  assert.equal(new URL(edit.web_app.url).searchParams.get("d"), "1");
+
+  // Formadan (server bilan aloqa yo'q edi) — noto'g'risi rad etiladi, to'g'risi navbatga
+  await webAppData(JSON.stringify({ type: "load", load: { from: "andijon", to: "toshkent_sh", weight: "20", phones: [] } }));
+  assert.match(texts(calls).at(-1), /Yuborilmadi: Telefon raqamini yozing/);
+  await webAppData(JSON.stringify({ type: "load", load: { from: "andijon", to: "toshkent_sh", cargo: "un", weight: "20", phones: ["90 000 00 03"] } }));
+  assert.match(texts(calls).at(-1), /Yukingiz qabul qilindi/);
+  const [post] = store.shipperPosts(42);
+  assert.equal(post.via, "web");
+  assert.equal(post.direct[0].fromRegion, "andijon");
+  assert.deepEqual(store.getDriver(42).loadPhones, ["+998900000003"]);
+  assert.equal(queued.length, 1);
+  // Haydovchi formani yubora olmaydi
+  store.saveDriver(42, { role: "haydovchi", profile: PROFILE });
+  await webAppData(JSON.stringify({ type: "load", load: { from: "andijon", to: "toshkent_sh", weight: "20", phones: ["90 000 00 03"] } }));
+  assert.match(texts(calls).at(-1), /faqat yuk beruvchilar uchun/);
+  assert.equal(store.shipperPosts(42).length, 1);
 });

@@ -1033,3 +1033,48 @@ path.route-dot.start {
 .notice-actions .secondary {
   flex: 0 1 auto;
 }
+
+/* --- «📦 Yuk berish» (LoadFormPage.jsx) --- */
+.field.area {
+  padding: 0;
+}
+
+.field textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 84px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+  outline: none;
+}
+
+.field-under {
+  margin: 8px 0 10px;
+}
+
+.add-phone {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 0;
+}
+
+.sent-load {
+  display: block;
+  margin-top: 10px;
+  color: var(--text);
+}
+
+/* Yuk egasining o'zi yuborgan yuk (guruhdan emas) — kartochkada */
+.owner {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.footer.static {
+  position: static;
+}

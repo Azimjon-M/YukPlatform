@@ -164,6 +164,12 @@ function migrate(db) {
   // sender (2026-11-09) — e'lonni guruhga yozgan odamning Telegram username'i, @ siz («💬 Lichkasi» havolasi uchun).
   // NULL — username'i yo'q, kanal nomidan yozilgan, bot yoki eski e'lon
   if (!columns.includes("sender")) db.exec("ALTER TABLE posts ADD COLUMN sender TEXT");
+  // Yuk beruvchining o'z yuki (2026-11-10, «📦 Yuk berish»): shipper — kim yubordi (chat id), direct — tayyor yuklar (JSON,
+  // @yuk/shared shipperLoad.js yoki botdagi erkin matndan tushunilgani). Bunday e'lon AI'ga bormaydi: bot uni darhol mos
+  // haydovchilarga yuboradi (apps/bot pipeline.js). source = "shipper:<chat id>", link yo'q
+  if (!columns.includes("shipper")) db.exec("ALTER TABLE posts ADD COLUMN shipper INTEGER");
+  if (!columns.includes("direct")) db.exec("ALTER TABLE posts ADD COLUMN direct TEXT");
+  db.exec("CREATE INDEX IF NOT EXISTS posts_shipper ON posts (shipper, created_at)");
   // Manbalar: collector akkaunti guruhga a'zomi (a'zo — jonli), qachon tekshirilgan. NULL — hali tekshirilmagan
   const sourceColumns = db.prepare("PRAGMA table_info(sources)").all().map((c) => c.name);
   if (!sourceColumns.includes("joined")) db.exec("ALTER TABLE sources ADD COLUMN joined INTEGER");
@@ -251,6 +257,10 @@ function migrate(db) {
   // route_msg_id — chatdagi oxirgi «📍 Qayerdan?» / «🏁 Qayerga?» xabari (2026-11-10). Yo'nalish web xaritasida tanlansa,
   // bot o'sha xabarni «✅ Yo'nalish: …» ga almashtiradi (eski tugmalar chatda osilib qolmasin)
   if (!users.includes("route_msg_id")) db.exec("ALTER TABLE drivers ADD COLUMN route_msg_id INTEGER");
+  // Yuk beruvchi (2026-11-10): load_draft — botga yozilgan, hali tasdiqlanmagan yuk (JSON: { text, loads, stage, at,
+  // messageId }; apps/bot shipperLoads.js); load_phones — oxirgi yukda yozgan raqamlari (keyingi yukda forma shu bilan ochiladi)
+  if (!users.includes("load_draft")) db.exec("ALTER TABLE drivers ADD COLUMN load_draft TEXT");
+  if (!users.includes("load_phones")) db.exec("ALTER TABLE drivers ADD COLUMN load_phones TEXT");
 
   // kind — yuk (yuk bor, mashina kerak) | mashina (mashina bo'sh, yuk kerak — yuk beruvchilarga)
   const loads = db.prepare("PRAGMA table_info(loads)").all().map((c) => c.name);
@@ -325,6 +335,8 @@ function driverRow(row) {
     subMissing: parse(row.sub_missing) ?? [],
     subCheckedAt: row.sub_checked_at ?? null,
     subRemindedAt: row.sub_reminded_at ?? null,
+    // Yuk beruvchi oxirgi yukida yozgan raqamlar (["+998..."]) — keyingi yuk formasi shu bilan ochiladi
+    loadPhones: parse(row.load_phones) ?? [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -361,6 +373,10 @@ function queuedPost(row) {
     queuedAt: row.created_at,
     via: row.via, // live — a'zo bo'lingan guruhdan jonli kelgan (bot uni tezroq AI'ga yuboradi)
     sender: row.sender ?? null, // e'lonni yozgan odamning username'i («💬 Lichkasi»)
+    // Yuk beruvchining o'z yuki: kim yubordi va tayyor yuklar (AI'ga bormaydi, bot darhol yuboradi). Oddiy e'londa — null
+    shipper: row.shipper ?? null,
+    fromShipper: row.shipper != null,
+    direct: row.direct == null ? null : JSON.parse(row.direct),
   };
 }
 
@@ -392,13 +408,13 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     newPostsAfter: db.prepare("SELECT * FROM posts WHERE status = 'new' AND id > ? ORDER BY id LIMIT ?"),
     expirePosts: db.prepare(
       `UPDATE posts SET status = 'done', error = ?, done_at = ?
-       WHERE status = 'new' AND posted_at < ? AND id NOT IN (SELECT value FROM json_each(?))`,
+       WHERE status = 'new' AND posted_at < ? AND direct IS NULL AND id NOT IN (SELECT value FROM json_each(?))`,
     ),
     recentLoad: db.prepare("SELECT id FROM loads WHERE key = ? AND kind = ? AND created_at > ? LIMIT 1"),
     insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, kind, created_at) VALUES (?, ?, ?, ?, ?)"),
     loadDelivery: db.prepare("UPDATE loads SET sent_to = ?, channel_message_id = ? WHERE id = ?"),
     recentLoads: db.prepare(
-      `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at, p.sender
+      `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at, p.sender, p.shipper
        FROM loads l JOIN posts p ON p.id = l.post_id
        WHERE l.created_at > ? AND l.kind = ? ORDER BY l.id DESC LIMIT ?`,
     ),
@@ -461,7 +477,68 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       return q.newPostsAfter.all(afterId, limit).map(queuedPost);
     },
 
-    // parsedBy — e'lonni kim tushundi: "rules" | "ai" (berilmasa — o'zgarmaydi)
+    // --- Yuk beruvchining o'z yuki («📦 Yuk berish»: web forma yoki botga yozilgan matn) ---
+    // Navbatga tushadi (bot pipeline.js uni AI'siz, darhol mos haydovchilarga yuboradi va natijani yuk beruvchiga yozadi).
+    // loads — tayyor yuklar (@yuk/shared sanitizeShipperLoad yoki bot tushungani, telefonlari bilan); text — botga yozgani
+    // yoki formadan yasalgan matn (shipperLoadText); via — "bot" | "web"; sender — username («💬 Lichkasi»).
+    // message_id — shu yuk beruvchining navbatdagi raqami (1, 2, 3...; bitta SQL — bot va server bir vaqtda yozsa ham adashmaydi).
+    // → { id }
+    addDirectPost({ chatId, text, loads, via = "bot", sender = null }) {
+      const time = now();
+      const source = `shipper:${chatId}`;
+      const result = db
+        .prepare(
+          `INSERT INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via, sender, shipper, direct)
+           SELECT ?, COALESCE(MAX(message_id), 0) + 1, NULL, ?, ?, ?, 'new', ?, ?, ?, ?, ? FROM posts WHERE source = ?`,
+        )
+        .run(source, text, textKey(text), time, time, via, sender, chatId, JSON.stringify(loads), source);
+      return { id: Number(result.lastInsertRowid) };
+    },
+
+    // Oxirgi sinceMs ichida shu yuk beruvchi nechta yuk e'loni yubordi (kunlik limit — @yuk/shared SHIPPER_LOAD_LIMIT)
+    shipperPostCount(chatId, sinceMs = 24 * 60 * 60 * 1000) {
+      return db.prepare("SELECT COUNT(*) AS n FROM posts WHERE shipper = ? AND created_at > ?").get(chatId, now() - sinceMs).n;
+    },
+
+    // Yuk beruvchining yuborgan yuklari, eng yangisi birinchi: natijasi bilan (status, error — masalan «allaqachon bor»,
+    // loads — nechta yuk saqlandi, sent — nechta haydovchiga yetdi). Boshqaruv markazidagi «Batafsil» uchun
+    shipperPosts(chatId, { limit = 30 } = {}) {
+      return db
+        .prepare(
+          `SELECT p.id, p.text, p.via, p.status, p.error, p.created_at, p.direct,
+             (SELECT COUNT(*) FROM loads l WHERE l.post_id = p.id) AS loads,
+             (SELECT COALESCE(SUM(sent_to), 0) FROM loads l WHERE l.post_id = p.id) AS sent
+           FROM posts p WHERE p.shipper = ? ORDER BY p.id DESC LIMIT ?`,
+        )
+        .all(chatId, limit)
+        .map((row) => ({
+          id: row.id,
+          text: row.text,
+          via: row.via,
+          status: row.status,
+          error: row.error,
+          createdAt: row.created_at,
+          direct: row.direct == null ? [] : JSON.parse(row.direct),
+          loads: row.loads,
+          sent: row.sent,
+        }));
+    },
+
+    // Botga yozilgan, hali tasdiqlanmagan yuk (apps/bot shipperLoads.js). Web forma «✏️ Formada tuzatish» bilan shuni ochadi
+    loadDraft(chatId) {
+      return parse(db.prepare("SELECT load_draft FROM drivers WHERE chat_id = ?").get(chatId)?.load_draft ?? null);
+    },
+
+    setLoadDraft(chatId, draft) {
+      db.prepare("UPDATE drivers SET load_draft = ? WHERE chat_id = ?").run(json(draft ?? null), chatId);
+    },
+
+    // Oxirgi yukdagi raqamlar — keyingi yukda forma shu bilan to'ldirilib ochiladi (updated_at o'zgarmaydi — bu sozlama emas)
+    setLoadPhones(chatId, phones) {
+      db.prepare("UPDATE drivers SET load_phones = ? WHERE chat_id = ?").run(json(phones?.length ? phones : null), chatId);
+    },
+
+    // parsedBy — e'lonni kim tushundi: "rules" | "ai" | "shipper" (yuk beruvchining o'zi) (berilmasa — o'zgarmaydi)
     finishPost(id, status, error = null, parsedBy = null) {
       q.finishPost.run(status, error, now(), parsedBy, id);
     },
@@ -491,12 +568,14 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     },
 
     // Oxirgi yuklar, eng yangisi birinchi ("📋 Mos yuklar" / "🚚 Bo'sh mashinalar" tugmalari uchun).
-    // → [{ id, load, post: { source, link, postedAt, sender }, createdAt }]
+    // → [{ id, load, post: { source, link, postedAt, sender, fromShipper }, createdAt }]
+    // fromShipper — yuk egasining o'zi yuborgan («📦 Yuk berish»). Uning chat id'si BERILMAYDI: bu ro'yxat web'ga ham ketadi
     recentLoads({ sinceMs = 24 * 60 * 60 * 1000, limit = 500, kind = "yuk" } = {}) {
       return q.recentLoads.all(now() - sinceMs, kind, limit).map((row) => ({
         id: row.id,
         load: JSON.parse(row.data),
-        post: { source: row.source, link: row.link, postedAt: row.posted_at, sender: row.sender ?? null },
+        // source "shipper:<chat id>" ham yashiriladi — null
+        post: { source: row.shipper != null ? null : row.source, link: row.link, postedAt: row.posted_at, sender: row.sender ?? null, fromShipper: row.shipper != null },
         createdAt: row.created_at,
       }));
     },
@@ -640,9 +719,14 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     },
 
     // Butunlay o'chirish — faqat boshqaruv markazidan (odam shaxsiy ma'lumotini o'chirishni talab qilsa):
-    // foydalanuvchi, unga yuborilganlar ro'yxati va tarixi. Qaytarib bo'lmaydi. → true (bor edi) yoki false
+    // foydalanuvchi, unga yuborilganlar ro'yxati, tarixi va (yuk beruvchi bo'lsa) o'zi yuborgan yuklar. Qaytarib bo'lmaydi. → true (bor edi) yoki false
     purgeDriver(chatId) {
       db.prepare("DELETE FROM deliveries WHERE chat_id = ?").run(chatId);
+      // Yuk beruvchi bo'lsa — o'zi yuborgan yuklar ham (ularda uning raqamlari bor): yetkazilganlar ro'yxati, yuklar, e'lonlar
+      const own = "SELECT id FROM posts WHERE shipper = ?";
+      db.prepare(`DELETE FROM deliveries WHERE load_id IN (SELECT id FROM loads WHERE post_id IN (${own}))`).run(chatId);
+      db.prepare(`DELETE FROM loads WHERE post_id IN (${own})`).run(chatId);
+      db.prepare("DELETE FROM posts WHERE shipper = ?").run(chatId);
       db.prepare("DELETE FROM user_events WHERE chat_id = ?").run(chatId);
       return db.prepare("DELETE FROM drivers WHERE chat_id = ?").run(chatId).changes > 0;
     },

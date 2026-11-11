@@ -4,7 +4,7 @@
 //   npm run bot -- --dry-run — navbatdagi e'lonlarni tahlil qilib, Telegram'ga yubormasdan ekranga chiqarish
 import { existsSync, statSync } from "node:fs";
 import { createParser, createParserPool, envSeedEntries, resolveSettings } from "@yuk/parser";
-import { ROUTE_SCOPES, routeScopeFrom } from "@yuk/shared";
+import { ROUTE_SCOPES, SHIPPER_LOAD_LIMIT, routeScopeFrom } from "@yuk/shared";
 import { acquireRunLock, createCallLinks, createSessions, loadSecret, openStore, tunnelUrl } from "@yuk/store";
 import { createBot } from "./bot.js";
 import { createIdleWatcher } from "./idle.js";
@@ -149,14 +149,50 @@ async function main() {
   // «📞 Telefon qilish» tugmasi: imzolangan havola (raqamning o'zi emas) — sahifani haydovchilar serveri ochadi (/pub/call)
   const calls = createCallLinks(secret);
   const callLink = (link) => calls.make(link);
-  const { bot, init, publish, deliver, canReceive, commands, notices, sources } = createBot({ token: config.token, store, config, log, appUrl, linkToken, callLink });
-  await init();
-  const { routeScope, maxPostAgeMs } = config;
   // Oddiy e'lonlar AI'siz (qoidaviy parser), qolgani AI'ga — pipeline.js createWorker deps.rules
   const rules = config.ruleParser ? ruleParse : null;
-  // canReceive — kanal va guruhga a'zomi (bot.js; a'zo emas — yuk o'rniga «a'zo bo'ling» eslatmasi)
-  const worker = createWorker(
-    { pool, store, publish, deliver, rules, requireContact: config.requireContact, routeScope, canReceive },
+  // Yuk beruvchi botga yozgan yuk («📦 Yuk berish», shipperLoads.js): u javobni KUTIB turibdi, shuning uchun navbatga emas —
+  // darhol. Avval qoidaviy parser (2 ms), tushunmasa — bo'sh AI ulanishi (hammasi band bo'lsa 20 s gacha kutamiz).
+  // → { ok, postType, loads, by } yoki null (AI band — bot «bir daqiqadan keyin» deydi)
+  const parseLoad = async (text) => {
+    const quick = rules?.(text);
+    if (quick) return { ...quick, by: "rules" };
+    const until = Date.now() + 20_000;
+    let lease = pool.acquire();
+    while (!lease && Date.now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      lease = pool.acquire();
+    }
+    if (!lease) return null;
+    try {
+      return { ...(await lease.parser.parse(text)), by: "ai" };
+    } catch (error) {
+      lease.fail(error); // ulanish dam oladi (limit, band) — guruh e'lonlari boshqasiga o'tadi
+      log(`Yuk beruvchi xabari: AI xatosi — ${lease.describe(error)}`);
+      return null;
+    } finally {
+      lease.release({ posts: 1 });
+    }
+  };
+  // Ishchi pastda yaratiladi, bot esa undan oldin: «navbatga tushdi — darhol ko'r» keyin ulanadi
+  let worker = null;
+  const { bot, init, publish, deliver, canReceive, directDone, commands, notices, sources } = createBot({
+    token: config.token,
+    store,
+    config,
+    log,
+    appUrl,
+    linkToken,
+    callLink,
+    parseLoad,
+    onLoadQueued: () => worker?.poke(),
+  });
+  await init();
+  const { routeScope, maxPostAgeMs } = config;
+  // canReceive — kanal va guruhga a'zomi (bot.js; a'zo emas — yuk o'rniga «a'zo bo'ling» eslatmasi).
+  // onDirect — yuk beruvchining yuki yuborildi: natijani unga yozadi
+  worker = createWorker(
+    { pool, store, publish, deliver, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone },
     { log, maxAgeMs: maxPostAgeMs },
   );
   // 24 soat kirmaganga — ogohlantirish, 48 soatda — pauza (idle.js; Azimjon, 2026-11-09)
@@ -189,6 +225,7 @@ async function main() {
   log(config.miniappUrl ? `Mini App: ${config.miniappUrl}` : "Mini App: tunnel manzili (tunnel o'chiq bo'lsa — sozlamalar chatda savol-javob)");
   log("Faollik: botga 24 soat kirmaganga ogohlantirish, 48 soatda avtomatik pauza (har 10 daqiqada tekshiriladi)");
   log("Foydalanuvchi guruhlari: raqam ulashganlar «➕ Guruh qo'shish» bilan qo'shadi — collector oxirgi xabarlarini ko'radi, keyin 24 soat sinov (kamida 5 ta yuk e'loni)");
+  log(`Yuk beruvchilar: «📦 Yuk berish» — forma yoki botga oddiy xabar (tasdiqlangach darhol mos haydovchilarga), 24 soatda ${SHIPPER_LOAD_LIMIT} tagacha`);
   log(config.requiredChats.length
     ? `A'zolik: bot faqat ${config.requiredChats.join(" va ")} a'zolariga ishlaydi (.env: REQUIRED_CHATS)`
     : "A'zolik: tekshirilmaydi, bot hammaga ishlaydi (yoqish: .env ga REQUIRED_CHATS=@kanal,@guruh)");

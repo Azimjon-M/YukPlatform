@@ -22,6 +22,10 @@ export function escapeHtml(text) {
 
 // E'lon guruhda chiqqan vaqt: «🕒 Asl e'lon: 09.11 12:05». Guruh nomi yozilmaydi (Azimjon, 2026-11-09: «@TutGruz kerak emas»)
 export const postedLine = (postedAt) => `🕒 Asl e'lon: ${escapeHtml(postedText(postedAt))}`;
+// Yuk egasining o'zi botga yoki formaga yozgan yuk («📦 Yuk berish», 2026-11-10): guruhdan olinmagan — «asl e'lon» yo'q,
+// vositachisiz ekani haydovchi uchun muhim
+export const ownerLine = (postedAt) => `✅ Yuk egasining o'zi yubordi · ${escapeHtml(postedText(postedAt))}`;
+const timeLine = (post) => (post.fromShipper ? ownerLine(post.postedAt) : postedLine(post.postedAt));
 
 // E'lonni guruhga yozgan odamning shaxsiy chati: «💬 Lichkasi» (havola). Username'i yo'q bo'lsa — qator yo'q.
 // t.me havolasi Telegram ichida «Havolani ochish» so'ramasdan darhol o'sha odam bilan chatni ochadi
@@ -49,7 +53,7 @@ export function formatLoad(load, post = {}) {
   const sender = senderLine(post.sender);
   if (sender) lines.push(sender);
 
-  if (post.postedAt) lines.push(postedLine(post.postedAt));
+  if (post.postedAt) lines.push(timeLine(post));
 
   return { text: lines.join("\n"), url: post.link ?? null };
 }
@@ -70,7 +74,7 @@ export function formatTruck(truck, post = {}) {
   const sender = senderLine(post.sender);
   if (sender) lines.push(sender);
 
-  if (post.postedAt) lines.push(postedLine(post.postedAt));
+  if (post.postedAt) lines.push(timeLine(post));
 
   return { text: lines.join("\n"), url: post.link ?? null };
 }

@@ -1,9 +1,10 @@
 // Telefon raqamlarini matndan ajratib, bitta ko'rinishga keltiradi: +998901234567
 // Bu yerda AI ishlatilmaydi: regex tez, bepul va raqamni "o'ylab topmaydi".
 
-// 998 dan keyingi 2 ta raqam: mobil operatorlar + Toshkent shahar (71) va viloyati (70).
-// 87 va 70 haqiqiy yuk e'lonlarida "+998 87 ..." / "+998 70 ..." ko'rinishida uchradi (2026-11).
-const UZ_CODES = new Set(["20", "33", "50", "55", "70", "71", "77", "87", "88", "90", "91", "93", "94", "95", "97", "98", "99"]);
+import { UZ_PHONE_CODES } from "@yuk/shared";
+
+// 998 dan keyingi 2 ta raqam (@yuk/shared contact.js): mobil operatorlar + Toshkent shahar (71) va viloyati (70)
+const UZ_CODES = new Set(UZ_PHONE_CODES);
 
 // "Bo'lak" — raqamlar va ular orasidagi bo'sh joy, chiziqcha, qavs, nuqta.
 // Yangi qator (\n) kirmaydi, aks holda har xil qatordagi sonlar qo'shilib ketadi.

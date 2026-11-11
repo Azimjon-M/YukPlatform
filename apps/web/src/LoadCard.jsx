@@ -35,6 +35,8 @@ function Contacts({ load, post, now }) {
       </div>
       {!phones.length && <p className="muted small">Telefon yozilmagan — asl e'lonni oching.</p>}
       <p className="meta">
+        {/* Yuk egasining o'zi yuborgan («📦 Yuk berish») — guruhdan emas, vositachisiz */}
+        {post.fromShipper && <span className="owner">✅ Yuk egasidan · </span>}
         <time dateTime={new Date(post.postedAt).toISOString()}>{agoText(post.postedAt, now)}</time>
         {source && ` · ${source}`}
       </p>

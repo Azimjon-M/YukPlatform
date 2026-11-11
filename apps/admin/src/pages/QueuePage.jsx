@@ -46,7 +46,13 @@ function PostCard({ item, now, onChanged }) {
         <Badge tone={meta.tone} icon={meta.icon}>
           {meta.label}
         </Badge>
-        <span className="post-source">{item.source}</span>
+        {/* «📦 Yuk berish»: guruhdan emas — yuk beruvchining o'zi (botga yozdi yoki formadan). source = shipper:<chat id> */}
+        <span className="post-source">{item.fromShipper ? `📦 Yuk beruvchi · ${item.source.slice(8)}` : item.source}</span>
+        {item.fromShipper && (
+          <Badge tone="good" icon="✅" title="Yuk egasining o'zi yubordi — AI'ga bormaydi, darhol mos haydovchilarga">
+            {item.via === "web" ? "Formadan" : "Botga yozdi"}
+          </Badge>
+        )}
         {item.parsedBy === "rules" && (
           <Badge tone="info" icon="⚡">
             AI'siz
