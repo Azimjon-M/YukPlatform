@@ -23,6 +23,14 @@ test("FLOOD_WAIT — kutish vaqti daqiqada", () => {
   assert.match(action.message, /10 daqiqa/);
 });
 
+test("again: qaytadan boshlash yo'li matnga qo'yiladi (Mini App'da — tugma, terminalda — buyruq)", () => {
+  const again = "«➕ Akkaunt qo'shish» ni qayta bosing";
+  assert.equal(authErrorAction(telegramError("PHONE_CODE_EXPIRED"), 0, { again }).message, `Kod eskirdi. Qaytadan boshlang: ${again}`);
+  assert.match(authErrorAction(telegramError("PHONE_CODE_EXPIRED")).message, /npm run tg:login/);
+  assert.ok(authErrorAction(telegramError("PHONE_CODE_INVALID"), MAX_RETRIES, { again }).message.endsWith(again));
+  assert.match(authErrorAction(telegramError("SIGN_UP_REQUIRED")).message, /akkaunt yo'q/);
+});
+
 test("eskirgan kod va GramJS'ning o'z xabarlari tushunarli matnga aylanadi", () => {
   assert.match(authErrorAction(telegramError("PHONE_CODE_EXPIRED")).message, /eskirdi/);
   assert.match(authErrorAction(new Error("Code is empty")).message, /Kod kiritilmadi/);

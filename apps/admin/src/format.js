@@ -440,7 +440,7 @@ export function tgAccountView(account) {
     case "error":
       return { tone: "critical", icon: "!", label: "Ulanib bo'lmadi", title: error, hint: "Collector o'zi qayta urinadi (1 … 30 daqiqada)" };
     case "logged_out":
-      return { tone: "critical", icon: "✖", label: "Sessiya yo'q", title: error, hint: `Akkaunt egasi serverda qayta kirsin: ${loginCommand(account.name)}` };
+      return { tone: "critical", icon: "✖", label: "Sessiya yo'q", title: error, hint: reloginHint(account.name) };
     case "duplicate":
       return { tone: "warning", icon: "⚠", label: "Takror", title: error, hint: "Bu boshqa nom bilan ulangan akkauntning o'zi — ishlatilmaydi" };
     default:
@@ -449,6 +449,13 @@ export function tgAccountView(account) {
 }
 
 export const loginCommand = (name) => (name === MAIN_TG_ACCOUNT ? "npm run tg:login" : `npm run tg:login -- --account ${name}`);
+
+// Qo'shimcha akkauntga Mini App'dan kiriladi (2026-11-13, apps/web TgAccounts.jsx), asosiysiga — faqat serverda terminaldan
+export const MINIAPP_LOGIN = "Mini App → «🛠 Boshqaruv» → «Telegram akkauntlari»";
+export function reloginHint(name) {
+  if (name === MAIN_TG_ACCOUNT) return `Akkaunt egasi serverda qayta kirsin: ${loginCommand(name)}`;
+  return `Akkaunt egasi qayta kirsin: ${MINIAPP_LOGIN} → «🔑 Qayta kirish» (yoki serverda: ${loginCommand(name)})`;
+}
 
 // «Yopiq guruh qo'shish» ro'yxati: hali manba bo'lmagan guruh/kanallar, bir guruh bir marta (a'zo akkauntlari bilan),
 // yopiqlari birinchi, keyin nomi bo'yicha. query — nomi, @username yoki id bo'yicha qidirish.

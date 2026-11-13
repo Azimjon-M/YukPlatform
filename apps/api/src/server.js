@@ -21,6 +21,7 @@ import { createPublicApp } from "./public.js";
 import { createBotMessenger } from "./botMessage.js";
 import { findCloudflared, findNginx, findTailscale } from "./edge/tools.js";
 import { createSessions } from "./telegramAuth.js";
+import { createTgLogin } from "./tgLogin.js";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const PORT = Number(process.env.API_PORT) || 3000;
@@ -80,9 +81,12 @@ const app = createApp({
   publicUrl: PUBLIC_LOCAL_URL,
   errors,
 });
+// Collector uchun Telegram akkaunt qo'shish — Mini App «🛠 Boshqaruv» dan (raqam → kod → 2FA; alohida jarayonda)
+const tgLogin = createTgLogin({ store, log });
 const publicApp = createPublicApp({
   store,
   sessions,
+  tgLogin,
   calls: createCallLinks(secret), // «📞 Telefon qilish» sahifasi (/pub/call) — bot bilan bir kalit
   scope: routeScopeFrom(),
   webDist: path.join(ROOT, "apps/web/dist"),
@@ -136,6 +140,7 @@ async function shutdown() {
   closing = true;
   log("To'xtatilyapti: bot, collector, nginx va tunnel yumshoq to'xtatiladi...");
   await processes.shutdown();
+  tgLogin.close();
   app.locals.live.close();
   server.close();
   publicServer.close();

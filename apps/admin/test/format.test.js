@@ -317,7 +317,7 @@ test("foydalanuvchi qo'shgan manba: tekshiruv belgisi", () => {
 test("Telegram akkaunti holati: ishlayapti / ulanib bo'lmadi / sessiya yo'q (qanday kirish) / takror", () => {
   assert.equal(tgAccountView({ name: "ikkinchi", status: "ok" }).label, "Ishlayapti");
   assert.equal(tgAccountView({ name: "ikkinchi", status: "error", error: "Not connected" }).title, "Not connected");
-  assert.match(tgAccountView({ name: "ikkinchi", status: "logged_out" }).hint, /npm run tg:login -- --account ikkinchi/);
+  assert.match(tgAccountView({ name: "ikkinchi", status: "logged_out" }).hint, /Boshqaruv.*Qayta kirish.*npm run tg:login -- --account ikkinchi/);
   assert.match(tgAccountView({ name: "asosiy", status: "logged_out" }).hint, /npm run tg:login$/);
   assert.equal(tgAccountView({ name: "x", status: "duplicate" }).tone, "warning");
 });

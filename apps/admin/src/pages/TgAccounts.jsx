@@ -1,9 +1,10 @@
 // Collector'ning Telegram akkauntlari (2026-11-13): yopiq guruhni faqat unga a'zo akkaunt o'qiy oladi.
 // Bu yerda — akkauntlar holati, ularning guruhlari ro'yxatidan yopiq guruhni manba qilib qo'shish.
-// Akkauntga kirish (kod, 2FA) shu sahifada YO'Q: uni akkaunt egasi serverda terminalda o'zi qiladi (tg:login).
+// Akkauntga kirish (kod, 2FA) shu sahifada YO'Q: qo'shimcha akkauntga egasi Mini App'da («🛠 Boshqaruv» →
+// «Telegram akkauntlari», apps/web TgAccounts.jsx) bitta telefondan kiradi; asosiysiga — serverda terminalda (tg:login).
 import { useState } from "react";
 import { get, post } from "../api.js";
-import { dialogSource, formatNumber, loginCommand, MAIN_TG_ACCOUNT, pickableDialogs, tgAccountView } from "../format.js";
+import { dialogSource, formatNumber, loginCommand, MAIN_TG_ACCOUNT, MINIAPP_LOGIN, pickableDialogs, tgAccountView } from "../format.js";
 import { useApi } from "../hooks.js";
 import { Badge, Button, Card, Field, TimeAgo, useToast } from "../ui.jsx";
 
@@ -36,8 +37,9 @@ function AccountRow({ account, now }) {
           </>
         ) : null}
       </p>
-      {/* Collector xatosida qanday kirish allaqachon yozilgan bo'lsa — maslahat takrorlanmaydi */}
-      {view.hint && !(account.error ?? "").includes("tg:login") && <p className="small">{view.hint}</p>}
+      {/* Asosiy akkaunt: collector xatosida terminal buyrug'i allaqachon yozilgan bo'lsa — maslahat takrorlanmaydi
+          (qo'shimchada maslahat Mini App yo'lini ham aytadi, shuning uchun doim ko'rsatiladi) */}
+      {view.hint && (account.name !== MAIN_TG_ACCOUNT || !(account.error ?? "").includes("tg:login")) && <p className="small">{view.hint}</p>}
       {account.error && account.status !== "ok" && <p className="inline-error small">{account.error}</p>}
     </li>
   );
@@ -113,8 +115,10 @@ export function TgAccountsCard({ state, now }) {
                 qo'shsin.
               </li>
               <li>
-                Serverda, loyiha papkasida, terminalda: <code>{loginCommand("ikkinchi")}</code> (nom — o'zingiz tanlaysiz: kichik lotin harflari). Kodni va 2FA
-                parolni <strong>akkaunt egasining o'zi</strong> terminalga yozadi — ularni hech kimga, hech qanday botga yoki chatga yubormang.
+                Botda (admin): {MINIAPP_LOGIN} → «➕ Akkaunt qo'shish» — nom va raqam, keyin Telegram yuborgan kod va (bo'lsa) 2FA parol. Bitta telefonda:
+                Telegram'da shu akkauntga o'tib kodni o'qing, asosiy akkauntga qaytib Mini App'ni qayta oching — kirish joyidan davom etadi (15 daqiqa).
+                Kodni va parolni <strong>akkaunt egasining o'zi</strong> kiritadi — ularni hech kimga, hech qanday botga yoki chatga yubormang. Muqobil:
+                serverda terminalda <code>{loginCommand("ikkinchi")}</code>.
               </li>
               <li>Ishlab turgan collector yangi akkauntni 30 soniya ichida o'zi ulaydi — shu yerda paydo bo'ladi. Qayta ishga tushirish shart emas.</li>
               <li>Pastdagi «Yopiq guruh qo'shish» ro'yxatidan guruhni tanlang. Shu akkaunt uni o'qiydi, e'lonlar boshqa guruhlarnikidek haydovchilarga boradi.</li>

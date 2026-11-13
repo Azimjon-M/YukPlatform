@@ -370,7 +370,8 @@ export function createApp({
   });
 
   // --- Collector'ning Telegram akkauntlari (tgAccounts.js, 2026-11-13) ---
-  // Kirish (kod, 2FA) — faqat egasi o'zi, serverda terminalda; bu yerda faqat holat va a'zo bo'lgan guruhlar ro'yxati.
+  // Kirish (kod, 2FA) — faqat egasi o'zi: Mini App (public.js /pub/admin/tg-accounts/login) yoki serverda terminalda;
+  // bu yerda faqat holat va a'zo bo'lgan guruhlar ro'yxati.
   // dialogs[].added — shu guruh allaqachon manba bo'lsa, uning nomi (id yoki @username bo'yicha)
   api.get("/tg-accounts", (req, res) => {
     const sources = store.listSources();

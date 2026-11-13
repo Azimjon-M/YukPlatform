@@ -1,5 +1,6 @@
 // 🛠 Boshqaruv — faqat adminlarga (Azimjon: "botda telegram webi orqali ochib ishlaydigan bo'lsin").
-// Ko'rsatkichlar, AI ulanishlari holati, foydalanuvchilar (rolni almashtirish). Faol / pauza — faqat foydalanuvchining
+// Ko'rsatkichlar, AI ulanishlari holati, collector'ning Telegram akkauntlari (yangisini qo'shish — TgAccounts.jsx),
+// foydalanuvchilar (rolni almashtirish). Faol / pauza — faqat foydalanuvchining
 // o'zi (Azimjon, 2026-11-09), bu yerda faqat ko'rinadi; 48 soat botga kirmasa bot o'zi pauza qiladi.
 // Server har bir so'rovda admin ekanini tekshiradi (apps/api public.js /pub/admin). Admin qilish va obuna —
 // faqat kompyuterdagi boshqaruv markazidan (localhost:3000), bu yerdan emas.
@@ -7,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ROLES, agoText } from "@yuk/shared";
 import { getAdminOverview, getAdminUsers, updateAdminUser } from "./api.js";
 import { confirmAction, haptic, showAlert } from "./telegram.js";
+import { TgAccounts } from "./TgAccounts.jsx";
 import { Notice, Segmented, Spinner } from "./ui.jsx";
 
 const REFRESH_MS = 60_000;
@@ -230,6 +232,9 @@ export function AdminPage({ onAuthLost }) {
       ) : (
         <Spinner />
       )}
+
+      <h2 className="group-title">Telegram akkauntlari (collector)</h2>
+      <TgAccounts onAuthLost={onAuthLost} />
 
       <h2 className="group-title">Foydalanuvchilar</h2>
       <div className="toolbar">

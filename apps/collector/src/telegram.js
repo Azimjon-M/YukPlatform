@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Api, TelegramClient, utils } from "telegram";
 import { NewMessage } from "telegram/events/index.js";
 import { Logger, LogLevel } from "telegram/extensions/Logger.js";
+import { computeCheck } from "telegram/Password.js";
 import { StringSession } from "telegram/sessions/index.js";
 import { MAIN_TG_ACCOUNT, TG_ACCOUNT_NAME } from "@yuk/store";
 import { authErrorAction } from "./authErrors.js";
@@ -19,6 +20,20 @@ export const SESSION_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.
 // «asosiy» — yuqoridagi SESSION_FILE (yoki .env TG_SESSION), avvalgidek
 export const SESSIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../sessions");
 export const MAIN_ACCOUNT = MAIN_TG_ACCOUNT;
+
+// my.telegram.org dagi ilova kalitlari (.env). 8a236e5 da tasodifan o'chib ketgan edi — createClient
+// «readConfig is not defined» bilan yiqilardi (collector umuman ulanmasdi); telegram.test.js endi buni tutadi
+export function readConfig(env = process.env) {
+  const apiId = Number(env.TG_API_ID);
+  const apiHash = env.TG_API_HASH;
+  if (!apiId || !apiHash) {
+    throw new Error(
+      "TG_API_ID va TG_API_HASH topilmadi.\n" +
+        "my.telegram.org → API development tools → ilova yarating, keyin ikkalasini .env ga yozing.",
+    );
+  }
+  return { apiId, apiHash };
+}
 
 // --account qiymatini tekshiradi: bo'sh — asosiy. Nom fayl nomiga aylanadi, shuning uchun faqat xavfsiz belgilar
 export function accountName(input) {
@@ -142,6 +157,71 @@ export async function login(ask, { account = MAIN_ACCOUNT } = {}) {
   }
   await saveSession(client, account);
   return client;
+}
+
+// --- Mini App'dan kirish (loginWorker.js, 2026-11-13): raqam → kod → (2FA bo'lsa) parol, bosqichma-bosqich ---
+// client.start() hamma savolni bitta chaqiruvda so'raydi; Mini App'da esa har bosqich alohida so'rov bo'lib keladi.
+// Kod qayerga ketdi: app — akkauntning Telegram ilovasidagi «Telegram» xizmat chatiga, sms, call — qo'ng'iroq, email…
+const CODE_VIA = {
+  SentCodeTypeApp: "app",
+  SentCodeTypeSms: "sms",
+  SentCodeTypeFirebaseSms: "sms",
+  SentCodeTypeSmsWord: "sms",
+  SentCodeTypeSmsPhrase: "sms",
+  SentCodeTypeCall: "call",
+  SentCodeTypeFlashCall: "call",
+  SentCodeTypeMissedCall: "call",
+  SentCodeTypeEmailCode: "email",
+  SentCodeTypeSetUpEmailRequired: "setup_email",
+  SentCodeTypeFragmentSms: "fragment",
+};
+// GramJS className — "auth.SentCodeTypeApp" ko'rinishida
+const codeVia = (type) => (type ? (CODE_VIA[String(type.className).replace(/^auth\./, "")] ?? "other") : null);
+
+// Kod yuborish → { phoneCodeHash, via, length }. AUTH_RESTART — Telegram «boshidan boshlang» dedi: bir marta qayta
+export async function sendLoginCode(client, phoneNumber) {
+  const { apiId, apiHash } = readConfig();
+  const ask = () => client.invoke(new Api.auth.SendCode({ phoneNumber, apiId, apiHash, settings: new Api.CodeSettings({}) }));
+  let sent;
+  try {
+    sent = await ask();
+  } catch (error) {
+    if (error?.errorMessage !== "AUTH_RESTART") throw error;
+    sent = await ask();
+  }
+  if (!(sent instanceof Api.auth.SentCode)) throw new Error("Telegram kod yubormadi (kutilmagan javob)");
+  return { phoneCodeHash: sent.phoneCodeHash, via: codeVia(sent.type), length: sent.type?.length ?? null };
+}
+
+// Kod bilan kirish → { user } yoki { password: true, hint } (akkauntda 2FA bor).
+// Raqamda akkaunt yo'q bo'lsa — xato: GramJS'dagidek yangi akkaunt OCHMAYMIZ
+export async function signInWithCode(client, { phoneNumber, phoneCodeHash, code }) {
+  try {
+    const result = await client.invoke(new Api.auth.SignIn({ phoneNumber, phoneCodeHash, phoneCode: code }));
+    if (result instanceof Api.auth.AuthorizationSignUpRequired) {
+      throw Object.assign(new Error("Bu raqamda Telegram akkaunt yo'q"), { errorMessage: "SIGN_UP_REQUIRED" });
+    }
+    return { user: result.user };
+  } catch (error) {
+    if (error?.errorMessage !== "SESSION_PASSWORD_NEEDED") throw error;
+    const info = await client.invoke(new Api.account.GetPassword());
+    return { password: true, hint: info.hint || null };
+  }
+}
+
+// 2FA parol: Telegram parolning o'zini emas, undan hisoblangan isbotni (SRP) oladi → { user }
+export async function signInWithPassword(client, password) {
+  const info = await client.invoke(new Api.account.GetPassword());
+  const result = await client.invoke(new Api.auth.CheckPassword({ password: await computeCheck(info, password) }));
+  return { user: result.user };
+}
+
+// Kirilgan akkaunt (whoAmI bilan bir xil ko'rinishda)
+export const userInfo = (user) => ({ userId: String(user.id), username: user.username ?? null, firstName: user.firstName ?? null });
+
+// Yangi ochilgan sessiyani yopish (kerak bo'lmay qolsa: masalan, bu akkaunt boshqa nom bilan allaqachon ulangan)
+export async function closeAuthorization(client) {
+  await client.invoke(new Api.auth.LogOut());
 }
 
 export async function logout(client, account = MAIN_ACCOUNT) {

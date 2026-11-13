@@ -178,3 +178,10 @@ export const getAdminOverview = () => request("GET", "/pub/admin/overview");
 export const getAdminUsers = (params = {}) => request("GET", `/pub/admin/users?${query(params)}`);
 // { active } yoki { role } (boshqa rolga o'tsa, uning sozlamalari saqlanib qoladi, yangi roldagisi bo'lsa — tiklanadi)
 export const updateAdminUser = (chatId, body) => request("PATCH", `/pub/admin/users/${chatId}`, { body });
+
+// Collector'ning Telegram akkauntlari va yangi akkaunt qo'shish (raqam → kod → 2FA parol; apps/api tgLogin.js)
+export const getTgAccounts = () => request("GET", "/pub/admin/tg-accounts");
+export const startTgLogin = (name, phone) => request("POST", "/pub/admin/tg-accounts/login", { body: { name, phone } });
+export const sendTgCode = (id, code) => request("POST", `/pub/admin/tg-accounts/login/${encodeURIComponent(id)}/code`, { body: { code } });
+export const sendTgPassword = (id, password) => request("POST", `/pub/admin/tg-accounts/login/${encodeURIComponent(id)}/password`, { body: { password } });
+export const cancelTgLogin = (id) => request("DELETE", `/pub/admin/tg-accounts/login/${encodeURIComponent(id)}`);

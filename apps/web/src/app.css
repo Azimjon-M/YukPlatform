@@ -720,6 +720,59 @@ select:focus-visible {
   display: none;
 }
 
+/* «Telegram akkauntlari» (TgAccounts.jsx): holat belgisi, kirish bosqichlari */
+.tag-bad {
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+  color: var(--error);
+}
+
+.user .error {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.tg-acc p {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.tg-acc .field + .hint,
+.tg-acc .tg-under {
+  margin: 6px 2px 0;
+  font-size: 13px;
+}
+
+.tg-acc .error {
+  margin: 10px 0 0;
+}
+
+.tg-actions {
+  margin: 14px 0 0;
+}
+
+.tg-actions .primary {
+  flex: 1 1 160px;
+}
+
+.tg-help {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.tg-help summary {
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.tg-help ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.tg-help li + li {
+  margin-top: 4px;
+}
+
 /* --- Ro'yxatdan o'tish qadamlari (Steps.jsx) --- */
 .steps {
   margin: 0 0 6px;

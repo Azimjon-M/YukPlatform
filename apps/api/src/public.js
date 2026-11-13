@@ -29,6 +29,11 @@
 //   GET  /pub/admin/overview   ko'rsatkichlar (navbat, yuklar, foydalanuvchilar) va AI ulanishlari holati
 //   GET  /pub/admin/users      ?q&role — foydalanuvchilar ro'yxati
 //   PATCH /pub/admin/users/:id { role } — rolni almashtirish (faol / pauza — faqat foydalanuvchining o'zi)
+//   GET  /pub/admin/tg-accounts            collector'ning Telegram akkauntlari + davom etayotgan kirish (tgLogin.js)
+//   POST /pub/admin/tg-accounts/login      { name, phone } — yangi akkaunt: Telegram kod yuboradi
+//   POST /pub/admin/tg-accounts/login/:id/code      { code }
+//   POST /pub/admin/tg-accounts/login/:id/password  { password } — 2FA bo'lsa
+//   DELETE /pub/admin/tg-accounts/login/:id         bekor qilish / yopish
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -60,6 +65,7 @@ import {
   validRouteArea,
   withRoute,
 } from "@yuk/shared";
+import { MAIN_TG_ACCOUNT } from "@yuk/store";
 import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -226,7 +232,8 @@ export function callPage(call) {
 // notify(chatId, text, extra) — bot nomidan xabar (botMessage.js); null — yuborilmaydi (testlarda soxtasi beriladi)
 // calls — «📞 Telefon qilish» havolalari (@yuk/store createCallLinks, bot bilan bir kalit); null — /pub/call 404
 // errors — boshqaruv markazining xatolar jurnali (errorLog.js); server xatolari u yerda ham ko'rinadi
-export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, notify = null, errors = null, now = () => Date.now() }) {
+// tgLogin — collector uchun Telegram akkaunt qo'shish (tgLogin.js); null — «server qayta ishga tushirilgach»
+export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, notify = null, errors = null, tgLogin = null, now = () => Date.now() }) {
   const app = express();
   app.disable("x-powered-by");
   const botToken = env.BOT_TOKEN?.trim() || null;
@@ -616,6 +623,47 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     // Bot va web'dagidek: har rolning sozlamalari saqlanadi, yangi rolda avval to'ldirgani bo'lsa — tiklanadi
     if (role && role !== roleOf(user)) return res.json(meOf(store.switchRole(chatId, role), { withPhone: false }));
     res.json(meOf(user, { withPhone: false }));
+  });
+
+  // --- Collector'ning Telegram akkauntlari va yangi akkaunt qo'shish (tgLogin.js, 2026-11-13) ---
+  // Akkauntlar ro'yxatida raqam yo'q (sessiya — serverda faylda). login — davom etayotgan kirish (bittadan), Mini App
+  // yopilib qayta ochilsa shu bilan davom etadi; unavailable — bu serverda kirib bo'lmasa, nega
+  admin.get("/tg-accounts", (req, res) => {
+    const perAccount = {};
+    for (const s of store.listSources()) perAccount[s.account ?? MAIN_TG_ACCOUNT] = (perAccount[s.account ?? MAIN_TG_ACCOUNT] ?? 0) + 1;
+    res.json({
+      accounts: (store.listTgAccounts?.() ?? []).map((a) => ({
+        name: a.name,
+        firstName: a.firstName,
+        username: a.username,
+        status: a.status,
+        error: a.status === "ok" ? null : a.error,
+        dialogs: a.dialogs ?? 0,
+        sources: perAccount[a.name] ?? 0,
+        updatedAt: a.updatedAt,
+      })),
+      login: tgLogin?.current() ?? null,
+      unavailable: tgLogin ? tgLogin.unavailable() : "Server qayta ishga tushirilgach ishlaydi",
+    });
+  });
+
+  const needLogin = () => {
+    if (!tgLogin) throw httpError(409, "Server qayta ishga tushirilgach ishlaydi");
+    return tgLogin;
+  };
+  // Nom + raqam → Telegram kod yuboradi. Javob — kirish holati (step: code | failed …)
+  admin.post("/tg-accounts/login", async (req, res) => {
+    res.status(201).json({ login: await needLogin().start({ name: req.body?.name, phone: req.body?.phone, by: req.driver.chatId }) });
+  });
+  // Kod va 2FA parol: tekshiruv natijasi shu javobda (noto'g'ri bo'lsa — login.error, bosqich o'zgarmaydi)
+  admin.post("/tg-accounts/login/:id/code", async (req, res) => {
+    res.json({ login: await needLogin().code(req.params.id, req.body?.code) });
+  });
+  admin.post("/tg-accounts/login/:id/password", async (req, res) => {
+    res.json({ login: await needLogin().password(req.params.id, req.body?.password) });
+  });
+  admin.delete("/tg-accounts/login/:id", (req, res) => {
+    res.json({ ok: needLogin().cancel(req.params.id) });
   });
 
   pub.use("/admin", admin);

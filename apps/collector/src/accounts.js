@@ -5,7 +5,9 @@
 // Har akkaunt o'z halqasida (runLive) va o'z sur'atida ishlaydi: Telegram cheklovlari akkaunt bo'yicha.
 // Qo'shimcha akkauntning xatosi asosiyni to'xtatmaydi (supervisor qayta ulaydi), asosiyniki — avvalgidek jarayonni
 // to'xtatadi (boshqaruv markazi qayta yoqadi).
-// Kirish (kod, 2FA) — faqat akkaunt egasining o'zi, terminalda: npm run tg:login -- --account <nom>
+// Kirish (kod, 2FA) — faqat akkaunt egasining o'zi: Mini App «🛠 Boshqaruv» → «Telegram akkauntlari» (apps/api tgLogin.js →
+// loginWorker.js, sessiya sessions/<nom>.session ga yoziladi — shu supervisor 30 s ichida ko'radi) yoki terminalda:
+// npm run tg:login -- --account <nom>. Asosiy akkaunt — faqat terminalda.
 import { setTimeout as wait } from "node:timers/promises";
 import { MAIN_TG_ACCOUNT } from "@yuk/store";
 import { durationText, runLive, withTimeout } from "./live.js";
