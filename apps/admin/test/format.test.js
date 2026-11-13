@@ -11,6 +11,9 @@ import {
   eventView,
   formatDateTime,
   sourceCheckView,
+  dialogSource,
+  pickableDialogs,
+  tgAccountView,
   formatNumber,
   formatTime,
   loadView,
@@ -309,4 +312,38 @@ test("foydalanuvchi qo'shgan manba: tekshiruv belgisi", () => {
   assert.equal(sourceCheckView({ checkState: "failed", checkStats: { probe: {} } }).label, "Rad etildi");
   assert.equal(sourceCheckView({ checkState: "failed", checkStats: { probe: {}, trial: {} } }).label, "Sinovdan o'tmadi");
   assert.equal(sourceCheckView({ checkState: "ok" }).tone, "good");
+});
+
+test("Telegram akkaunti holati: ishlayapti / ulanib bo'lmadi / sessiya yo'q (qanday kirish) / takror", () => {
+  assert.equal(tgAccountView({ name: "ikkinchi", status: "ok" }).label, "Ishlayapti");
+  assert.equal(tgAccountView({ name: "ikkinchi", status: "error", error: "Not connected" }).title, "Not connected");
+  assert.match(tgAccountView({ name: "ikkinchi", status: "logged_out" }).hint, /npm run tg:login -- --account ikkinchi/);
+  assert.match(tgAccountView({ name: "asosiy", status: "logged_out" }).hint, /npm run tg:login$/);
+  assert.equal(tgAccountView({ name: "x", status: "duplicate" }).tone, "warning");
+});
+
+test("yopiq guruh tanlash: qo'shilmaganlari, bir guruh bir marta, yopiqlari birinchi, faqat ishlayotgan akkauntlar; qidiruv", () => {
+  const accounts = [
+    { name: "asosiy", status: "ok" },
+    { name: "ikkinchi", status: "ok" },
+    { name: "eski", status: "logged_out" },
+  ];
+  const dialogs = [
+    { account: "asosiy", peerId: "-1001", title: "Yuk Andijon", username: "yuk_andijon", added: null },
+    { account: "asosiy", peerId: "-1002", title: "Qo'shilgan", username: null, added: "-1002" },
+    { account: "ikkinchi", peerId: "-1003", title: "Haydovchilar", username: null, added: null },
+    { account: "asosiy", peerId: "-1003", title: "Haydovchilar", username: null, added: null },
+    { account: "eski", peerId: "-1004", title: "Eski akkaunt guruhi", username: null, added: null },
+  ];
+  const list = pickableDialogs(dialogs, accounts);
+  assert.deepEqual(
+    list.map((d) => [d.peerId, d.accounts]),
+    [["-1003", ["ikkinchi", "asosiy"]], ["-1001", ["asosiy"]]],
+  );
+  assert.deepEqual(dialogSource(list[0]), { name: "-1003", account: "asosiy" }, "asosiy a'zo bo'lsa — asosiy o'qiydi");
+  assert.deepEqual(dialogSource({ ...list[0], accounts: ["ikkinchi"] }), { name: "-1003", account: "ikkinchi" });
+  assert.deepEqual(dialogSource(list[1]), { name: "@yuk_andijon", account: null }, "ochig'i — manzili bilan");
+  assert.deepEqual(pickableDialogs(dialogs, accounts, "ANDIJON").map((d) => d.peerId), ["-1001"]);
+  assert.deepEqual(pickableDialogs(dialogs, accounts, "@yuk_").map((d) => d.peerId), ["-1001"]);
+  assert.deepEqual(pickableDialogs(dialogs, accounts, "-1003").map((d) => d.peerId), ["-1003"]);
 });

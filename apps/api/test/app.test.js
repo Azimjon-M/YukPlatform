@@ -50,6 +50,8 @@ test("manba nomi: @nom, havola, -100 id; yopiq havola va xato nom rad etiladi", 
   assert.equal(normalizeSourceName("https://t.me/yuk_markazi/1234"), "@yuk_markazi");
   assert.equal(normalizeSourceName("t.me/yuk_markazi?start=1"), "@yuk_markazi");
   assert.equal(normalizeSourceName("-1001234567890"), "-1001234567890");
+  assert.equal(normalizeSourceName("-4012345678"), "-4012345678", "kichik guruh");
+  assert.equal(normalizeSourceName("-12"), null);
   assert.equal(normalizeSourceName("https://t.me/+AbCdEf"), null);
   assert.equal(normalizeSourceName("https://t.me/joinchat/AbCdEf"), null);
   assert.equal(normalizeSourceName("ab"), null);
@@ -97,7 +99,7 @@ test("haydovchilar: faol / pauzani boshqaruv markazidan o'zgartirib bo'lmaydi (f
 
 test("manbalar: qo'shish, takror, o'chirib-yoqish, o'chirish", async () => {
   assert.equal((await send("POST", "/api/sources", { name: "https://t.me/yangi_guruh" })).status, 201);
-  assert.deepEqual((await send("POST", "/api/sources", { name: "@yangi_guruh" })).body, { name: "@yangi_guruh", added: false });
+  assert.deepEqual((await send("POST", "/api/sources", { name: "@yangi_guruh" })).body, { name: "@yangi_guruh", added: false, account: null });
   assert.equal((await send("POST", "/api/sources", { name: "https://t.me/+yopiq" })).status, 400);
   const name = encodeURIComponent("@yangi_guruh");
   assert.equal((await send("PATCH", `/api/sources/${name}`, { enabled: false })).status, 200);
@@ -150,6 +152,46 @@ test("jarayonlar: yoqish/o'chirish, loglar, noma'lum amal", async () => {
   assert.equal((await send("POST", "/api/processes/bot/portlat")).status, 404);
   assert.deepEqual(calls.at(-1), ["restart", "bot"]);
   assert.equal((await get("/api/processes/bot/logs?after=5")).body.last, 6);
+});
+
+test("akkauntlar: holati va guruhlari; yopiq guruh shu akkaunt bilan qo'shiladi, a'zo bo'lish navbatiga tushmaydi", async () => {
+  store.saveTgAccount("asosiy", { userId: 111, status: "ok" });
+  store.saveTgAccount("ikkinchi", { userId: 222, username: "yuk_ikki", status: "ok" });
+  store.setTgDialogs("asosiy", [{ id: "-1007777777", title: "Ochiq guruh", username: "Ochiq_Guruh", type: "guruh" }]);
+  store.setTgDialogs("ikkinchi", [
+    { id: "-1001234567", title: "Haydovchilar (yopiq)", username: null, type: "guruh", members: 80 },
+    { id: "-1007777777", title: "Ochiq guruh", username: "Ochiq_Guruh", type: "guruh" },
+  ]);
+  await send("POST", "/api/sources", { name: "@ochiq_guruh" });
+
+  const yopiq = await send("POST", "/api/sources", { name: "-1001234567" });
+  assert.deepEqual([yopiq.status, yopiq.body], [201, { name: "-1001234567", added: true, account: "ikkinchi" }], "a'zo bo'lgan akkaunt o'zi topiladi");
+  const row = (await get("/api/sources")).body.items.find((s) => s.name === "-1001234567");
+  assert.deepEqual([row.account, row.title, row.chatType, row.members], ["ikkinchi", "Haydovchilar (yopiq)", "group", 80]);
+
+  assert.equal((await send("POST", "/api/sources", { name: "-1009999999" })).status, 400, "hech bir akkaunt a'zo emas");
+  assert.equal((await send("POST", "/api/sources", { name: "-1001234567", account: "asosiy" })).status, 400, "asosiy a'zo emas");
+  const join = await send("POST", `/api/sources/${encodeURIComponent("-1001234567")}/join`);
+  assert.equal(join.status, 409);
+  await send("POST", "/api/sources/join-all");
+  assert.equal((await get("/api/sources")).body.items.find((s) => s.name === "-1001234567").joinState, null, "«hammasiga a'zo bo'lish» ga kirmadi");
+
+  const { body } = await get("/api/tg-accounts");
+  assert.deepEqual(body.accounts.map((a) => [a.name, a.userId, a.status, a.dialogs, a.sources]), [
+    ["asosiy", "111", "ok", 1, body.accounts[0].sources],
+    ["ikkinchi", "222", "ok", 2, 1],
+  ]);
+  assert.deepEqual(
+    body.dialogs.map((d) => [d.account, d.peerId, d.added]),
+    [["asosiy", "-1007777777", "@ochiq_guruh"], ["ikkinchi", "-1001234567", "-1001234567"], ["ikkinchi", "-1007777777", "@ochiq_guruh"]],
+    "qo'shilgani — id yoki username bo'yicha (katta-kichik harf farqi yo'q)",
+  );
+  assert.equal(body.collector, null, "collector jarayoni ro'yxatda yo'q");
+  assert.equal(body.refreshRequestedAt, null);
+  const refresh = await send("POST", "/api/tg-accounts/refresh");
+  assert.equal(typeof refresh.body.requestedAt, "number");
+  assert.equal((await get("/api/tg-accounts")).body.refreshRequestedAt, refresh.body.requestedAt);
+  for (const n of ["-1001234567", "@ochiq_guruh"]) await send("DELETE", `/api/sources/${encodeURIComponent(n)}`);
 });
 
 test("himoya: maxsus sarlavhasiz o'zgartirish va begona Host rad etiladi", async () => {

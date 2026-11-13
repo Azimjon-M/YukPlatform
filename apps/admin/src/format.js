@@ -428,6 +428,56 @@ export function sourceCheckView(source, { timeZone } = {}) {
   }
 }
 
+// --- Collector'ning Telegram akkauntlari (2026-11-13, yopiq guruhlar uchun) ---
+export const MAIN_TG_ACCOUNT = "asosiy"; // @yuk/store tgAccounts.js bilan bir xil
+// Holat belgisi: ok — ishlayapti; error — ulanib bo'lmadi (collector o'zi qayta urinadi); logged_out — sessiya bekor
+// qilingan yoki fayli yo'q (egasi qayta kirishi kerak); duplicate — boshqa nom bilan ulangan akkauntning o'zi
+export function tgAccountView(account) {
+  const error = account.error ?? undefined;
+  switch (account.status) {
+    case "ok":
+      return { tone: "good", icon: "✓", label: "Ishlayapti" };
+    case "error":
+      return { tone: "critical", icon: "!", label: "Ulanib bo'lmadi", title: error, hint: "Collector o'zi qayta urinadi (1 … 30 daqiqada)" };
+    case "logged_out":
+      return { tone: "critical", icon: "✖", label: "Sessiya yo'q", title: error, hint: `Akkaunt egasi serverda qayta kirsin: ${loginCommand(account.name)}` };
+    case "duplicate":
+      return { tone: "warning", icon: "⚠", label: "Takror", title: error, hint: "Bu boshqa nom bilan ulangan akkauntning o'zi — ishlatilmaydi" };
+    default:
+      return { tone: "neutral", icon: "…", label: "Noma'lum" };
+  }
+}
+
+export const loginCommand = (name) => (name === MAIN_TG_ACCOUNT ? "npm run tg:login" : `npm run tg:login -- --account ${name}`);
+
+// «Yopiq guruh qo'shish» ro'yxati: hali manba bo'lmagan guruh/kanallar, bir guruh bir marta (a'zo akkauntlari bilan),
+// yopiqlari birinchi, keyin nomi bo'yicha. query — nomi, @username yoki id bo'yicha qidirish.
+// Faqat ishlayotgan (ok) akkauntlarning ro'yxati — sessiyasi yo'q akkaunt guruhni o'qiy olmaydi
+export function pickableDialogs(dialogs, accounts, query = "") {
+  const working = new Set(accounts.filter((a) => a.status === "ok").map((a) => a.name));
+  const words = query.trim().toLowerCase();
+  const byPeer = new Map();
+  for (const d of dialogs) {
+    if (d.added || !working.has(d.account)) continue;
+    const entry = byPeer.get(d.peerId);
+    if (entry) {
+      entry.accounts.push(d.account);
+      continue;
+    }
+    byPeer.set(d.peerId, { ...d, accounts: [d.account] });
+  }
+  const list = [...byPeer.values()].filter((d) => !words || [d.title, d.username ? `@${d.username}` : "", d.peerId].some((v) => v.toLowerCase().includes(words)));
+  return list.sort((a, b) => Number(Boolean(a.username)) - Number(Boolean(b.username)) || a.title.localeCompare(b.title));
+}
+
+// Tanlangan guruh qanday qo'shiladi: ochig'i — @username (asosiy akkaunt a'zo bo'lmasdan o'qiydi), yopig'i — id va uni
+// o'qiydigan akkaunt (asosiy a'zo bo'lsa — asosiy, aks holda birinchi a'zo akkaunt)
+export function dialogSource(dialog) {
+  if (dialog.username) return { name: `@${dialog.username}`, account: null };
+  const account = dialog.accounts.includes(MAIN_TG_ACCOUNT) ? MAIN_TG_ACCOUNT : dialog.accounts[0];
+  return { name: dialog.peerId, account };
+}
+
 // --- Vaqt ---
 // Brauzer o'z vaqt mintaqasini ishlatadi (Toshkent). Testlarda timeZone beriladi.
 export function formatTime(ts, { seconds = false, timeZone } = {}) {

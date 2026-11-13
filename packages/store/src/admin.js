@@ -234,9 +234,9 @@ export function createAdminQueries(db, now) {
         posts: one("SELECT MAX(id), MAX(done_at) FROM posts"),
         loads: `${one("SELECT MAX(id) FROM loads")}|${deliveries}`,
         ai: `${one("SELECT COUNT(*), MAX(updated_at) FROM ai_slots")}|${one("SELECT COUNT(*), MAX(id), SUM(enabled) FROM ai_keys")}`,
-        sources: one(
-          "SELECT COUNT(*), SUM(enabled), SUM(joined), SUM(poll_ms), SUM(watch = 'tops'), SUM(join_state IS NOT NULL), MAX(join_at), MAX(check_at), COUNT(check_state) FROM sources",
-        ),
+        sources: `${one(
+          "SELECT COUNT(*), SUM(enabled), SUM(joined), SUM(poll_ms), SUM(watch = 'tops'), SUM(join_state IS NOT NULL), MAX(join_at), MAX(check_at), COUNT(check_state), COUNT(account) FROM sources",
+        )}|${one("SELECT COUNT(*), MAX(updated_at) FROM tg_accounts")}`,
       };
     },
 
@@ -270,14 +270,18 @@ export function createAdminQueries(db, now) {
           checkUntil: row.check_until ?? null,
           checkNote: row.check_note ?? null,
           checkStats: parse(row.check_stats),
+          // Qaysi Telegram akkaunti o'qiydi (tgAccounts.js): null — asosiy; nom — yopiq guruhga a'zo qo'shimcha akkaunt
+          account: row.account ?? null,
         }));
     },
 
     // «A'zo bo'lish» tugmasi: navbatga qo'yadi (collector sekin, bittadan qo'shiladi).
     // → "wanted" | "joined" (akkaunt allaqachon a'zo) | "requested" (so'rov allaqachon yuborilgan) | null (bunday manba yo'q)
+    // "account" — bu guruhni qo'shimcha akkaunt o'qiydi (yopiq guruh: unga odam qo'shadi, asosiy akkaunt a'zo bo'lmaydi)
     requestJoin(name) {
-      const row = db.prepare("SELECT joined, join_state FROM sources WHERE name = ?").get(name);
+      const row = db.prepare("SELECT joined, join_state, account FROM sources WHERE name = ?").get(name);
       if (!row) return null;
+      if (row.account) return "account";
       if (row.joined === 1) return "joined";
       if (row.join_state === "requested" || row.join_state === "wanted") return row.join_state;
       db.prepare("UPDATE sources SET join_state = 'wanted', join_error = NULL WHERE name = ?").run(name);
@@ -323,9 +327,13 @@ export function createAdminQueries(db, now) {
       return Object.fromEntries(rows.map((r) => [r.source, { recent: r.recent ?? 0, day: r.day }]));
     },
 
-    // → true (qo'shildi) yoki false (allaqachon bor)
-    addSource(name, { note = null, enabled = true } = {}) {
-      const result = db.prepare("INSERT OR IGNORE INTO sources (name, enabled, note, created_at) VALUES (?, ?, ?, ?)").run(name, enabled ? 1 : 0, note, now());
+    // → true (qo'shildi) yoki false (allaqachon bor).
+    // account — yopiq guruhni o'qiydigan qo'shimcha akkaunt (null — asosiy); title/chatType/members — collector yozgan
+    // guruhlar ro'yxatidan (yopiq guruhning manzili yo'q, boshqaruv markazida nomi ko'rinsin)
+    addSource(name, { note = null, enabled = true, account = null, title = null, chatType = null, members = null } = {}) {
+      const result = db
+        .prepare("INSERT OR IGNORE INTO sources (name, enabled, note, created_at, account, title, chat_type, members) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(name, enabled ? 1 : 0, note, now(), account, title, chatType, members);
       return result.changes > 0;
     },
 

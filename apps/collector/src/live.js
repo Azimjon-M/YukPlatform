@@ -81,7 +81,7 @@ export function senderUsername(sender) {
 export class StalledError extends Error {}
 
 // promise ms ichida tugamasa — xato. (Osilgan so'rov fonda qolib ketadi, lekin aylanish davom etadi)
-function withTimeout(promise, ms, message) {
+export function withTimeout(promise, ms, message) {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(message)), ms);
@@ -175,6 +175,13 @@ export async function runLive({
   probeGapMs = 30_000,
   probeBackfillMs = 3 * HOUR,
   requireContact = true, // probe: faqat aloqasi bor yuk e'lonlari sanaladi (probe.js judgeProbe; .env REQUIRE_CONTACT)
+  // Qo'shimcha akkaunt (accounts.js, 2026-11-13) faqat o'ziga biriktirilgan yopiq guruhlarni o'qiydi: foydalanuvchi
+  // qo'shgan guruhlarni tekshirish (probe) va a'zo bo'lish navbati (joins) — faqat asosiy akkauntda
+  probe = true,
+  joins = true,
+  // Har aylanish boshida chaqiriladi (accounts.js: guruhlar ro'yxatini vaqti-vaqti bilan yangilash). Xatosi — o'zida
+  tick = null,
+  emptyText = "Kuzatiladigan guruh yo'q: boshqaruv markazining «Manbalar» bo'limidan qo'shing.",
   gapMs = 2_000,
   backfill = 0,
   log = console.log,
@@ -391,7 +398,7 @@ export async function runLive({
   const probeTries = new Map(); // nomi → { tries, retryAt }
   let nextProbeAt = -Infinity;
   async function probeNext() {
-    if (!store.sourcesToProbe || !reader.since || now() < nextProbeAt || now() < pauseUntil) return;
+    if (!probe || !store.sourcesToProbe || !reader.since || now() < nextProbeAt || now() < pauseUntil) return;
     const row = store.sourcesToProbe({ limit: 20 }).find((r) => now() >= (probeTries.get(r.name)?.retryAt ?? -Infinity));
     if (!row) return;
     nextProbeAt = now() + probeGapMs;
@@ -589,13 +596,15 @@ export async function runLive({
   let empty = false;
   try {
     while (!signal?.aborted) {
+      if (tick) await tick();
+      if (signal?.aborted) break;
       // Yangi (foydalanuvchi qo'shgan) guruhni ko'rib chiqish — kuzatiladigan guruh bo'lmasa ham
       await probeNext();
       if (signal?.aborted) break;
       const list = current();
       active = new Set(list.map(sourceLabel));
       if (!list.length) {
-        if (!empty) log("Kuzatiladigan guruh yo'q: boshqaruv markazining «Manbalar» bo'limidan qo'shing.");
+        if (!empty) log(emptyText);
         empty = true;
         ok(); // kuzatadigan narsa yo'q — bu uzilish emas
         await sleep(IDLE_MS);
@@ -611,7 +620,7 @@ export async function runLive({
         await checkTops(list);
         saveSchedule(list);
       }
-      if (reader.join && store.setJoinState && !joinsStopped && now() >= nextJoinAt && !signal?.aborted) await joinNext(list);
+      if (joins && reader.join && store.setJoinState && !joinsStopped && now() >= nextJoinAt && !signal?.aborted) await joinNext(list);
       report(list);
       if (signal?.aborted) break;
 

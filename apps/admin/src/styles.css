@@ -1804,6 +1804,62 @@ input[type="checkbox"] {
   }
 }
 
+/* --- Telegram akkauntlari va yopiq guruh tanlash (TgAccounts.jsx) --- */
+.stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tg-account-list,
+.dialog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tg-account,
+.dialog-row {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.tg-account p {
+  margin: 4px 0 0;
+}
+
+.dialog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dialog-row p {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.dialog-list {
+  margin-top: 12px;
+}
+
+.tg-howto > summary h2 {
+  font-size: 14.5px;
+}
+
+@media (max-width: 560px) {
+  .dialog-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 /* --- Loglar --- */
 .log-panel {
   position: relative;

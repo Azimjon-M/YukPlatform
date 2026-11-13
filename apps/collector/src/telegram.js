@@ -2,42 +2,68 @@
 // Kutubxona: GramJS ("telegram" paketi). U 2026-yilda arxivlangan; davomi — "teleproto" forki.
 // Keyinroq o'tish kerak bo'lsa, faqat shu fayl o'zgaradi.
 import { existsSync } from "node:fs";
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Api, TelegramClient, utils } from "telegram";
 import { NewMessage } from "telegram/events/index.js";
 import { Logger, LogLevel } from "telegram/extensions/Logger.js";
 import { StringSession } from "telegram/sessions/index.js";
+import { MAIN_TG_ACCOUNT, TG_ACCOUNT_NAME } from "@yuk/store";
 import { authErrorAction } from "./authErrors.js";
 import { senderUsername } from "./live.js";
 
 // Sessiya fayli = akkauntga kirish kaliti. U gitga tushmaydi (.gitignore: *.session).
 export const SESSION_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../telegram.session");
+// Qo'shimcha akkauntlar (2026-11-13, yopiq guruhlar uchun): har biri o'z faylida — sessions/<nom>.session.
+// «asosiy» — yuqoridagi SESSION_FILE (yoki .env TG_SESSION), avvalgidek
+export const SESSIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../sessions");
+export const MAIN_ACCOUNT = MAIN_TG_ACCOUNT;
 
-export function readConfig() {
-  const apiId = Number(process.env.TG_API_ID);
-  const apiHash = process.env.TG_API_HASH;
-  if (!apiId || !apiHash) {
-    throw new Error(
-      "TG_API_ID va TG_API_HASH topilmadi.\n" +
-        "my.telegram.org → API development tools → ilova yarating, keyin ikkalasini .env ga yozing.",
-    );
+// --account qiymatini tekshiradi: bo'sh — asosiy. Nom fayl nomiga aylanadi, shuning uchun faqat xavfsiz belgilar
+export function accountName(input) {
+  const name = String(input ?? "").trim().toLowerCase();
+  if (!name || name === MAIN_ACCOUNT) return MAIN_ACCOUNT;
+  if (!TG_ACCOUNT_NAME.test(name)) {
+    throw new Error(`Akkaunt nomi "${input}" yaroqsiz: kichik lotin harfi bilan boshlansin, 2–20 belgi (harf, raqam, _ yoki -). Masalan: --account ikkinchi`);
   }
-  return { apiId, apiHash };
+  return name;
 }
 
-export async function loadSession() {
-  if (process.env.TG_SESSION) return process.env.TG_SESSION;
-  return existsSync(SESSION_FILE) ? (await readFile(SESSION_FILE, "utf8")).trim() : "";
+export const sessionFile = (account = MAIN_ACCOUNT) => (account === MAIN_ACCOUNT ? SESSION_FILE : path.join(SESSIONS_DIR, `${account}.session`));
+// Buyruqlarda ko'rsatish uchun: asosiy akkauntga --account kerak emas
+const accountFlag = (account) => (account === MAIN_ACCOUNT ? "" : ` -- --account ${account}`);
+
+export async function loadSession(account = MAIN_ACCOUNT) {
+  if (account === MAIN_ACCOUNT && process.env.TG_SESSION) return process.env.TG_SESSION;
+  const file = sessionFile(account);
+  return existsSync(file) ? (await readFile(file, "utf8")).trim() : "";
 }
 
-export async function saveSession(client) {
-  await writeFile(SESSION_FILE, client.session.save(), "utf8");
+// 0o600 — serverda (Linux) faylni faqat egasi o'qiy oladi
+export async function saveSession(client, account = MAIN_ACCOUNT) {
+  const file = sessionFile(account);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, client.session.save(), { encoding: "utf8", mode: 0o600 });
 }
 
-export async function deleteSession() {
-  if (existsSync(SESSION_FILE)) await unlink(SESSION_FILE);
+export async function deleteSession(account = MAIN_ACCOUNT) {
+  const file = sessionFile(account);
+  if (existsSync(file)) await unlink(file);
+}
+
+// Qo'shimcha akkauntlar (sessions/*.session): [{ name, changedAt }] — changedAt: fayl o'zgargan vaqt
+// (qayta kirilsa yangilanadi — «sessiya bekor qilingan» holatidagi akkaunt shunda qayta ulanadi)
+export async function listAccounts() {
+  const files = await readdir(SESSIONS_DIR).catch(() => []);
+  const out = [];
+  for (const file of files.sort()) {
+    const name = file.replace(/\.session$/, "");
+    if (!file.endsWith(".session") || !TG_ACCOUNT_NAME.test(name) || name === MAIN_ACCOUNT) continue;
+    const info = await stat(path.join(SESSIONS_DIR, file)).catch(() => null);
+    if (info?.size) out.push({ name, changedAt: info.mtimeMs });
+  }
+  return out;
 }
 
 export async function createClient(sessionString) {
@@ -54,21 +80,37 @@ export async function createClient(sessionString) {
   return client;
 }
 
-// Saqlangan sessiya bilan ulanadi; sessiya bo'lmasa yoki eskirgan bo'lsa — xato
-export async function connectSaved() {
-  const session = await loadSession();
-  if (!session) throw new Error("Avval Telegram'ga kiring: npm run tg:login");
+// Saqlangan sessiya bilan ulanadi; sessiya bo'lmasa yoki bekor qilingan bo'lsa — xato (code "SESSION": qayta urinish
+// foydasiz, egasi qayta kirishi kerak). GramJS checkAuthorization har qanday xatoda (tarmoq ham) false qaytaradi —
+// shuning uchun tekshiruv so'rovini o'zimiz yuboramiz: tarmoq xatosi oddiy xato bo'lib qoladi (keyin qayta urinadi)
+const AUTH_ERROR = /AUTH_KEY|SESSION_|USER_DEACTIVATED/;
+export async function connectSaved(account = MAIN_ACCOUNT) {
+  const session = await loadSession(account);
+  const sessionError = (message) => Object.assign(new Error(message), { code: "SESSION" });
+  if (!session) throw sessionError(`Avval Telegram'ga kiring: npm run tg:login${accountFlag(account)}`);
   const client = await createClient(session);
-  if (!(await client.checkAuthorization())) {
-    await client.disconnect();
-    throw new Error("Sessiya eskirgan yoki bekor qilingan. Qayta kiring: npm run tg:login");
+  try {
+    await client.invoke(new Api.updates.GetState());
+  } catch (error) {
+    await client.disconnect().catch(() => {});
+    if (error?.code === 401 || AUTH_ERROR.test(error?.errorMessage ?? "")) {
+      throw sessionError(`Sessiya bekor qilingan (${error.errorMessage ?? error.message}). Qayta kiring: npm run tg:login${accountFlag(account)}`);
+    }
+    throw error;
   }
   return client;
 }
 
-// ask(savol, { hidden }) — terminaldan javob o'qiydigan funksiya (cli.js beradi)
-export async function login(ask) {
-  const client = await createClient(await loadSession());
+// Akkaunt kimligi (boshqaruv markazida ko'rsatish va bir akkaunt ikki nom bilan ulanmasligi uchun)
+export async function whoAmI(client) {
+  const me = await client.getMe();
+  return { userId: String(me.id), username: me.username ?? null, firstName: me.firstName ?? null };
+}
+
+// ask(savol, { hidden }) — terminaldan javob o'qiydigan funksiya (cli.js beradi).
+// account — qaysi nom bilan saqlanadi (standart — asosiy; serverdagi loginFlow.js shunday chaqiradi)
+export async function login(ask, { account = MAIN_ACCOUNT } = {}) {
+  const client = await createClient(await loadSession(account));
   let retries = 0;
   let stopMessage = null;
   try {
@@ -98,13 +140,13 @@ export async function login(ask) {
     await client.disconnect();
     throw new Error(stopMessage ?? authErrorAction(error).message);
   }
-  await saveSession(client);
+  await saveSession(client, account);
   return client;
 }
 
-export async function logout(client) {
+export async function logout(client, account = MAIN_ACCOUNT) {
   await client.invoke(new Api.auth.LogOut());
-  await deleteSession();
+  await deleteSession(account);
 }
 
 // Akkaunt a'zo bo'lgan guruh va kanallar

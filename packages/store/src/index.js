@@ -10,11 +10,13 @@ import { createAdminQueries } from "./admin.js";
 import { createUserSourceQueries } from "./userSources.js";
 import { userEvents } from "./history.js";
 import { createAiQueries } from "./ai.js";
+import { createTgAccountQueries } from "./tgAccounts.js";
 
 export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR } from "./lock.js";
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
 export { createCallLinks, createSessions, LINK_PERIOD_S, SESSION_TTL_S } from "./sessions.js";
 export { TUNNEL_URL_KEY, tunnelUrl } from "./tunnel.js";
+export { MAIN_TG_ACCOUNT, TG_ACCOUNT_NAME } from "./tgAccounts.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // YUK_DB — boshqa fayl bilan sinash uchun (masalan, YUK_DB=data/sinov.db); yo'l YukPlatform papkasiga nisbatan
@@ -149,6 +151,28 @@ CREATE TABLE IF NOT EXISTS bot_notices (
   kind TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+-- Collector'ning Telegram akkauntlari (2026-11-13, tgAccounts.js): kim ekani va holati — collector yozadi.
+-- tg_dialogs — har akkaunt a'zo bo'lgan guruh/kanallar (yopiq guruhni boshqaruv markazida shu ro'yxatdan tanlash uchun)
+CREATE TABLE IF NOT EXISTS tg_accounts (
+  name TEXT PRIMARY KEY,             -- "asosiy" | sessiya fayli nomi (apps/collector/sessions/<nom>.session)
+  user_id TEXT,
+  username TEXT,
+  first_name TEXT,
+  status TEXT,                       -- ok | error | logged_out | duplicate
+  error TEXT,
+  dialogs_at INTEGER,                -- guruhlar ro'yxati oxirgi marta qachon olingan
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tg_dialogs (
+  account TEXT NOT NULL,
+  peer_id TEXT NOT NULL,             -- "-100123…" (kanal / katta guruh) yoki "-123…" (kichik guruh)
+  title TEXT,
+  username TEXT,                     -- bo'lsa — ochiq guruh
+  type TEXT,                         -- guruh | kanal
+  members INTEGER,
+  PRIMARY KEY (account, peer_id)
+);
 `;
 
 // Eski bazaga yangi ustunlar (CREATE TABLE IF NOT EXISTS mavjud jadvalni o'zgartirmaydi)
@@ -201,6 +225,8 @@ function migrate(db) {
   ]) {
     if (!sourceColumns.includes(name)) db.exec(`ALTER TABLE sources ADD COLUMN ${name} ${type}`);
   }
+  // Qaysi Telegram akkaunti o'qiydi (2026-11-13, tgAccounts.js): NULL — asosiy; boshqasi — yopiq guruhga a'zo qo'shimcha akkaunt
+  if (!sourceColumns.includes("account")) db.exec("ALTER TABLE sources ADD COLUMN account TEXT");
 
   // Rollar (2026-11-06): role — haydovchi | yuk_beruvchi | NULL (hali tanlamagan);
   // plan — obuna (hozircha hammasi "free", pullik obuna keyin); is_admin — faqat boshqaruv markazidan yoqiladi
@@ -447,6 +473,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     ...createUserSourceQueries(db, now),
     // AI kalitlari va ulanishlar holati (ai.js)
     ...createAiQueries(db, now),
+    // Collector'ning Telegram akkauntlari va ularning guruhlari ro'yxati (tgAccounts.js)
+    ...createTgAccountQueries(db, now),
 
     // --- E'lonlar navbati ---
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.

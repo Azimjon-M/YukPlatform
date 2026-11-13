@@ -6,6 +6,7 @@ import { del, get, patch, post } from "../api.js";
 import { formatDateTime, formatNumber, sourceCheckView } from "../format.js";
 import { useApi, useNow } from "../hooks.js";
 import { Async, Badge, Button, Card, Empty, ExternalLink, Field, PageHeader, TimeAgo, Toggle, useTitle, useToast } from "../ui.jsx";
+import { PrivateGroupPicker, TgAccountsCard, useTgAccounts } from "./TgAccounts.jsx";
 
 const NOTE = "O'zgarish collector'da bir necha soniyada kuchga kiradi.";
 // API manzili («@guruh» → /api/sources/%40guruh) va guruhning Telegram havolasi (raqamli id'da havola yo'q)
@@ -170,12 +171,16 @@ function AddSource({ onAdded }) {
           {error}
         </p>
       )}
-      <p className="muted small">{NOTE} Faqat ochiq guruhlar: yopiq guruh taklif havolasi (t.me/+...) ishlamaydi.</p>
+      <p className="muted small">
+        {NOTE} Bu yerda — ochiq guruhlar. Yopiq guruh taklif havolasi (t.me/+...) ishlamaydi: yopiq guruhni unga a'zo akkaunt o'qiydi — pastdagi «Yopiq
+        guruh qo'shish» dan tanlang.
+      </p>
     </Card>
   );
 }
 
-function SourceRow({ source, now, onChanged }) {
+// account — shu manbani o'qiydigan qo'shimcha akkauntning holati (/api/tg-accounts; asosiy akkaunt manbalarida — null)
+function SourceRow({ source, account, now, onChanged }) {
   const notify = useToast();
   const [busy, setBusy] = useState(false);
   const [enabled, setEnabled] = useState(source.enabled);
@@ -212,11 +217,20 @@ function SourceRow({ source, now, onChanged }) {
 
   const link = sourceLink(source.name);
   const check = sourceCheckView(source);
+  // Yopiq guruhning manzili yo'q: nomi asosiy, raqami yonida
+  const titled = !link && source.title;
+  const accountDown = source.account && account?.status !== "ok";
   return (
     <li className={`source-row ${enabled ? "" : "is-off"}`}>
       <div className="source-main">
         <div className="source-name">
-          {link ? <ExternalLink href={link}>{source.name}</ExternalLink> : <strong>{source.name}</strong>}
+          {link ? <ExternalLink href={link}>{source.name}</ExternalLink> : <strong>{titled ? source.title : source.name}</strong>}
+          {titled && <span className="muted small">{source.name}</span>}
+          {source.account && (
+            <Badge tone={accountDown ? "critical" : "info"} icon="👤" title="Bu guruhni shu qo'shimcha Telegram akkaunti o'qiydi (u guruhga a'zo)">
+              {source.account}
+            </Badge>
+          )}
           {check && (
             <Badge tone={check.tone} icon={check.icon} title={check.title}>
               {check.label}
@@ -225,7 +239,12 @@ function SourceRow({ source, now, onChanged }) {
           {enabled ? <ModeBadge joined={source.joined} live={s.live} watch={source.watch} pollMs={source.pollMs} /> : source.checkState !== "probe" && <Badge icon="■">O'chirilgan</Badge>}
           {enabled && source.joined && <span className="muted small">a'zo</span>}
         </div>
-        {source.title && <p className="small">{source.title}{source.members ? <span className="muted"> · {formatNumber(source.members)} a'zo</span> : null}</p>}
+        {source.title && !titled && <p className="small">{source.title}{source.members ? <span className="muted"> · {formatNumber(source.members)} a'zo</span> : null}</p>}
+        {accountDown && (
+          <p className="inline-error small">
+            «{source.account}» akkaunti {account ? "ishlamayapti" : "topilmadi"} — bu guruh o'qilmayapti{account?.error ? `: ${account.error}` : ""}
+          </p>
+        )}
         {source.addedByUser && <AddedBy source={source} />}
         {source.note && !source.addedBy && <p className="muted small">{source.note}</p>}
         {source.checkNote && <p className={`small ${source.checkState === "failed" ? "inline-error" : "muted"}`}>Tekshiruv: {source.checkNote}</p>}
@@ -261,7 +280,7 @@ function SourceRow({ source, now, onChanged }) {
       </div>
       <div className="source-controls">
         <Toggle checked={enabled} onChange={toggle} busy={busy} label={enabled ? "Kuzatilyapti" : "O'chiq"} />
-        {enabled && source.joinState !== undefined && <JoinControl source={source} onChanged={onChanged} />}
+        {enabled && source.joinState !== undefined && !source.account && <JoinControl source={source} onChanged={onChanged} />}
         {confirming ? (
           <div className="confirm" role="group" aria-label="Olib tashlashni tasdiqlash">
             <span className="small">Olib tashlansinmi?</span>
@@ -287,13 +306,21 @@ export function SourcesPage() {
   const notify = useToast();
   const now = useNow(30_000);
   const state = useApi(() => get("/api/sources"), [], { live: ["sources", "posts"], liveGapMs: 5000 });
+  const tg = useTgAccounts();
+  const accountsByName = new Map((tg.data?.accounts ?? []).map((a) => [a.name, a]));
   const items = state.data?.items ?? [];
   const [joining, setJoining] = useState(false);
   // «Hammasiga a'zo bo'lish»: kuzatilayotgan, a'zo bo'lmagan va hali navbatda / so'rovda bo'lmaganlar.
   // joinState kelmasa — server eski versiyada (a'zo bo'lish navbatini bilmaydi)
   // Sinovdagi foydalanuvchi manbasi kirmaydi (kunlik 15 talik a'zolik limiti sinovdan o'tmaganga ketmasin; server ham shunday)
   const joinable = items.filter(
-    (s) => s.enabled && s.joined !== true && s.joinState !== undefined && !["wanted", "requested", "joined"].includes(s.joinState) && !["probe", "trial"].includes(s.checkState),
+    (s) =>
+      s.enabled &&
+      !s.account &&
+      s.joined !== true &&
+      s.joinState !== undefined &&
+      !["wanted", "requested", "joined"].includes(s.joinState) &&
+      !["probe", "trial"].includes(s.checkState),
   );
   const queued = items.filter((s) => s.joinState === "wanted").length;
   const byUsers = items.filter((s) => s.addedBy != null);
@@ -350,6 +377,14 @@ export function SourcesPage() {
           Natijani bot qo'shgan odamga o'zi yozadi.
         </p>
         <AddSource onAdded={state.reload} />
+        <TgAccountsCard state={tg} now={now} />
+        <PrivateGroupPicker
+          state={tg}
+          onAdded={() => {
+            state.reload();
+            tg.reload();
+          }}
+        />
         <Async state={state}>
           {(data) =>
             data.items.length === 0 ? (
@@ -366,7 +401,13 @@ export function SourcesPage() {
             ) : (
               <ul className="source-list">
                 {data.items.map((source) => (
-                  <SourceRow key={`${source.name}:${source.enabled}`} source={source} now={now} onChanged={state.reload} />
+                  <SourceRow
+                    key={`${source.name}:${source.enabled}`}
+                    source={source}
+                    account={source.account ? (accountsByName.get(source.account) ?? null) : null}
+                    now={now}
+                    onChanged={state.reload}
+                  />
                 ))}
               </ul>
             )

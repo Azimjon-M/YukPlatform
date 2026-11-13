@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
 import { isAdmin, parseAdminIds } from "@yuk/shared";
-import { tunnelUrl } from "@yuk/store";
+import { MAIN_TG_ACCOUNT, tunnelUrl } from "@yuk/store";
 import { createAiTools } from "./ai.js";
 import { COOKIE_NAME, createAdminAuth, requestToken } from "./adminAuth.js";
 import { createErrorLog } from "./errorLog.js";
@@ -14,10 +14,11 @@ import { createLive, processMarks } from "./live.js";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const SLOW_MS = 10_000; // API javobi bundan uzoq — «sekin» ogohlantirishi
 
-// "@guruh", "guruh", "t.me/guruh", "https://t.me/guruh/123" → "@guruh"; "-100123" → "-100123"; boshqasi → null
+// "@guruh", "guruh", "t.me/guruh", "https://t.me/guruh/123" → "@guruh"; "-100123…" (kanal / katta guruh) va
+// "-123…" (kichik guruh) — collector akkauntlari a'zo bo'lgan guruhning raqami → o'zgarishsiz; boshqasi → null
 export function normalizeSourceName(input) {
   const raw = String(input ?? "").trim();
-  if (/^-100\d{5,}$/.test(raw)) return raw;
+  if (/^-\d{5,}$/.test(raw)) return raw;
   const link = raw.replace(/^https?:\/\//i, "").replace(/^(www\.)?(t\.me|telegram\.me)\//i, "");
   if (/^(\+|joinchat\/)/i.test(link)) return null; // yopiq guruh taklif havolasi
   const username = link.replace(/^@/, "").split(/[/?#]/)[0];
@@ -338,21 +339,71 @@ export function createApp({
     });
   });
 
+  // Raqamli id (yopiq guruh) — collector yozgan akkauntlar guruhlari ro'yxatidan (tg_dialogs): qaysi akkaunt o'qiydi
+  // va guruh nomi. account berilsa — o'sha akkaunt a'zo bo'lishi shart; berilmasa — asosiy, u a'zo bo'lmasa — a'zo bo'lgani.
+  // Ro'yxat hali umuman yo'q bo'lsa (yangi collector ishlamagan) — avvalgidek asosiy akkauntga
   api.post("/sources", (req, res) => {
     const name = normalizeSourceName(req.body?.name);
     if (!name) throw httpError(400, "Guruh manzili tushunarsiz. Masalan: @guruh_nomi yoki https://t.me/guruh_nomi (yopiq guruh havolasi ishlamaydi)");
     const note = typeof req.body?.note === "string" ? req.body.note.slice(0, 200) : null;
-    const added = store.addSource(name, { note });
-    res.status(added ? 201 : 200).json({ name, added });
+    const options = { note };
+    if (name.startsWith("-")) {
+      const wanted = typeof req.body?.account === "string" && req.body.account ? req.body.account : null;
+      const dialogs = store.findTgDialog?.(name) ?? [];
+      const dialog = wanted ? dialogs.find((d) => d.account === wanted) : dialogs[0];
+      if (wanted && !dialog) throw httpError(400, `«${wanted}» akkaunti bu guruhga a'zo emas (yoki ro'yxati eskirgan — «Ro'yxatni yangilash» ni bosing)`);
+      const known = (store.listTgAccounts?.() ?? []).some((a) => a.dialogsAt != null);
+      if (!dialog && known) {
+        throw httpError(400, "Bu id hech bir akkauntning guruhlari ro'yxatida yo'q: avval akkauntni guruhga qo'shing, keyin «Ro'yxatni yangilash» ni bosing");
+      }
+      if (dialog) {
+        Object.assign(options, {
+          account: dialog.account === MAIN_TG_ACCOUNT ? null : dialog.account,
+          title: dialog.title || null,
+          chatType: dialog.type === "kanal" ? "channel" : "group",
+          members: dialog.members,
+        });
+      }
+    }
+    const added = store.addSource(name, options);
+    res.status(added ? 201 : 200).json({ name, added, account: options.account ?? null });
+  });
+
+  // --- Collector'ning Telegram akkauntlari (tgAccounts.js, 2026-11-13) ---
+  // Kirish (kod, 2FA) — faqat egasi o'zi, serverda terminalda; bu yerda faqat holat va a'zo bo'lgan guruhlar ro'yxati.
+  // dialogs[].added — shu guruh allaqachon manba bo'lsa, uning nomi (id yoki @username bo'yicha)
+  api.get("/tg-accounts", (req, res) => {
+    const sources = store.listSources();
+    const byName = new Map(sources.map((s) => [s.name.toLowerCase(), s.name]));
+    const perAccount = {};
+    for (const s of sources) perAccount[s.account ?? MAIN_TG_ACCOUNT] = (perAccount[s.account ?? MAIN_TG_ACCOUNT] ?? 0) + 1;
+    const collector = processes.list().find((p) => p.name === "collector") ?? null;
+    res.json({
+      accounts: (store.listTgAccounts?.() ?? []).map((a) => ({ ...a, sources: perAccount[a.name] ?? 0 })),
+      dialogs: (store.tgDialogs?.() ?? []).map((d) => ({
+        ...d,
+        added: byName.get(d.peerId) ?? (d.username ? (byName.get(`@${d.username.toLowerCase()}`) ?? null) : null),
+      })),
+      // Manbaga biriktirilgan, lekin bazada yo'q akkaunt (sessiyasi o'chirilgan) — sahifa ogohlantiradi
+      orphans: Object.keys(perAccount).filter((name) => name !== MAIN_TG_ACCOUNT && !(store.listTgAccounts?.() ?? []).some((a) => a.name === name)),
+      refreshRequestedAt: store.dialogsRefreshRequest?.() ?? null,
+      collector: collector ? { status: collector.status } : null,
+    });
+  });
+
+  // «Ro'yxatni yangilash»: ishlab turgan collector har akkaunt guruhlarini 1 daqiqa ichida qayta oladi
+  api.post("/tg-accounts/refresh", (req, res) => {
+    res.json({ requestedAt: store.requestDialogsRefresh() });
   });
 
   // A'zo bo'lish navbati: collector 5 daqiqada bittadan, kuniga ko'pi bilan 15 ta qo'shiladi (apps/collector live.js)
   // join-all — kuzatilayotgan, akkaunt a'zo bo'lmagan va hali navbatda / so'rovda bo'lmagan hamma guruh
-  // Sinovdagi foydalanuvchi manbasi kirmaydi: kuniga 15 talik a'zolik limiti sinovdan o'tmagan guruhga ketmasin
+  // Sinovdagi foydalanuvchi manbasi kirmaydi: kuniga 15 talik a'zolik limiti sinovdan o'tmagan guruhga ketmasin.
+  // Qo'shimcha akkaunt o'qiydigan yopiq guruh ham kirmaydi (unga akkauntni odam qo'shadi)
   api.post("/sources/join-all", (req, res) => {
     const names = store
       .listSources()
-      .filter((s) => s.enabled && s.joined !== true && !["wanted", "requested", "joined"].includes(s.joinState) && !["probe", "trial"].includes(s.checkState))
+      .filter((s) => s.enabled && !s.account && s.joined !== true && !["wanted", "requested", "joined"].includes(s.joinState) && !["probe", "trial"].includes(s.checkState))
       .map((s) => s.name);
     for (const name of names) store.requestJoin(name);
     res.json({ queued: names.length });
@@ -361,6 +412,7 @@ export function createApp({
   api.post("/sources/:name/join", (req, res) => {
     const state = store.requestJoin(req.params.name);
     if (!state) throw httpError(404, "Manba topilmadi");
+    if (state === "account") throw httpError(409, "Bu yopiq guruhni qo'shimcha akkaunt o'qiydi (u guruhga a'zo) — asosiy akkaunt a'zo bo'lmaydi");
     res.json({ state });
   });
 

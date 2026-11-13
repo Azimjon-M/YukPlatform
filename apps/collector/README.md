@@ -34,6 +34,7 @@ Oddiy Telegram akkaunt orqali yuk guruhlari va kanallarini o'qiydi. Guruh admini
 | `npm run tg:live` | Jonli rejim: `.env` dagi `TG_SOURCES` guruhlarini har 60 s tekshiradi |
 | `npm run tg:live -- @guruh1 @guruh2 --interval 90 --backfill 20` | Boshqa guruhlar, 90 s da bir, boshida oxirgi 20 ta xabardan |
 | `npm run tg:logout` | Sessiyani Telegram'da bekor qiladi va faylini o'chiradi |
+| `npm run tg:login -- --account ikkinchi` | **Qo'shimcha akkaunt** bilan kirish (yopiq guruhlar uchun, pastda). `--account` `tg:dialogs`, `tg:logout`, `tg:search`, `tg:export` da ham ishlaydi |
 
 `tg:export` haqida:
 
@@ -57,11 +58,27 @@ Keyin: `npm run parse -- --dry-run`, so'ng `npm run parse -- --limit 20`.
 - Qisqa xabarlar va 3 kun ichida takrorlangan matn AI'ga yuborilmaydi.
 - E'lonlarni tahlil qilib yuboradigan — bot: `npm run bot`.
 
+## Bir nechta akkaunt — yopiq guruhlar (2026-11-13, `src/accounts.js`)
+
+Ochiq guruhni a'zo bo'lmasdan ham o'qisa bo'ladi, yopig'ini — faqat unga **a'zo** akkaunt. Shuning uchun collector bir nechta akkaunt bilan ishlaydi:
+
+- **asosiy** — avvalgi akkaunt (`telegram.session` yoki `TG_SESSION`): hamma ochiq guruh, foydalanuvchi qo'shgan guruhlarni tekshirish, «A'zo bo'lish» navbati.
+- **qo'shimcha** — `apps/collector/sessions/<nom>.session` (gitga tushmaydi): faqat o'ziga biriktirilgan guruhlarni (`sources.account`) o'qiydi. Tekshirish va a'zo bo'lish navbati unda yo'q.
+
+Qo'shish tartibi:
+
+1. Alohida raqamdagi akkaunt. Yopiq guruh a'zosi (masalan, haydovchi) shu akkauntni guruhga qo'shadi.
+2. **Serverda**, loyiha papkasida: `npm run tg:login -- --account ikkinchi` (nom: kichik lotin harfi bilan, 2–20 belgi, «asosiy» emas). Kod va 2FA parolni **akkaunt egasining o'zi** terminalga yozadi — ularni hech qanday bot, chat yoki sahifaga yubormang (bunday imkoniyat ataylab yo'q).
+3. Ishlab turgan `tg:live` `sessions/` papkasini har 30 s da qaraydi: yangi akkaunt o'zi ulanadi, kimligi va a'zo bo'lgan guruhlari ro'yxati bazaga yoziladi (`tg_accounts`, `tg_dialogs`; ro'yxat 30 daqiqada bir yoki boshqaruv markazidagi «Ro'yxatni yangilash» bilan 1 daqiqada yangilanadi).
+4. Boshqaruv markazi → «Manbalar» → «Yopiq guruh qo'shish»: ro'yxatdan guruhni tanlang. Yopiq guruh id bilan (`-100…`, kichik guruh `-…`) shu akkauntga biriktiriladi; e'lonlarga havola bo'lmaydi (yopiq guruh xabarini a'zo bo'lmagan haydovchi ocha olmaydi), qolgani — boshqa guruhlarnikidek.
+
+Har akkaunt o'z halqasida va o'z sur'atida ishlaydi (`TG_POLL_BUDGET` — har biriga). Qo'shimcha akkauntning xatosi asosiyni to'xtatmaydi: ulanib bo'lmasa 1, 2, 4 … 30 daqiqadan keyin qayta urinadi; sessiyasi bekor qilingan (`AUTH_KEY_*`, `SESSION_REVOKED`) yoki boshqa nom bilan ulangan akkauntning o'zi bo'lsa — egasi qayta kirmaguncha (fayl o'zgarmaguncha) urinmaydi. Fayl o'chirilsa (`tg:logout -- --account …`) — akkaunt to'xtaydi. Asosiy akkaunt sessiyasi yo'q yoki bekor qilingan bo'lsa — collector `EXIT_CONFIG` (78) bilan chiqadi va boshqaruv markazi uni qayta-qayta yoqmaydi.
+
 ## Xavfsizlik
 
 - Alohida telefon raqamdagi akkaunt ishlating, shaxsiy (Premium) akkauntingiz emas: bloklansa, asosiy akkaunt yo'qolmaydi
 - Faqat o'qing, hech narsa yozmang. Ko'p guruhga birdaniga qo'shilmang
-- `telegram.session` fayli (yoki `TG_SESSION`) = akkauntga to'liq kirish. U gitga tushmaydi (`*.session`), hech kimga bermang
+- `telegram.session` fayli (yoki `TG_SESSION`) va `sessions/*.session` = akkauntga to'liq kirish. Ular gitga tushmaydi (`*.session`), hech kimga bermang; serverda faqat egasi o'qiy oladi (0600)
 - Sessiya qo'lga tushdi deb o'ylasangiz: `npm run tg:logout` yoki Telegram → Settings → Devices → sessiyani yoping
 
 ## Texnik eslatmalar
