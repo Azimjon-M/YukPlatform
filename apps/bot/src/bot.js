@@ -32,6 +32,7 @@ import {
   withRoute,
 } from "@yuk/shared";
 import { createCommandSync } from "./commands.js";
+import { profileFromText } from "./driverText.js";
 import { escapeHtml, formatLoad, formatTruck } from "./format.js";
 import { IDLE_BUTTONS } from "./idle.js";
 import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
@@ -396,6 +397,13 @@ export function createBot({
     if (draft) url.searchParams.set("d", "1");
     return url.href;
   };
+  // Haydovchi ro'yxatdan o'tish formasi (matndan preview'dagi «✏️ Formada tuzatish» uchun). Inline Mini App initData oladi,
+  // shuning uchun ?t= token shart emas (route.js xaritasidagidek)
+  const regFormUrl = () => {
+    const base = appUrl();
+    return base ? miniAppUrl(base, null, scope, { role: "haydovchi" }) : null;
+  };
+
   // Botga yozilgan yuk: tushunish → raqam (yo'q bo'lsa) → tasdiqlash → navbat (shipperLoads.js)
   const desk = createLoadDesk({ store, parse: parseLoad, scope, onQueued: () => onLoadQueued(), editUrl: () => loadFormUrl({ draft: true }) });
 
@@ -605,10 +613,19 @@ export function createBot({
       await ctx.reply(`${t.chosen}\n\n${loadIntro({ form: Boolean(loadFormUrl()) })}\n\n«${settingsLabel(driver)}» — ${t.register}.`, html(driver));
       return;
     }
-    // Rol tanlandi, sozlamalar hali yo'q (Azimjon matni, 2026-11-10): nima keladi + «Ro'yxatdan o'tish» tugmasi
-    const next = appUrl() ? `\n\n👇 Endi pastdagi «${settingsLabel(driver)}» tugmasini bosing — 1 daqiqalik forma.` : "";
-    await ctx.reply(`${ROLE_TEXT[role].chosen}${next}`, html(driver));
-    if (!appUrl()) await startWizard(ctx, null, role);
+    // Rol tanlandi, sozlamalar hali yo'q: ro'yxatdan o'tishning 2 yo'li — forma yoki shu chatga yozish (driverText.js)
+    if (appUrl()) {
+      await ctx.reply(
+        `${ROLE_TEXT[role].chosen}\n\n` +
+          "Ro'yxatdan o'tishning 2 yo'li bor:\n" +
+          `• «${settingsLabel(driver)}» — 1 daqiqalik forma;\n` +
+          `• «${MENU.writeHere}» — mashinangizni shu chatga oddiy yozasiz, qolganini men qilaman.`,
+        html(driver),
+      );
+      return;
+    }
+    await ctx.reply(ROLE_TEXT[role].chosen, html(driver));
+    await startWizard(ctx, null, role);
   }
 
   async function setActive(ctx, active) {
@@ -739,6 +756,25 @@ export function createBot({
     groupIntents.delete(chatId);
     return intent && Date.now() - intent.at < GROUP_INTENT_MS ? intent : null;
   }
+
+  // «✍️ Shu chatga yozish» (haydovchi, profilsiz): mashinasini oddiy matn bilan yozsa — AI/qoidalar profilga aylantiradi
+  // (driverText.js). regText — tugma bosilgan, keyingi matn mashina tavsifi; regPreview — tasdiqlash kutilayotgan profil.
+  // Faqat xotirada, 30 daqiqa; bot qayta ishga tushsa unutiladi (foydalanuvchi qaytadan yozadi).
+  const REG_TEXT_MS = 30 * 60_000;
+  const regText = new Map(); // chatId → { at }
+  const regPreview = new Map(); // chatId → { profile, at }
+  const regTextActive = (chatId) => {
+    const v = regText.get(chatId);
+    if (v && Date.now() - v.at < REG_TEXT_MS) return true;
+    regText.delete(chatId);
+    return false;
+  };
+  const WRITE_HERE_EXAMPLE =
+    "✍️ Mashinangiz haqida yozing — men o'zim to'ldiraman.\n\n" +
+    "Masalan:\n" +
+    "• «Fura, tent, 20 tonna, qo'shni davlatlarga ham chiqaman»\n" +
+    "• «Isuzu, ref, 5 tonna, faqat O'zbekiston»\n" +
+    "• «Labo, 1 tonna»";
 
   // /start (kanaldagi "🤖 Menga mos yuklar" havolasi ham shu yerga keladi: /start kanal).
   // «✅ A'zo bo'ldim» tasdiqlansa ham shu ekran chiqadi. Rol tanlanmagan odam nima bossa yoki yozsa ham shu ekran:
@@ -933,6 +969,17 @@ export function createBot({
   // Pastki menyu tugmalari (savol-javob o'rtasida bosilsa ham ishlaydi, qoralama saqlanib qoladi)
   privateChat.hears([MENU.loads, MENU.trucks], showMatches);
   privateChat.hears([MENU.settings, MENU.register], openSettings);
+  // «✍️ Shu chatga yozish» (haydovchi, profilsiz): namuna beramiz, keyingi matnni mashina tavsifi deb o'qiymiz (readRegText)
+  privateChat.hears(MENU.writeHere, async (ctx) => {
+    const driver = rememberUser(ctx);
+    if (roleOf(driver) !== "haydovchi") return showStart(ctx);
+    if (driver.profile) {
+      await ctx.reply(`Siz allaqachon ro'yxatdan o'tgansiz. O'zgartirish — «${settingsLabel(driver)}».`, menu(driver));
+      return;
+    }
+    regText.set(ctx.chat.id, { at: Date.now() });
+    await ctx.reply(WRITE_HERE_EXAMPLE, menu(driver));
+  });
   privateChat.hears(MENU.pause, (ctx) => setActive(ctx, false));
   privateChat.hears(MENU.resume, (ctx) => setActive(ctx, true));
   privateChat.hears(MENU.apps, showApps); // eski menyudagi tugma (endi menyuda raqam tugmasi)
@@ -961,6 +1008,33 @@ export function createBot({
     await ctx.replyWithChatAction("typing").catch(() => {});
     const view = await desk.read(ctx.chat.id, ctx.message.text, driver, { form: Boolean(loadFormUrl()) });
     await showLoadView(ctx, view, driver);
+  }
+
+  // Haydovchi «✍️ Shu chatga yozish» → mashinasini yozdi. parseLoad (qoidalar, bo'lmasa AI) bilan tushunamiz → profil
+  // (driverText.js) → preview (tasdiqlash tugmalari). AI band bo'lsa yoki tushunmasa — tushunarli matn; regText qoladi,
+  // foydalanuvchi aniqroq qayta yozishi mumkin.
+  async function readRegText(ctx, driver) {
+    await ctx.replyWithChatAction("typing").catch(() => {});
+    const parsed = await parseLoad(ctx.message.text);
+    if (!parsed) {
+      await ctx.reply("⏳ Tizim hozir band. Birozdan keyin qayta yozing yoki «🚚 Ro'yxatdan o'tish» formasidan to'ldiring.", menu(driver));
+      return;
+    }
+    const { profile, error } = profileFromText(parsed, ctx.message.text, { scope });
+    if (error) {
+      await ctx.reply(error, menu(driver));
+      return;
+    }
+    regPreview.set(ctx.chat.id, { profile, at: Date.now() });
+    const keyboard = new InlineKeyboard().text("✅ Ha, saqlash", "rt:ok");
+    const formUrl = regFormUrl();
+    if (formUrl) keyboard.webApp("✏️ Formada tuzatish", formUrl);
+    keyboard.row().text("❌ Bekor", "rt:no");
+    await ctx.reply(`Mana, tushunganim 👇\n\n${escapeHtml(describeProfile(profile, scope, "haydovchi"))}\n\nTo'g'rimi?`, {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      reply_markup: keyboard,
+    });
   }
 
   // Formadan (web) kelgan yuk — server bilan aloqa bo'lmaganda Mini App uni sendData bilan shu yerga yuboradi
@@ -999,6 +1073,34 @@ export function createBot({
     desk.cancel(ctx.chat.id);
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(LOAD_TEXT.cancelled).catch(() => {});
+  });
+
+  // Matndan ro'yxatdan o'tish preview'i (driverText.js). [✅ Ha, saqlash] — profilni saqlaydi, keyin odatdagi oqim (raqam → yo'nalish)
+  bot.callbackQuery("rt:ok", async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery();
+    const driver = rememberUser(ctx);
+    const preview = regPreview.get(ctx.chat.id);
+    regPreview.delete(ctx.chat.id);
+    if (!preview || Date.now() - preview.at > REG_TEXT_MS || driver.profile) {
+      await ctx.editMessageReplyMarkup().catch(() => {});
+      await ctx.reply(`Bu taklif eskirdi. «${MENU.writeHere}» ni qayta bosing yoki «${settingsLabel(driver)}».`, menu(driver));
+      return;
+    }
+    regText.delete(ctx.chat.id);
+    await ctx.editMessageReplyMarkup().catch(() => {}); // tugmalar qayta bosilmasin
+    await saved(ctx, preview.profile, "haydovchi");
+  });
+
+  // [❌ Bekor] — preview rad etildi
+  bot.callbackQuery("rt:no", async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery();
+    regPreview.delete(ctx.chat.id);
+    regText.delete(ctx.chat.id);
+    const driver = rememberUser(ctx);
+    await ctx.editMessageReplyMarkup().catch(() => {});
+    await ctx.reply(`Bekor qilindi. Xohlasangiz «${MENU.writeHere}» yoki «${settingsLabel(driver)}».`, menu(driver));
   });
 
   // [📞 +998 …] — oldin yozgan raqami bilan
@@ -1170,6 +1272,8 @@ export function createBot({
     // Yuk beruvchi oddiy xabar yozdi — bu uning yuki («📦 Yuk berish», shipperLoads.js). Chatdagi sozlamalar savol-javobi
     // (draft) ochiq bo'lsa — avval u
     if (!driver.draft && roleOf(driver) === "yuk_beruvchi") return readLoad(ctx, driver);
+    // Haydovchi «✍️ Shu chatga yozish» ni bosgan (profilsiz) — bu matnni mashina tavsifi deb o'qiymiz
+    if (!driver.draft && roleOf(driver) === "haydovchi" && !driver.profile && regTextActive(ctx.chat.id)) return readRegText(ctx, driver);
     if (!driver.draft) {
       await ctx.reply("Pastdagi menyudan tanlang 👇", menu(driver));
       return;

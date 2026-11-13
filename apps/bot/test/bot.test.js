@@ -206,6 +206,63 @@ const FORM = { ...PROFILE, fromAreas: [] };
 const lastMarkup = (calls) => calls.filter((c) => c.method === "sendMessage").at(-1).payload.reply_markup;
 const buttons = (markup) => markup.keyboard.flat();
 
+test("haydovchi «✍️ Shu chatga yozish»: matn → AI → preview → tasdiqlash → saqlash", async () => {
+  const parseLoad = async () => ({ postType: "mashina_bor", loads: [{ truckClass: "fura", bodyType: "tent", weightT: 20 }] });
+  const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP }, parseLoad });
+
+  await press("r:haydovchi"); // appUrl bor — wizard boshlanmaydi, 2 yo'l taklif qilinadi
+  assert.match(texts(calls).at(-1), /Shu chatga yozish/);
+
+  // Tugma bosildi — namuna chiqadi, profil hali yo'q
+  calls.length = 0;
+  await message(PRIVATE, MENU.writeHere);
+  assert.match(texts(calls).at(-1), /Mashinangiz haqida yozing/);
+  assert.equal(store.getDriver(42).profile, null);
+
+  // Mashinasini yozdi — preview (inline [✅ rt:ok] [web_app] [❌ rt:no]); tasdiqlanmaguncha saqlanmaydi
+  calls.length = 0;
+  await message(PRIVATE, "Fura, tent, 20 tonna");
+  assert.match(texts(calls).at(-1), /tushunganim/);
+  const kb = calls.filter((c) => c.method === "sendMessage").at(-1).payload.reply_markup.inline_keyboard.flat();
+  assert.deepEqual(kb.map((b) => b.callback_data ?? "web_app"), ["rt:ok", "web_app", "rt:no"]);
+  assert.equal(store.getDriver(42).profile, null);
+
+  // Tasdiqladi — profil saqlanadi, odatdagi oqim (raqam so'raladi)
+  calls.length = 0;
+  await press("rt:ok");
+  const { profile, role } = store.getDriver(42);
+  assert.equal(role, "haydovchi");
+  assert.deepEqual([profile.vehicle.truckClass, profile.vehicle.bodyType, profile.vehicle.capacityKg], ["fura", "tent", 20000]);
+  assert.ok(texts(calls).includes("✅ Saqlandi."));
+});
+
+test("haydovchi matni tushunarsiz — xato, keyin aniqroq yozsa preview; AI band — «birozdan keyin»", async () => {
+  let reply = null;
+  const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP }, parseLoad: async () => reply });
+
+  await press("r:haydovchi");
+  await message(PRIVATE, MENU.writeHere);
+
+  // Tushunmadi (truckClass yo'q) — xato, profil saqlanmaydi, lekin rejim saqlanadi (qaytadan yozsa bo'ladi)
+  reply = { postType: "boshqa", loads: [] };
+  calls.length = 0;
+  await message(PRIVATE, "salom qalaysiz");
+  assert.match(texts(calls).at(-1), /tushunmadim/);
+  assert.equal(store.getDriver(42).profile, null);
+
+  // AI band (null) — «birozdan keyin»
+  reply = null;
+  calls.length = 0;
+  await message(PRIVATE, "Isuzu 5 tonna");
+  assert.match(texts(calls).at(-1), /band|birozdan keyin/i);
+
+  // Endi aniqroq — preview chiqadi
+  reply = { postType: "mashina_bor", loads: [{ truckClass: "isuzu", bodyType: "ref", weightT: 5 }] };
+  calls.length = 0;
+  await message(PRIVATE, "Isuzu, ref, 5 tonna");
+  assert.match(texts(calls).at(-1), /tushunganim/);
+});
+
 test("pastki menyu: rol tanlanmaguncha yo'q, rol tanlangach Mini App tugmasi, savol-javobsiz", async () => {
   const { calls, command, press, message } = setup({ config: { miniappUrl: MINIAPP } });
   await command("/start");
@@ -229,15 +286,17 @@ test("pastki menyu: rol tanlanmaguncha yo'q, rol tanlangach Mini App tugmasi, sa
   assert.equal(
     texts(calls)[0],
     "🚚 Haydovchisiz. Sizga to'g'ri keladigan yuk e'lonlarini (transportingiz va yo'nalishingizga mos) yo'naltiramiz.\n\n" +
-      "👇 Endi pastdagi «🚚 Ro'yxatdan o'tish» tugmasini bosing — 1 daqiqalik forma.",
+      "Ro'yxatdan o'tishning 2 yo'li bor:\n" +
+      `• «${MENU.register}» — 1 daqiqalik forma;\n` +
+      `• «${MENU.writeHere}» — mashinangizni shu chatga oddiy yozasiz, qolganini men qilaman.`,
   );
   const markup = lastMarkup(calls);
   assert.equal(markup.is_persistent, undefined); // yig'iladigan: yozish qatoridagi belgi menyuni ochib-yopadi
   assert.equal(markup.resize_keyboard, true);
   const register = buttons(markup).find((b) => b.text === MENU.register);
   assert.equal(register.web_app.url, `${MINIAPP}?v=sozlamalar&r=haydovchi`); // ilova darhol sozlamalar bilan ochiladi
-  // Ro'yxatdan o'tmaguncha — faqat 3 tugma (Azimjon, 2026-11-10): mos yuklar, pauza, raqam — formadan keyin
-  assert.deepEqual(markup.keyboard.map((row) => row.map((b) => b.text)), [[MENU.register], [MENU.role, MENU.help]]);
+  // Ro'yxatdan o'tmaguncha — forma + «✍️ Shu chatga yozish», so'ng rol/yordam (Mos yuklar, pauza, raqam — formadan keyin)
+  assert.deepEqual(markup.keyboard.map((row) => row.map((b) => b.text)), [[MENU.register], [MENU.writeHere], [MENU.role, MENU.help]]);
 });
 
 test("web'dan hisobdan chiqqan (store.signOut): bot yangi odamdek — rol so'raladi, rolni tanlasa sozlamalari tiklanadi", async () => {
@@ -861,7 +920,7 @@ test("/start matni: bot haqida Azimjon matni, keyin menyu; menyuda «Ilovalar» 
       "Telefon ilovalari — /ilovalar.\n\n" +
       "👇 Boshlash uchun pastdagi\n«🚚 Ro'yxatdan o'tish» tugmasini bosing — 1 daqiqalik forma.",
   );
-  assert.deepEqual(lastMarkup(calls).keyboard.map((row) => row.map((b) => b.text)), [[MENU.register], [MENU.role, MENU.help]]);
+  assert.deepEqual(lastMarkup(calls).keyboard.map((row) => row.map((b) => b.text)), [[MENU.register], [MENU.writeHere], [MENU.role, MENU.help]]);
 
   // Ro'yxatdan o'tgach — to'liq menyu va to'liq ro'yxat
   store.saveDriver(42, { profile: PROFILE });

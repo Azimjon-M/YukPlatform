@@ -14,6 +14,7 @@ export const MENU = {
   trucks: "🚚 Bo'sh mashinalar",
   settings: "⚙️ Sozlamalar",
   register: "🚚 Ro'yxatdan o'tish",
+  writeHere: "✍️ Shu chatga yozish", // ro'yxatdan o'tishning 2-yo'li (haydovchi, profilsiz): mashinani oddiy matn bilan yozadi, AI profilga aylantiradi (bot.js, driverText.js)
   pause: "⏸ Pauza",
   resume: "▶️ Davom ettirish",
   phone: "📱 Raqam ulashish", // request_contact tugmasi (PHONE.share bilan bir xil matn) — faqat raqami yo'qlarda (bor bo'lsa — /raqam: almashtirish / o'chirish)
@@ -105,6 +106,8 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   // raqam formadan keyin baribir so'raladi).
   if (!driver?.profile && role !== "yuk_beruvchi") {
     const keyboard = settingsButton(loadRow(new Keyboard())).row();
+    // Ro'yxatdan o'tishning 2-yo'li: mashinani shu chatga oddiy matn bilan yozish (bot.js: AI → profil → tasdiqlash)
+    keyboard.text(MENU.writeHere).row();
     if (role) keyboard.text(MENU.role);
     keyboard.text(MENU.help);
     return keyboard.resized().placeholder("Menyudan tanlang");
