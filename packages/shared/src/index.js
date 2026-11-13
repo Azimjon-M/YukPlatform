@@ -14,4 +14,5 @@ export * from "./route.js";
 export * from "./idle.js";
 export * from "./shipperLoad.js";
 export * from "./geo.js";
+export * from "./devMode.js";
 export { CITY_COORDS, COUNTRY_COORDS, REGION_COORDS } from "./geoData.js";

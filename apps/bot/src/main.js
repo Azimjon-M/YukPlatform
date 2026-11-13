@@ -3,15 +3,19 @@
 //   npm run bot:check    — faqat tekshirish: token ishlayaptimi, bot kanalda adminmi
 //   npm run bot -- --dry-run — navbatdagi e'lonlarni tahlil qilib, Telegram'ga yubormasdan ekranga chiqarish
 import { existsSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Api } from "grammy";
 import { createParser, createParserPool, envSeedEntries, resolveSettings } from "@yuk/parser";
-import { ROUTE_SCOPES, SHIPPER_LOAD_LIMIT, routeScopeFrom } from "@yuk/shared";
-import { acquireRunLock, createCallLinks, createSessions, loadSecret, openStore, tunnelUrl } from "@yuk/store";
+import { EXIT_CONFIG, ROUTE_SCOPES, SHIPPER_LOAD_LIMIT, devBotProblem, isDevMode, routeScopeFrom } from "@yuk/shared";
+import { DEFAULT_DB_FILE, acquireRunLock, createCallLinks, createSessions, loadSecret, openStore, tunnelUrl } from "@yuk/store";
 import { createBot } from "./bot.js";
 import { createIdleWatcher } from "./idle.js";
 import { readConfig, requireContactOn, ruleParserOn } from "./config.js";
 import { formatLoad } from "./format.js";
 import { createWorker, ruleParse } from "./pipeline.js";
 
+const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
 const log = (message) => console.log(`[${time()}] ${message}`);
 
@@ -130,9 +134,41 @@ async function dryRun() {
   store.close();
 }
 
+// .env xatosi (token yo'q yoki noto'g'ri) — qayta yoqish yordam bermaydi: EXIT_CONFIG bilan chiqamiz,
+// shunda boshqaruv markazi botni 10 s da qayta-qayta yoqib turmaydi (processes.js)
+function configOrExit() {
+  try {
+    return readConfig();
+  } catch (error) {
+    console.error(`Xato: ${error.message}`);
+    if (isDevMode()) console.error("Dasturlash rejimi (YUK_ENV=dev): BOT_TOKEN ga TEST botning tokenini yozing (@BotFather → /newbot).");
+    process.exit(EXIT_CONFIG);
+  }
+}
+
+// Dasturlash rejimida serverdagi prod bot bilan ishga tushmaymiz (@yuk/shared devMode.js — sababi o'sha yerda).
+// Tekshiruv init()dan OLDIN: init bot tavsifi va buyruqlarini o'zgartiradi — prod botga tegmasin.
+// getMe — faqat «bu token kimniki?» degan savol: Telegram'da hech narsani o'zgartirmaydi va serverdagi
+// botning getUpdates'iga xalaqit bermaydi (409 faqat ikkinchi getUpdates'dan chiqadi).
+async function refuseProdBotInDev(token) {
+  if (!isDevMode()) return;
+  const me = await new Api(token).getMe().catch((error) => {
+    if (error.error_code !== 401) throw error; // internet yo'q va h.k. — oddiy xato, keyin qayta urinadi
+    console.error("Xato: BOT_TOKEN ni Telegram tanimadi (401). @BotFather dagi test bot tokenini qaytadan nusxalang.");
+    process.exit(EXIT_CONFIG);
+  });
+  const problem = devBotProblem(me.username);
+  if (problem) {
+    console.error(problem);
+    process.exit(EXIT_CONFIG);
+  }
+  console.log(`🧪 Dasturlash rejimi: test bot @${me.username}, baza ${path.relative(ROOT, DEFAULT_DB_FILE)}`);
+}
+
 async function main() {
   if (process.argv.includes("--dry-run")) return dryRun();
-  const config = readConfig();
+  const config = configOrExit();
+  await refuseProdBotInDev(config.token);
   if (process.argv.includes("--check")) return check(config);
 
   // Ikkinchi bot nusxasi Telegram'dan "409 Conflict" oladi — oldindan to'xtatamiz

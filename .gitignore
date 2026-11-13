@@ -17,6 +17,10 @@ data/samples/*
 # Baza (haydovchilar va e'lonlar)
 data/*.db
 data/*.db-*
+# Bazaning arxiv nusxalari (serverga ko'chirish uchun) — ichida haqiqiy telefon raqamlari bor, repo esa ochiq
+data/*.zip
+data/*.7z
+data/*.tar*
 
 # Ishlayotgan dasturlar (bot, collector) — PID fayllari
 data/run/

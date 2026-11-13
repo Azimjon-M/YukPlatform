@@ -7,6 +7,7 @@
 import { fork } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { EXIT_CONFIG } from "@yuk/shared";
 import { BEAT_MS, readRunLock, removeRunLock } from "@yuk/store";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -142,9 +143,21 @@ export function createProcessManager({
       // Majburan o'ldirilgan bola o'z PID faylini o'chira olmaydi — biz o'chiramiz (faqat u o'shaniki bo'lsa)
       removeLock(item.name, { pid: child.pid });
       const expected = item.status === "stopping" || !item.want;
-      Object.assign(item, { child: null, pid: null, exitCode: code, status: expected ? "stopped" : "crashed" });
-      push(item, "system", expected ? "■ to'xtadi" : `✖ kutilmaganda to'xtadi (${code ?? signal})`);
-      if (!expected) scheduleRestart(item);
+      // EXIT_CONFIG (78) — dastur o'zi «.env ni tuzating» dedi (masalan, dasturlash rejimida prod bot tokeni):
+      // qayta yoqish yordam bermaydi, faqat bir xil xatoni 5 marta takrorlaydi — to'xtab turadi
+      const misconfigured = !expected && code === EXIT_CONFIG;
+      if (misconfigured) item.want = false;
+      Object.assign(item, { child: null, pid: null, exitCode: code, status: expected || misconfigured ? "stopped" : "crashed" });
+      push(
+        item,
+        "system",
+        expected
+          ? "■ to'xtadi"
+          : misconfigured
+            ? "■ sozlama (.env) sababli ishlamadi — qayta yoqilmaydi. Yuqoridagi xabarni o'qing, .env ni tuzatib, qo'lda yoqing"
+            : `✖ kutilmaganda to'xtadi (${code ?? signal})`,
+      );
+      if (!expected && !misconfigured) scheduleRestart(item);
     });
     return state(item);
   }

@@ -55,6 +55,18 @@ test("kutilmaganda to'xtasa qayta ishga tushadi, ko'p marta bo'lsa — to'xtaydi
   assert.equal((await m.stop("fake")).status, "stopped", "qo'lda o'chirsa — holat tozalanadi");
 });
 
+test("EXIT_CONFIG (78) bilan chiqsa — qayta yoqilmaydi, holati «stopped», qo'lda yana yoqsa bo'ladi", async () => {
+  const m = manager("config");
+  m.start("fake");
+  await until(() => texts(m).some((t) => t.includes("qayta yoqilmaydi")));
+  await wait(200); // restartDelayMs = 50: qayta yoqilganida shu vaqt ichida ko'rinardi
+  const state = m.get("fake");
+  assert.deepEqual([state.status, state.exitCode, state.autoRestart, state.crashes], ["stopped", 78, false, 0]);
+  assert.equal(texts(m).filter((t) => t.startsWith("▶ ishga tushdi")).length, 1, "bir marta yoqildi");
+  assert.equal(m.start("fake").status, "running", "tuzatilgandan keyin qo'lda yoqiladi");
+  await until(() => texts(m).filter((t) => t.includes("qayta yoqilmaydi")).length === 2);
+});
+
 test("terminalda ishlayotgan nusxa: external, yoqib bo'lmaydi", () => {
   const m = manager("ok", { readLock: () => ({ pid: 4242, alive: true }) });
   assert.deepEqual([m.get("fake").status, m.get("fake").pid], ["external", 4242]);

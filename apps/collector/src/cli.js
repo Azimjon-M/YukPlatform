@@ -13,6 +13,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { EXIT_CONFIG, devCollectorProblem } from "@yuk/shared";
 import { acquireRunLock, openStore } from "@yuk/store";
 import { runLive, sourceLabel } from "./live.js";
 import { ask } from "./prompt.js";
@@ -189,6 +190,13 @@ const COMMANDS = { login: cmdLogin, dialogs: cmdDialogs, search: cmdSearch, expo
 try {
   const run = COMMANDS[command];
   if (!run) throw new Error(`Noma'lum buyruq: "${command ?? ""}". Mavjudlari: ${Object.keys(COMMANDS).join(", ")}`);
+  // Dasturlash rejimi (.env YUK_ENV=dev): serverdagi collector ishlatayotgan akkauntga tegmaymiz (@yuk/shared devMode.js).
+  // EXIT_CONFIG — boshqaruv markazi qayta-qayta yoqib turmaydi
+  const devProblem = devCollectorProblem(command);
+  if (devProblem) {
+    console.error(devProblem);
+    process.exit(EXIT_CONFIG);
+  }
   await run();
   process.exit(0); // GramJS ba'zan fonda ulanishni ochiq qoldiradi
 } catch (error) {

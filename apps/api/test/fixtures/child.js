@@ -5,6 +5,7 @@ process.stdout.write("salom ");
 process.stdout.write("dunyo\nikkinchi qator\n");
 console.error("ogohlantirish");
 if (mode === "crash") process.exit(3);
+if (mode === "config") process.exit(78); // EXIT_CONFIG — «.env ni tuzating»
 process.on("message", (message) => {
   if (message !== "stop" || mode === "stubborn") return;
   console.log("to'xtayapman");

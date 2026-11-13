@@ -12,8 +12,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { envSeedEntries, resolveSettings } from "@yuk/parser";
-import { routeScopeFrom } from "@yuk/shared";
-import { createCallLinks, loadSecret, openStore } from "@yuk/store";
+import { devAutostart, isDevMode, routeScopeFrom } from "@yuk/shared";
+import { DEFAULT_DB_FILE, createCallLinks, loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
 import { createErrorLog } from "./errorLog.js";
 import { createProcessManager } from "./processes.js";
@@ -34,7 +34,11 @@ const log = (message) => console.log(`[${time()}] ${message}`);
 // AUTOSTART bo'sh yoki yozilmagan — hammasi (nginx va tunnel — kompyuterda o'rnatilgan bo'lsa); "none" — hech biri
 const defaults = [findNginx() && "nginx", (findCloudflared() || findTailscale()) && "tunnel", "bot", "collector"].filter(Boolean).join(",");
 const wanted = process.env.AUTOSTART?.trim() || defaults;
-const autostart = process.argv.includes("--no-autostart") || wanted === "none" ? [] : wanted.split(/[,\s]+/).filter(Boolean);
+// Dasturlash rejimi (.env YUK_ENV=dev, @yuk/shared devMode.js): collector o'zi yoqilmaydi — server o'sha akkaunt bilan o'qiyapti
+const autostart = process.argv.includes("--no-autostart") || wanted === "none" ? [] : devAutostart(wanted.split(/[,\s]+/).filter(Boolean));
+if (isDevMode()) {
+  log(`🧪 Dasturlash rejimi (YUK_ENV=${process.env.YUK_ENV.trim()}): baza ${path.relative(ROOT, DEFAULT_DB_FILE)}, prod bot bilan bot ishga tushmaydi, collector ${autostart.includes("collector") ? "alohida akkaunt bilan (DEV_COLLECTOR=1)" : "o'chiq"}`);
+}
 
 const store = openStore();
 // Manbalar jadvali bo'sh bo'lsa — .env dagi TG_SOURCES dan (collector ham shunday qiladi).
