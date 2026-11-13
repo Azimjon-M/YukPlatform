@@ -34,6 +34,7 @@
 //   POST /pub/admin/tg-accounts/login/:id/code      { code }
 //   POST /pub/admin/tg-accounts/login/:id/password  { password } — 2FA bo'lsa
 //   DELETE /pub/admin/tg-accounts/login/:id         bekor qilish / yopish
+//   GET/POST/DELETE /pub/me/tg-accounts…   xuddi shular, lekin istalgan foydalanuvchi — faqat o'z akkauntlari (Sozlamalar)
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -640,6 +641,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
         error: a.status === "ok" ? null : a.error,
         dialogs: a.dialogs ?? 0,
         sources: perAccount[a.name] ?? 0,
+        scan: store.dialogScanSummary?.(a.name) ?? null,
         updatedAt: a.updatedAt,
       })),
       login: tgLogin?.current() ?? null,
@@ -664,6 +666,49 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   });
   admin.delete("/tg-accounts/login/:id", (req, res) => {
     res.json({ ok: needLogin().cancel(req.params.id) });
+  });
+
+  // --- Har foydalanuvchining o'z Telegram akkauntlari (Sozlamalar, 2026-11-13, Azimjon: «adminlik bermasdan shunchaki
+  // sozlamalar ichiga qo'shib ber» → «Hamma foydalanuvchiga»). Admin yo'lidan farqi: har kim faqat O'ZI qo'shgan
+  // akkauntlarni va O'Z kirishini ko'radi/boshqaradi (boshqaning kirish id'si — 404), nomni server beradi
+  // (tgLogin userAccountName), soatlik chegaralar alohida — admin limitiga tegmaydi.
+  // Ulangan akkaunt collector'ga qo'shiladi; uning yopiq guruhlarini manbaga admin qo'shadi (boshqaruv markazi).
+  const mine = (req) => req.driver.chatId;
+  pub.get("/me/tg-accounts", (req, res) => {
+    const perAccount = {};
+    for (const s of store.listSources()) if (s.account) perAccount[s.account] = (perAccount[s.account] ?? 0) + 1;
+    res.json({
+      accounts: (store.listTgAccounts?.() ?? [])
+        .filter((a) => a.addedBy === mine(req))
+        .map((a) => ({
+          name: a.name,
+          firstName: a.firstName,
+          username: a.username,
+          status: a.status,
+          error: a.status === "ok" ? null : a.error,
+          dialogs: a.dialogs ?? 0,
+          sources: perAccount[a.name] ?? 0,
+          // Guruhlarini avtomatik tekshirish natijasi (collector live.js scanNext): checked, pending, trial, ok, rejected …
+          scan: store.dialogScanSummary?.(a.name) ?? null,
+          updatedAt: a.updatedAt,
+        })),
+      login: tgLogin?.current(mine(req)) ?? null,
+      unavailable: tgLogin ? tgLogin.unavailable() : "Server qayta ishga tushirilgach ishlaydi",
+    });
+  });
+  // { phone, name? } — name faqat o'z akkauntiga qayta kirish uchun («🔑 Qayta kirish»); yangisiga nomni server beradi
+  pub.post("/me/tg-accounts/login", async (req, res) => {
+    const login = await needLogin().start({ name: req.body?.name || null, phone: req.body?.phone, by: mine(req), mine: true });
+    res.status(201).json({ login });
+  });
+  pub.post("/me/tg-accounts/login/:id/code", async (req, res) => {
+    res.json({ login: await needLogin().code(req.params.id, req.body?.code, mine(req)) });
+  });
+  pub.post("/me/tg-accounts/login/:id/password", async (req, res) => {
+    res.json({ login: await needLogin().password(req.params.id, req.body?.password, mine(req)) });
+  });
+  pub.delete("/me/tg-accounts/login/:id", (req, res) => {
+    res.json({ ok: needLogin().cancel(req.params.id, mine(req)) });
   });
 
   pub.use("/admin", admin);

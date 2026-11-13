@@ -347,3 +347,17 @@ test("yopiq guruh tanlash: qo'shilmaganlari, bir guruh bir marta, yopiqlari biri
   assert.deepEqual(pickableDialogs(dialogs, accounts, "@yuk_").map((d) => d.peerId), ["-1001"]);
   assert.deepEqual(pickableDialogs(dialogs, accounts, "-1003").map((d) => d.peerId), ["-1003"]);
 });
+
+test("scanView: Auto scan holati bir qatorda", async () => {
+  const { scanView } = await import("../src/format.js");
+  assert.equal(scanView(null), null);
+  assert.deepEqual(scanView({ running: false, checked: 0, pending: 0, trial: 0, ok: 0, failed: 0, rejected: 0, errors: 0 }), { running: false, text: null });
+  assert.deepEqual(scanView({ running: true, checked: 4, pending: 30, trial: 2, ok: 0, failed: 0, rejected: 2, errors: 0 }), {
+    running: true,
+    text: "🔎 Tekshirilyapti: 4 ta tekshirildi, yana 30 tasi navbatda (30 soniyada bittadan) · 2 tasi manbaga olindi (2 tasi sinovda) · 2 tasi yuk guruhi emas",
+  });
+  assert.equal(
+    scanView({ running: false, checked: 10, pending: 0, trial: 1, ok: 3, failed: 1, rejected: 5, errors: 1 }).text,
+    "🔎 10 ta guruh tekshirilgan · 5 tasi manbaga olindi (1 tasi sinovda), 3 tasi sinovdan o'tdi · 5 tasi yuk guruhi emas · 1 tasini o'qib bo'lmadi",
+  );
+});

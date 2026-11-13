@@ -154,10 +154,28 @@ test("ishlab turgan akkauntlar worker'ga beriladi (bir akkaunt ikki nom bilan ul
   assert.deepEqual(workers.spawned[0].sent[0].taken, { 10: "asosiy", 77: "ikkinchi" });
 });
 
+test("shu raqamli akkaunt allaqachon ulangan — yangi nom bilan kod/parol so'ramasdan rad etiladi", async () => {
+  const { store, tgLogin, workers } = setup();
+  // «birinchi» nomi bilan to'liq kirib bo'lingan (done → raqam xeshi saqlanadi)
+  const first = await tgLogin.start({ name: "birinchi", phone: "+998 90 123 45 67", by: 700 });
+  assert.equal((await tgLogin.code(first.id, "33333", 700)).step, "done");
+  store.saveTgAccount("birinchi", { userId: "77", status: "ok" }); // collector o'z qatorini yozadi, xesh saqlanib qoladi
+
+  // Shu raqam (boshqacha yozilgan), boshqa nom bilan — kod YUBORILMASDAN 409
+  await rejects(tgLogin.start({ name: "ikkinchi", phone: "998901234567" }), 409, /allaqachon «birinchi» nomi bilan ulangan/);
+  assert.equal(workers.spawned.length, 1, "dublikat uchun yangi kirish jarayoni ochilmasligi kerak");
+
+  // Sessiyasi yo'qolsa (logged_out) — o'sha raqamga o'z nomi bilan qayta kirsa bo'ladi
+  store.saveTgAccount("birinchi", { status: "logged_out" });
+  assert.equal((await tgLogin.start({ name: "birinchi", phone: "+998901234567" })).step, "code");
+});
+
 test("Telegram javob bermasa yoki worker yiqilsa — «failed», qaytadan boshlasa bo'ladi", async () => {
   const slow = setup({ stepTimeoutMs: 30 });
   const login = await slow.tgLogin.start({ name: "ikkinchi", phone: "+998901234567" });
-  const hung = await slow.tgLogin.code(login.id, "88888");
+  // Kutish taymeri unref() — test jarayoni uni kutmay chiqib ketmasin (serverda Express jarayonni tirik ushlaydi)
+  const keepAlive = setInterval(() => {}, 1000);
+  const hung = await slow.tgLogin.code(login.id, "88888").finally(() => clearInterval(keepAlive));
   assert.equal(hung.step, "failed");
   assert.match(hung.error, /javob bermadi/);
   assert.deepEqual(slow.workers.spawned[0].sent.at(-1), { type: "cancel" });
@@ -265,6 +283,107 @@ test("eski server (tgLogin berilmagan): ro'yxat ochiladi, kirish — «qayta ish
     assert.match(list.unavailable, /qayta ishga tushirilgach/);
     const start = await fetch(`${base}/pub/admin/tg-accounts/login`, { method: "POST", headers, body: JSON.stringify({ name: "ikkinchi", phone: "+998901234567" }) });
     assert.equal(start.status, 409);
+  } finally {
+    server.close();
+  }
+});
+
+test("foydalanuvchi o'zi uchun: nomni server beradi, egasi yoziladi, boshqaning kirishi va akkauntiga tegolmaydi", async () => {
+  const { store, tgLogin } = setup({ userMaxAccounts: 2 });
+  // Begona nom (asosiy yoki boshqaning akkaunti) bilan «qayta kirish» — 404
+  store.saveTgAccount("ikkinchi", { userId: "77", status: "logged_out" });
+  await rejects(tgLogin.start({ name: "asosiy", phone: "+998901234567", by: 560, mine: true }), 404, /akkauntingiz yo'q/);
+  await rejects(tgLogin.start({ name: "ikkinchi", phone: "+998901234567", by: 560, mine: true }), 404, /akkauntingiz yo'q/);
+
+  const a = await tgLogin.start({ phone: "+998901234567", by: 560, mine: true });
+  assert.equal(a.name, "ufk-1");
+  // Boshqa foydalanuvchi: o'z kirishi bor, birinchisinikini ko'rmaydi va boshqarolmaydi
+  const b = await tgLogin.start({ phone: "+998901234568", by: 561, mine: true });
+  assert.equal(b.name, "ufl-1");
+  assert.equal(tgLogin.current(560).id, a.id);
+  assert.equal(tgLogin.current(561).id, b.id);
+  assert.equal(tgLogin.current(999), null);
+  await rejects(tgLogin.code(a.id, "12345", 561), 404, /endi yo'q/);
+  assert.equal(tgLogin.cancel(a.id, 561), false);
+
+  const done = await tgLogin.code(a.id, "12345", 560);
+  assert.equal(done.step, "done");
+  assert.equal(store.listTgAccounts().find((x) => x.name === "ufk-1").addedBy, 560);
+  // Collector keyin o'z ma'lumotini yozsa ham egasi qoladi
+  store.saveTgAccount("ufk-1", { userId: "90", status: "ok" });
+  assert.equal(store.listTgAccounts().find((x) => x.name === "ufk-1").addedBy, 560);
+
+  // Keyingi akkaunt — keyingi nom; chegara (2 ta) to'lsa — 409
+  const second = await tgLogin.start({ phone: "+998901234569", by: 560, mine: true });
+  assert.equal(second.name, "ufk-2");
+  await tgLogin.code(second.id, "12345", 560);
+  store.saveTgAccount("ufk-2", { userId: "91", status: "ok" });
+  await rejects(tgLogin.start({ phone: "+998901234560", by: 560, mine: true }), 409, /ko'pi bilan 2 ta/);
+  // Sessiyasi yo'qolgan o'z akkauntiga qayta kirish — mumkin
+  store.saveTgAccount("ufk-2", { status: "logged_out" });
+  assert.equal((await tgLogin.start({ name: "ufk-2", phone: "+998901234569", by: 560, mine: true })).name, "ufk-2");
+});
+
+test("foydalanuvchilar chegarasi admin limitiga tegmaydi; bir vaqtda kirishlar soni cheklangan", async () => {
+  const { tgLogin } = setup({ userStartsPerHour: 2, usersStartsPerHour: 3, maxUserLogins: 2 });
+  const one = await tgLogin.start({ phone: "+998901234567", by: 1, mine: true });
+  tgLogin.cancel(one.id, 1);
+  await tgLogin.start({ phone: "+998901234567", by: 1, mine: true });
+  await rejects(tgLogin.start({ phone: "+998901234567", by: 1, mine: true }), 409, /davom etyapti/);
+  await tgLogin.start({ phone: "+998901234568", by: 2, mine: true });
+  // 2 ta kirish davom etyapti — uchinchi foydalanuvchi kutadi
+  await rejects(tgLogin.start({ phone: "+998901234569", by: 3, mine: true }), 429, /boshqa foydalanuvchilar/);
+  for (const login of [tgLogin.current(1), tgLogin.current(2)]) tgLogin.cancel(login.id);
+  // Bir foydalanuvchi soatiga 2 marta (1-chi 2 marta so'radi)
+  await rejects(tgLogin.start({ phone: "+998901234567", by: 1, mine: true }), 429, /2 marta kod so'radingiz/);
+  // Hammasi birga — 3 marta (1: 2 ta, 2: 1 ta)
+  await rejects(tgLogin.start({ phone: "+998901234569", by: 3, mine: true }), 429, /juda ko'p kod/);
+  // Admin bularga qaramaydi
+  assert.equal((await tgLogin.start({ name: "ikkinchi", phone: "+998901234567", by: 558 })).step, "code");
+});
+
+test("Mini App API /pub/me/tg-accounts: har kim faqat o'zinikini ko'radi, admin emas ham", async () => {
+  const { store, tgLogin } = setup();
+  const sessions = createSessions(randomBytes(32));
+  store.saveDriver(560, { name: "Oddiy" });
+  store.saveDriver(561, { name: "Boshqa" });
+  store.saveTgAccount("asosiy", { userId: "10", status: "ok" });
+  store.setTgAccountOwner("ufl-1", 561);
+  store.saveTgAccount("ufl-1", { userId: "11", status: "ok" });
+  const app = createPublicApp({ store, env: { BOT_TOKEN: "1:x" }, sessions, scope: "qoshni", tgLogin });
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, "127.0.0.1", () => resolve(s));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = async (method, url, token, body) => {
+    const response = await fetch(base + url, {
+      method,
+      headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
+      body: body && JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  try {
+    const me = sessions.issue(560);
+    const other = sessions.issue(561);
+    assert.equal((await fetch(`${base}/pub/me/tg-accounts`)).status, 401);
+    const empty = await call("GET", "/pub/me/tg-accounts", me);
+    assert.deepEqual([empty.status, empty.body.accounts, empty.body.login, empty.body.unavailable], [200, [], null, null]);
+    assert.deepEqual((await call("GET", "/pub/me/tg-accounts", other)).body.accounts.map((a) => a.name), ["ufl-1"]);
+
+    const started = await call("POST", "/pub/me/tg-accounts/login", me, { phone: "+998901234567", name: "" });
+    assert.deepEqual([started.status, started.body.login.name, started.body.login.step], [201, "ufk-1", "code"]);
+    const id = started.body.login.id;
+    assert.equal((await call("GET", "/pub/me/tg-accounts", other)).body.login, null);
+    assert.equal((await call("POST", `/pub/me/tg-accounts/login/${id}/code`, other, { code: "12345" })).status, 404);
+    assert.deepEqual((await call("DELETE", `/pub/me/tg-accounts/login/${id}`, other)).body, { ok: false });
+    assert.equal((await call("POST", "/pub/me/tg-accounts/login", me, { phone: "+998901234567", name: "ufl-1" })).status, 409, "kirish davom etyapti");
+
+    const done = await call("POST", `/pub/me/tg-accounts/login/${id}/code`, me, { code: "12345" });
+    assert.equal(done.body.login.step, "done");
+    assert.deepEqual((await call("GET", "/pub/me/tg-accounts", me)).body.accounts.map((a) => a.name), ["ufk-1"]);
+    // Admin yo'li oddiy foydalanuvchiga hamon yopiq
+    assert.equal((await call("GET", "/pub/admin/tg-accounts", me)).status, 403);
   } finally {
     server.close();
   }

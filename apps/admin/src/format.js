@@ -533,3 +533,17 @@ export function uptimeText(startedAt, now = Date.now()) {
   if (ms < MINUTE) return `${Math.floor(ms / 1000)} s`;
   return durationMin(Math.floor(ms / MINUTE));
 }
+
+// «🔎 Auto scan» holati (server: store dialogScanSummary) → { running, text } — akkaunt qatori va «Batafsil» uchun
+export function scanView(scan) {
+  if (!scan) return null;
+  const taken = scan.trial + scan.ok + scan.failed;
+  const parts = [];
+  if (scan.running) parts.push(`🔎 Tekshirilyapti: ${scan.checked} ta tekshirildi, yana ${scan.pending} tasi navbatda (30 soniyada bittadan)`);
+  else if (scan.checked) parts.push(`🔎 ${scan.checked} ta guruh tekshirilgan`);
+  else return { running: false, text: null };
+  if (taken) parts.push(`${taken} tasi manbaga olindi${scan.trial ? ` (${scan.trial} tasi sinovda)` : ""}${scan.ok ? `, ${scan.ok} tasi sinovdan o'tdi` : ""}`);
+  if (scan.rejected) parts.push(`${scan.rejected} tasi yuk guruhi emas`);
+  if (scan.errors) parts.push(`${scan.errors} tasini o'qib bo'lmadi`);
+  return { running: scan.running, text: parts.join(" · ") };
+}

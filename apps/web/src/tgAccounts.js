@@ -59,3 +59,14 @@ export function codeWhere(login) {
   const where = VIA[login.via] ?? "Telegram ilovasiga";
   return `Telegram kodni ${login.phone} akkauntiga yubordi: ${where}.`;
 }
+
+// Guruhlarini avtomatik tekshirish natijasi (server: store dialogScanSummary) → bir qator matn yoki null
+export function scanText(scan) {
+  if (!scan || (!scan.checked && !scan.pending)) return null;
+  const taken = scan.trial + scan.ok + scan.failed;
+  const parts = [`🔎 ${scan.checked} ta guruh tekshirildi`];
+  if (taken) parts.push(`${taken} tasi manbaga olindi${scan.trial ? ` (${scan.trial} tasi sinovda)` : ""}`);
+  if (scan.rejected) parts.push(`${scan.rejected} tasi yuk guruhi emas`);
+  if (scan.pending) parts.push(`yana ${scan.pending} tasi navbatda`);
+  return parts.join(" · ");
+}

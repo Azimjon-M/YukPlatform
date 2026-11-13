@@ -883,6 +883,35 @@ export function createBot({
     if (!driver.phone) return needPhone(ctx);
     await ctx.reply(sourceIntake.intro(ctx.chat.id), html(driver));
   }
+  // /account_qosh (Azimjon, 2026-11-13): o'z Telegram akkauntini collector'ga ulash — Mini App Sozlamalardagi
+  // «📡 Telegram akkauntlarim» (apps/web TgAccounts mine). Inline web_app tugma, tokensiz (routeMapUrl dagidek: Telegram
+  // kimlikni initData bilan beradi). Kod va 2FA parol chatga emas, faqat Mini App'ga yoziladi
+  const ACCOUNT_BUTTON = "📡 Telegram akkauntni ulash";
+  async function showAddAccount(ctx) {
+    const driver = rememberUser(ctx);
+    const role = roleOf(driver);
+    if (!role) return showStart(ctx);
+    // Ro'yxatdan o'tayotgan haydovchiga Sozlamalarda bu bo'lim hali ko'rinmaydi
+    if (role === "haydovchi" && !driver.profile) {
+      return ctx.reply(`Avval ro'yxatdan o'ting: pastdagi «${settingsLabel(driver)}» tugmasini bosing — keyin /account_qosh.`, html(driver));
+    }
+    const base = appUrl();
+    if (!base?.startsWith("https://")) return ctx.reply("Bu imkoniyat hozircha ishlamayapti — ilova manzili sozlanmagan.", html(driver));
+    const url = miniAppUrl(base, null, scope, { view: "akkaunt", role });
+    await ctx.reply(
+      [
+        "📡 <b>Telegram akkauntingizni ulang</b>",
+        "",
+        "Yopiq yuk guruhlariga a'zo alohida Telegram akkauntingizni ulasangiz, o'sha guruhlardagi e'lonlar ham o'qiladi.",
+        "",
+        "Pastdagi tugma ilovani ochadi: raqam → Telegram yuborgan kod → (bo'lsa) 2FA parol.",
+        "⚠️ Kod va parolni faqat ilovaga yozing — hech qanday chatga yubormang (chatga yozilgan kodni Telegram bekor qiladi).",
+      ].join("\n"),
+      { parse_mode: "HTML", reply_markup: InlineKeyboard.from([[InlineKeyboard.webApp(ACCOUNT_BUTTON, url)]]) },
+    );
+  }
+  privateChat.command("account_qosh", showAddAccount); // «Menu» ro'yxatida ham (commands.js)
+
   privateChat.hears(MENU.addGroup, showAddGroup);
   privateChat.command("guruh_qoshish", showAddGroup); // «Menu» ro'yxatida ham (commands.js)
   privateChat.hears(LINK_RE, async (ctx) => {
@@ -890,7 +919,7 @@ export function createBot({
     if (!roleOf(driver)) return showStart(ctx);
     const link = parseSourceLink(ctx.message.text);
     if (!driver.phone) return needPhone(ctx, link.username ?? null);
-    const text = link.error ? INTAKE[link.error] : await sourceIntake.submit(ctx.chat.id, link.username);
+    const text = link.error ? INTAKE[link.error] : await sourceIntake.submit(ctx.chat.id, link);
     await ctx.reply(text, html(driver));
   });
   // Natijani (sinovga olindi / rad etildi / doimiy qo'shildi / o'chirildi) qo'shgan odamga yozadi — pastki menyu bilan
@@ -898,6 +927,7 @@ export function createBot({
     store,
     log,
     send: (chatId, text) => bot.api.sendMessage(chatId, text, html(store.getDriver(chatId))),
+    onInvite: (check) => sourceIntake.finishInvite(check),
   });
 
   // Pastki menyu tugmalari (savol-javob o'rtasida bosilsa ham ishlaydi, qoralama saqlanib qoladi)

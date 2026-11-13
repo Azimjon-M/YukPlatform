@@ -221,6 +221,8 @@ async function cmdLive() {
     backfill: Number(args.backfill),
     // Bot aloqasiz e'lonni yubormaydi — foydalanuvchi qo'shgan guruhni tekshirishda ham ular sanalmaydi (REQUIRE_CONTACT=0 — sanaladi)
     requireContact: !/^(0|yo'q|yoq|no|false|off)$/i.test(process.env.REQUIRE_CONTACT?.trim() ?? ""),
+    // «🔎 Auto scan» (live.js scanNext): o'zimizning kanal va majburiy a'zolik guruhlari tekshirilmaydi
+    scanExclude: [process.env.CHANNEL_ID, ...String(process.env.REQUIRED_CHATS ?? "").split(/[,\s]+/)].map((x) => String(x ?? "").trim()).filter((x) => /^(@\w+|-?\d+)$/.test(x)),
   };
 
   console.log(

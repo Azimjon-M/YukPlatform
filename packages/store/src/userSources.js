@@ -22,6 +22,8 @@ export function userSourceRow(row) {
     title: row.title ?? null,
     members: row.members ?? null,
     chatType: row.chat_type ?? null, // channel | group
+    account: row.account ?? null, // yopiq guruhni o'qiydigan akkaunt (NULL — asosiy)
+    autoScan: row.auto_scan === 1, // «🔎 Auto scan» qo'shgan (foydalanuvchi o'zi yubormagan)
     checkState: row.check_state ?? null,
     checkAt: row.check_at ?? null,
     checkUntil: row.check_until ?? null,
@@ -37,6 +39,8 @@ export function createUserSourceQueries(db, now) {
     // "@Guruh" yoki "guruh" — katta-kichik harf farqi yo'q (Telegram manzillarida ham yo'q)
     findSource(name) {
       const clean = String(name ?? "").replace(/^@/, "");
+      // Yopiq guruh — raqamli id (akkaunt guruhlarini avtomatik tekshirishdan), @ siz
+      if (/^-?\d+$/.test(clean)) return userSourceRow(byName.get(clean));
       return userSourceRow(byName.get(`@${clean}`));
     },
 
@@ -45,40 +49,63 @@ export function createUserSourceQueries(db, now) {
       const since = now() - 24 * HOUR;
       const one = (sql, ...params) => db.prepare(sql).get(...params).n;
       return {
-        checking: one("SELECT COUNT(*) AS n FROM sources WHERE added_by = ? AND check_state IN ('probe', 'trial')", chatId),
-        today: one("SELECT COUNT(*) AS n FROM sources WHERE added_by = ? AND created_at > ?", chatId, since),
-        all: one("SELECT COUNT(*) AS n FROM sources WHERE added_by IS NOT NULL AND created_at > ?", since),
+        // «🔎 Auto scan» qo'shganlari (auto_scan) foydalanuvchining o'z limitlariga kirmaydi
+        checking: one("SELECT COUNT(*) AS n FROM sources WHERE added_by = ? AND auto_scan IS NULL AND check_state IN ('probe', 'trial')", chatId),
+        today: one("SELECT COUNT(*) AS n FROM sources WHERE added_by = ? AND auto_scan IS NULL AND created_at > ?", chatId, since),
+        all: one("SELECT COUNT(*) AS n FROM sources WHERE added_by IS NOT NULL AND auto_scan IS NULL AND created_at > ?", since),
       };
     },
 
     // Shu odam qo'shgan manbalar (eng yangisi birinchi) — «➕ Guruh qo'shish» xabarida ro'yxat
     userSourcesOf(chatId, { limit = 10 } = {}) {
-      return db.prepare("SELECT * FROM sources WHERE added_by = ? ORDER BY created_at DESC LIMIT ?").all(chatId, limit).map(userSourceRow);
+      return db
+        .prepare("SELECT * FROM sources WHERE added_by = ? AND auto_scan IS NULL ORDER BY created_at DESC LIMIT ?")
+        .all(chatId, limit)
+        .map(userSourceRow);
     },
 
     // Yangi manba (yoki bir hafta oldin rad etilgani qayta yuborildi): «probe» holatida, o'chiq — collector oxirgi
     // xabarlarini ko'rib chiqadi (sourcesToProbe). Boshqa holatdagi mavjud manbaga tegilmaydi → false
-    addUserSource({ name, chatId, title = null, members = null, chatType = null }) {
+    // account — yopiq guruh (name = "-100…"): uni o'qiydigan, foydalanuvchi ulagan akkaunt (2026-11-13); ochig'ida NULL
+    addUserSource({ name, chatId, title = null, members = null, chatType = null, account = null }) {
       const existing = byName.get(name);
       const time = now();
       if (existing && existing.check_state !== "failed") return false;
       if (existing) {
         db.prepare(
           `UPDATE sources SET enabled = 0, added_by = ?, title = ?, members = ?, chat_type = ?, check_state = 'probe', check_at = ?,
-             check_until = NULL, check_note = NULL, check_stats = NULL, check_notified = NULL, created_at = ? WHERE name = ?`,
-        ).run(chatId, title, members, chatType, time, time, existing.name);
+             check_until = NULL, check_note = NULL, check_stats = NULL, check_notified = NULL, created_at = ?, account = ?,
+             auto_scan = NULL WHERE name = ?`,
+        ).run(chatId, title, members, chatType, time, time, account, existing.name);
         return true;
       }
       db.prepare(
-        `INSERT INTO sources (name, enabled, note, created_at, added_by, title, members, chat_type, check_state, check_at)
-         VALUES (?, 0, ?, ?, ?, ?, ?, ?, 'probe', ?)`,
-      ).run(name, "foydalanuvchi qo'shdi", time, chatId, title, members, chatType, time);
+        `INSERT INTO sources (name, enabled, note, created_at, added_by, title, members, chat_type, check_state, check_at, account)
+         VALUES (?, 0, ?, ?, ?, ?, ?, ?, 'probe', ?, ?)`,
+      ).run(name, "foydalanuvchi qo'shdi", time, chatId, title, members, chatType, time, account);
       return true;
     },
 
+    // «🔎 Auto scan» qo'shgan manbani foydalanuvchi o'zi ham yubordi (Azimjon, 2026-11-13: «avval qo'shilgan emas
+    // "qo'shildi" degan ma'noda») — endi u shu odamniki: keyingi natijalar (sinovdan o'tdi / o'chirildi) unga yoziladi.
+    // check_notified = hozirgi holat — «sinovga olindi» ni bot javobining o'zi aytadi, ikkinchi marta yozilmaydi
+    claimScannedSource(name, chatId) {
+      return (
+        db
+          .prepare("UPDATE sources SET added_by = ?, auto_scan = NULL, check_notified = check_state WHERE lower(name) = lower(?) AND auto_scan = 1")
+          .run(chatId, name).changes > 0
+      );
+    },
+
     // Collector: ko'rib chiqilishi kerak bo'lgan manbalar (eskisi birinchi)
-    sourcesToProbe({ limit = 5 } = {}) {
-      return db.prepare("SELECT * FROM sources WHERE check_state = 'probe' ORDER BY check_at LIMIT ?").all(limit).map(userSourceRow);
+    // account: berilmasa — hammasi; null — asosiy akkaunt o'qiydiganlari (ochiq guruhlar); nom — o'sha akkauntniki (yopiq)
+    sourcesToProbe({ limit = 5, account } = {}) {
+      if (account === undefined) {
+        return db.prepare("SELECT * FROM sources WHERE check_state = 'probe' ORDER BY check_at LIMIT ?").all(limit).map(userSourceRow);
+      }
+      const where = account == null ? "account IS NULL" : "account = ?";
+      const params = account == null ? [limit] : [account, limit];
+      return db.prepare(`SELECT * FROM sources WHERE check_state = 'probe' AND ${where} ORDER BY check_at LIMIT ?`).all(...params).map(userSourceRow);
     },
 
     // Oxirgi xabarlarni ko'rib chiqish natijasi (collector, yoki u ishlamasa — bot): ok → sinov boshlanadi (manba yoqiladi,
@@ -140,7 +167,7 @@ export function createUserSourceQueries(db, now) {
     sourceNotices() {
       return db
         .prepare(
-          `SELECT * FROM sources WHERE added_by IS NOT NULL AND check_state IN ('trial', 'ok', 'failed')
+          `SELECT * FROM sources WHERE added_by IS NOT NULL AND auto_scan IS NULL AND check_state IN ('trial', 'ok', 'failed')
              AND (check_notified IS NULL OR check_notified <> check_state) ORDER BY check_at`,
         )
         .all()

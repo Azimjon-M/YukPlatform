@@ -180,8 +180,16 @@ export const getAdminUsers = (params = {}) => request("GET", `/pub/admin/users?$
 export const updateAdminUser = (chatId, body) => request("PATCH", `/pub/admin/users/${chatId}`, { body });
 
 // Collector'ning Telegram akkauntlari va yangi akkaunt qo'shish (raqam → kod → 2FA parol; apps/api tgLogin.js)
-export const getTgAccounts = () => request("GET", "/pub/admin/tg-accounts");
-export const startTgLogin = (name, phone) => request("POST", "/pub/admin/tg-accounts/login", { body: { name, phone } });
-export const sendTgCode = (id, code) => request("POST", `/pub/admin/tg-accounts/login/${encodeURIComponent(id)}/code`, { body: { code } });
-export const sendTgPassword = (id, password) => request("POST", `/pub/admin/tg-accounts/login/${encodeURIComponent(id)}/password`, { body: { password } });
-export const cancelTgLogin = (id) => request("DELETE", `/pub/admin/tg-accounts/login/${encodeURIComponent(id)}`);
+// base: "/pub/admin/tg-accounts" (admin — hammasi) yoki "/pub/me/tg-accounts" (Sozlamalar — faqat o'zinikilar)
+export function tgAccountsApi(base) {
+  const login = (id) => `${base}/login/${encodeURIComponent(id)}`;
+  return {
+    get: () => request("GET", base),
+    start: (name, phone) => request("POST", `${base}/login`, { body: { name, phone } }),
+    code: (id, code) => request("POST", `${login(id)}/code`, { body: { code } }),
+    password: (id, password) => request("POST", `${login(id)}/password`, { body: { password } }),
+    cancel: (id) => request("DELETE", login(id)),
+  };
+}
+export const ADMIN_TG = tgAccountsApi("/pub/admin/tg-accounts");
+export const MY_TG = tgAccountsApi("/pub/me/tg-accounts");

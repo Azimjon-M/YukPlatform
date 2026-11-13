@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MAIN_TG_ACCOUNT, openStore, TG_ACCOUNT_NAME } from "../src/index.js";
+import { hashPhone, MAIN_TG_ACCOUNT, openStore, TG_ACCOUNT_NAME } from "../src/index.js";
 
 const fresh = () => {
   const clock = { t: 1_000 };
@@ -11,6 +11,29 @@ test("akkaunt nomi: kichik lotin harflari, raqam, _ -; asosiy — «asosiy»", (
   assert.equal(MAIN_TG_ACCOUNT, "asosiy");
   for (const name of ["ikkinchi", "dost_1", "a2", "haydovchi-guruh"]) assert.ok(TG_ACCOUNT_NAME.test(name), name);
   for (const name of ["", "a", "Ikkinchi", "1akk", "../x", "nom bilan", "a".repeat(21)]) assert.ok(!TG_ACCOUNT_NAME.test(name), name);
+});
+
+test("hashPhone: format farqi muhim emas, raqamsiz — null, raqamning o'zi chiqmaydi", () => {
+  const h = hashPhone("+998 90 123-45-67");
+  assert.equal(h, hashPhone("998901234567"), "bo'shliq/format bir xil xesh berishi kerak");
+  assert.notEqual(h, hashPhone("+998901234568"), "boshqa raqam — boshqa xesh");
+  assert.equal(hashPhone(""), null);
+  assert.equal(hashPhone(null), null);
+  assert.ok(!h.includes("901234567"), "xeshda raqamning o'zi bo'lmasligi kerak");
+});
+
+test("setTgAccountOwner/setTgAccountPhoneHash: raqam xeshi saqlanadi, keyingi saqlashlar o'chirmaydi", () => {
+  const { store } = fresh();
+  store.setTgAccountOwner("ikkinchi", 500, hashPhone("+998901234567"));
+  assert.equal(store.listTgAccounts().find((a) => a.name === "ikkinchi").phoneHash, hashPhone("998901234567"));
+  // Collector o'z qatorini yozsa ham xesh (va egasi) saqlanib qoladi
+  store.saveTgAccount("ikkinchi", { userId: "77", status: "ok" });
+  const row = store.listTgAccounts().find((a) => a.name === "ikkinchi");
+  assert.equal(row.phoneHash, hashPhone("998901234567"));
+  assert.equal(row.addedBy, 500);
+  // Egasi yo'q (admin qo'shgan) akkaunt uchun faqat xesh
+  store.setTgAccountPhoneHash("uchinchi", hashPhone("+998901110022"));
+  assert.equal(store.listTgAccounts().find((a) => a.name === "uchinchi").phoneHash, hashPhone("998901110022"));
 });
 
 test("saveTgAccount: kim va holati; berilmagan maydon o'zgarmaydi; asosiy ro'yxatda birinchi", () => {

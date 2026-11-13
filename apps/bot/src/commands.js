@@ -18,6 +18,8 @@ export const COMMANDS = [
   { command: "raqam", description: "Telefon raqamni ulashish (ixtiyoriy)" },
   // = menyudagi «➕ Guruh qo'shish» (Azimjon, 2026-11-10: buyrug'i /guruh_qoshish). Raqamsiz odamga — avval raqam
   { command: "guruh_qoshish", description: "Yuk guruhi yoki kanali qo'shish" },
+  // Sozlamalardagi «📡 Telegram akkauntlarim» — Mini App'ni shu bo'limga ochadi (Azimjon, 2026-11-13)
+  { command: "account_qosh", description: "Telegram akkauntimni ulash (yopiq guruhlar uchun)" },
   { command: "ilovalar", description: "Telefon ilovalari" },
   { command: "ochirish", description: "Ma'lumotlarimni o'chirish" },
   { command: "yordam", description: "Yordam" },

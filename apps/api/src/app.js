@@ -273,7 +273,11 @@ export function createApp({
   api.get("/drivers/:chatId", (req, res) => {
     const details = store.driverDetails(Number(req.params.chatId));
     if (!details) throw httpError(404, "Haydovchi topilmadi");
-    res.json(details);
+    // Mini App'dan ulagan Telegram akkauntlari — «🔎 Auto scan» shu yerdan ham (2026-11-13)
+    const tgAccounts = (store.listTgAccounts?.() ?? [])
+      .filter((a) => a.addedBy === Number(req.params.chatId))
+      .map((a) => ({ ...a, scan: store.dialogScanSummary(a.name) }));
+    res.json({ ...details, tgAccounts });
   });
 
   // Butunlay o'chirish — odam shaxsiy ma'lumotini o'chirishni talab qilsa (o'zi botda o'chirsa ham ma'lumot qoladi):
@@ -380,7 +384,7 @@ export function createApp({
     for (const s of sources) perAccount[s.account ?? MAIN_TG_ACCOUNT] = (perAccount[s.account ?? MAIN_TG_ACCOUNT] ?? 0) + 1;
     const collector = processes.list().find((p) => p.name === "collector") ?? null;
     res.json({
-      accounts: (store.listTgAccounts?.() ?? []).map((a) => ({ ...a, sources: perAccount[a.name] ?? 0 })),
+      accounts: (store.listTgAccounts?.() ?? []).map((a) => ({ ...a, sources: perAccount[a.name] ?? 0, scan: store.dialogScanSummary?.(a.name) ?? null })),
       dialogs: (store.tgDialogs?.() ?? []).map((d) => ({
         ...d,
         added: byName.get(d.peerId) ?? (d.username ? (byName.get(`@${d.username.toLowerCase()}`) ?? null) : null),
@@ -390,6 +394,17 @@ export function createApp({
       refreshRequestedAt: store.dialogsRefreshRequest?.() ?? null,
       collector: collector ? { status: collector.status } : null,
     });
+  });
+
+  // «🔎 Auto scan» (2026-11-13): shu akkauntning hali manba bo'lmagan guruh/kanallari «➕ Guruh qo'shish» tekshiruvidan
+  // o'tadi (collector live.js scanNext, 30 soniyada bittadan, shu akkaunt bilan); o'tgani — 24 soatlik sinovga.
+  // Akkaunt egasiga xabar yuborilmaydi. Navbat tugaguncha qayta bosish — shunchaki davom etadi
+  api.post("/tg-accounts/:name/scan", (req, res) => {
+    const account = (store.listTgAccounts?.() ?? []).find((a) => a.name === req.params.name);
+    if (!account) throw httpError(404, "Bunday akkaunt yo'q");
+    if (account.status !== "ok") throw httpError(409, "Akkaunt hozir ishlamayapti — u ulangach tekshiriladi");
+    if (!account.scanRequestedAt) store.requestAccountScan(account.name);
+    res.json({ scan: store.dialogScanSummary(account.name) });
   });
 
   // «Ro'yxatni yangilash»: ishlab turgan collector har akkaunt guruhlarini 1 daqiqa ichida qayta oladi

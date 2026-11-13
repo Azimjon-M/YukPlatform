@@ -9,7 +9,7 @@
 // tarixida qolardi. Mini App — oddiy web sahifa: kod va parol HTTPS orqali shu serverga, undan Telegram'ga ketadi.
 //
 // Kirishning o'zi alohida jarayonda (apps/collector/src/loginWorker.js, IPC): GramJS xatosi serverni yiqitmaydi.
-// Bir vaqtda bitta kirish. Holat server xotirasida: Mini App yopilib qayta ochilsa (bitta telefonda kodni ko'rish uchun
+// Har foydalanuvchida bir vaqtda bitta kirish (bir nechta foydalanuvchi — parallel). Holat server xotirasida: Mini App yopilib qayta ochilsa (bitta telefonda kodni ko'rish uchun
 // Telegram'da boshqa akkauntga o'tib, qaytib kelsa) — shu bosqichdan davom etadi. 15 daqiqa harakatsiz — bekor.
 // Kod va parol hech qayerga yozilmaydi va javobga qaytmaydi; raqam javobda yashirilgan (+998 90 ••• •• 67).
 import { fork } from "node:child_process";
@@ -19,7 +19,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { devCollectorProblem } from "@yuk/shared";
-import { MAIN_TG_ACCOUNT, TG_ACCOUNT_NAME } from "@yuk/store";
+import { hashPhone, MAIN_TG_ACCOUNT, TG_ACCOUNT_NAME } from "@yuk/store";
 
 const COLLECTOR = fileURLToPath(new URL("../../collector/", import.meta.url));
 const WORKER = path.join(COLLECTOR, "src/loginWorker.js");
@@ -29,7 +29,13 @@ const SESSIONS_DIR = path.join(COLLECTOR, "sessions");
 const MINUTE = 60_000;
 export const STEP_TIMEOUT_MS = 90_000; // Telegram shu vaqtda javob bermasa — kirish bekor
 export const IDLE_MS = 15 * MINUTE; // kod/parol shu vaqtda kiritilmasa — bekor (Telegram kodi ham eskiradi)
-export const STARTS_PER_HOUR = 5; // kod so'rash: Telegram ko'p so'ralgan raqamni va API kalitini bloklaydi
+export const STARTS_PER_HOUR = 5; // kod so'rash (adminlar): Telegram ko'p so'ralgan raqamni va API kalitini bloklaydi
+// Oddiy foydalanuvchilar (Sozlamalar → «Telegram akkauntlarim», 2026-11-13): har biriga alohida va hammasiga birga chegara —
+// bitta odam adminlarning limitini ham, boshqalarnikini ham yeb qo'ya olmaydi
+export const USER_STARTS_PER_HOUR = 3;
+export const USERS_STARTS_PER_HOUR = 10;
+export const USER_MAX_ACCOUNTS = 3; // bir foydalanuvchi nechta akkaunt ulay oladi
+export const MAX_USER_LOGINS = 3; // bir vaqtda nechta foydalanuvchi kirishi davom etishi mumkin (har biri — alohida jarayon)
 const ACTIVE = new Set(["sending", "code", "checking", "password"]);
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
@@ -77,6 +83,12 @@ function spawnWorker({ log }) {
 
 // store — @yuk/store (listTgAccounts). spawn({ log }) → child (send, kill, on("message"|"exit")) — testda soxtasi.
 // sessionExists(nom) — sessions/<nom>.session bormi
+// Oddiy foydalanuvchi akkauntining nomi — server o'zi beradi: "u" + chat id (36-lik) + "-" + tartib raqami.
+// Foydalanuvchi nom tanlay olmaydi: aks holda boshqa birovning sessiya fayli nomini yozib, ustidan yozishga urinardi
+export function userAccountName(chatId, n) {
+  return `u${Math.abs(Number(chatId)).toString(36)}-${n}`;
+}
+
 export function createTgLogin({
   store,
   env = process.env,
@@ -86,13 +98,19 @@ export function createTgLogin({
   stepTimeoutMs = STEP_TIMEOUT_MS,
   idleMs = IDLE_MS,
   startsPerHour = STARTS_PER_HOUR,
+  userStartsPerHour = USER_STARTS_PER_HOUR,
+  usersStartsPerHour = USERS_STARTS_PER_HOUR,
+  userMaxAccounts = USER_MAX_ACCOUNTS,
+  maxUserLogins = MAX_USER_LOGINS,
   log = console.log,
 } = {}) {
-  let login = null; // { id, name, phone, step, via, codeLength, hint, error, user, by, startedAt, expiresAt, child, pending }
-  let idleTimer = null;
-  const starts = []; // kod so'ralgan vaqtlar (oxirgi soat)
+  // id → { id, name, phone, step, via, codeLength, hint, error, user, by, mine, startedAt, expiresAt, child, pending, timer }
+  // mine — oddiy foydalanuvchi o'zi uchun boshlagan (Sozlamalar); aks holda — admin («🛠 Boshqaruv»)
+  const logins = new Map();
+  const starts = { admin: [], users: [] }; // kod so'ralgan vaqtlar (oxirgi soat); har foydalanuvchiniki — perUser
+  const perUser = new Map();
 
-  const view = () =>
+  const view = (login) =>
     login && {
       id: login.id,
       name: login.name,
@@ -108,7 +126,7 @@ export function createTgLogin({
       expiresAt: login.expiresAt,
     };
 
-  function stopChild(target = login) {
+  function stopChild(target) {
     const child = target?.child;
     if (!child) return;
     target.child = null;
@@ -121,31 +139,37 @@ export function createTgLogin({
     timer.unref?.();
   }
 
-  function fail(message) {
-    if (!login) return;
-    login.step = "failed";
-    login.error = message;
-    touch(); // xato matni yana 15 daqiqa ko'rinib tursin (Mini App qayta ochilsa ham)
-    stopChild();
+  function fail(target, message) {
+    if (logins.get(target.id) !== target) return;
+    target.step = "failed";
+    target.error = message;
+    touch(target); // xato matni yana 15 daqiqa ko'rinib tursin (Mini App qayta ochilsa ham)
+    stopChild(target);
   }
 
-  // Muddati o'tgan kirish: davom etayotgan bo'lsa — bekor, tugaganini esa ro'yxatdan olib tashlaymiz
+  function drop(target) {
+    logins.delete(target.id);
+    clearTimeout(target.timer);
+  }
+
+  // Muddati o'tgan kirishlar: davom etayotgani — bekor, tugaganlari esa ro'yxatdan olib tashlanadi
   function sweep() {
-    if (!login || now() < login.expiresAt || login.pending) return;
-    if (ACTIVE.has(login.step)) fail(`${Math.round(idleMs / MINUTE)} daqiqa ichida tugatilmadi — qaytadan boshlang`);
-    else login = null;
+    for (const target of [...logins.values()]) {
+      if (now() < target.expiresAt || target.pending) continue;
+      if (ACTIVE.has(target.step)) fail(target, `${Math.round(idleMs / MINUTE)} daqiqa ichida tugatilmadi — qaytadan boshlang`);
+      else drop(target);
+    }
   }
 
-  function touch() {
-    login.expiresAt = now() + idleMs;
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(sweep, idleMs + 1000);
-    idleTimer.unref?.();
+  function touch(target) {
+    target.expiresAt = now() + idleMs;
+    clearTimeout(target.timer);
+    target.timer = setTimeout(sweep, idleMs + 1000);
+    target.timer.unref?.();
   }
 
   // Worker'ga bitta so'rov va uning bitta javobi (yoki vaqt tugashi / jarayon yiqilishi)
-  function ask(message) {
-    const target = login;
+  function ask(target, message) {
     return new Promise((resolve) => {
       const timer = setTimeout(() => target.pending?.({ type: "timeout" }), stepTimeoutMs);
       timer.unref?.();
@@ -163,7 +187,7 @@ export function createTgLogin({
   }
 
   function apply(target, reply) {
-    if (login !== target) return; // shu orada bekor qilingan
+    if (logins.get(target.id) !== target) return; // shu orada bekor qilingan
     target.error = null;
     switch (reply?.type) {
       case "code":
@@ -175,26 +199,34 @@ export function createTgLogin({
       case "done":
         Object.assign(target, { step: "done", user: reply.user ?? null });
         target.child = null; // worker o'zi tugaydi
-        log(`Telegram akkaunt qo'shildi: «${target.name}» (Mini App, admin ${target.by})`);
+        // Kim qo'shgani — Sozlamalarda har kim faqat o'zinikini ko'rishi uchun; raqam xeshi — keyingi dublikatni erta to'xtatish uchun
+        if (target.by != null) store.setTgAccountOwner?.(target.name, target.by, target.phoneHash);
+        else store.setTgAccountPhoneHash?.(target.name, target.phoneHash);
+        log(`Telegram akkaunt qo'shildi: «${target.name}» (Mini App, ${target.mine ? "foydalanuvchi" : "admin"} ${target.by})`);
         break;
       case "error":
         // retry — noto'g'ri kod/parol: shu bosqich qoladi, xato matni ko'rsatiladi
         if (reply.retry && target.step === "checking") Object.assign(target, { step: target.lastStep, error: reply.message });
-        else fail(reply.message);
+        else fail(target, reply.message);
         break;
       case "timeout":
-        fail(`Telegram ${Math.round(stepTimeoutMs / 1000)} soniyada javob bermadi — qaytadan urinib ko'ring`);
+        fail(target, `Telegram ${Math.round(stepTimeoutMs / 1000)} soniyada javob bermadi — qaytadan urinib ko'ring`);
         break;
       default:
-        fail("Kirish jarayoni kutilmaganda to'xtadi — qaytadan urinib ko'ring");
+        fail(target, "Kirish jarayoni kutilmaganda to'xtadi — qaytadan urinib ko'ring");
     }
   }
 
-  function ongoing(id) {
+  // Shu odamning kirishi. by berilmasa (admin yo'li, eski chaqiruvlar) — istalgani
+  const owns = (target, by) => by === undefined || target.by === by;
+  const latestOf = (by) => [...logins.values()].filter((t) => owns(t, by)).at(-1) ?? null;
+
+  function ongoing(id, by) {
     sweep();
-    if (!login || login.id !== id) throw httpError(404, "Bu kirish endi yo'q (bekor qilingan yoki muddati o'tgan) — qaytadan boshlang");
-    if (login.pending) throw httpError(409, "Oldingi so'rov hali tugamadi — bir oz kuting");
-    return login;
+    const target = logins.get(id);
+    if (!target || !owns(target, by)) throw httpError(404, "Bu kirish endi yo'q (bekor qilingan yoki muddati o'tgan) — qaytadan boshlang");
+    if (target.pending) throw httpError(409, "Oldingi so'rov hali tugamadi — bir oz kuting");
+    return target;
   }
 
   // Serverda kirish mumkinmi: null — mumkin, aks holda — nega emas (Mini App shuni ko'rsatadi)
@@ -206,47 +238,103 @@ export function createTgLogin({
     return null;
   }
 
-  async function step(id, expected, message) {
-    const target = ongoing(id);
+  async function step(id, by, expected, message) {
+    const target = ongoing(id, by);
     if (target.step !== expected) throw httpError(409, "Bu bosqich allaqachon o'tgan — sahifani yangilang");
     target.lastStep = expected;
     target.step = "checking";
-    touch();
-    apply(target, await ask(message));
-    return view();
+    touch(target);
+    apply(target, await ask(target, message));
+    return view(target);
+  }
+
+  // Soatlik chegara: list — vaqtlar ro'yxati (eskilari tashlanadi); to'lgan bo'lsa — 429
+  function within(list, limit, text) {
+    while (list.length && now() - list[0] > 60 * MINUTE) list.shift();
+    if (list.length >= limit) throw httpError(429, text);
+  }
+
+  // Oddiy foydalanuvchi: nom — o'zining yangi nomi yoki o'zi qo'shgan (sessiyasi yo'qolgan) akkaunt nomi
+  function userName(requested, by) {
+    const own = store.listTgAccounts().filter((a) => a.addedBy === Number(by));
+    if (requested) {
+      const row = own.find((a) => a.name === String(requested).trim().toLowerCase());
+      if (!row) throw httpError(404, "Bunday akkauntingiz yo'q");
+      return row.name;
+    }
+    const working = own.filter((a) => a.status !== "logged_out");
+    if (working.length >= userMaxAccounts) throw httpError(409, `Bitta foydalanuvchi ko'pi bilan ${userMaxAccounts} ta akkaunt ulay oladi`);
+    const busy = new Set([...store.listTgAccounts().map((a) => a.name), ...[...logins.values()].map((t) => t.name)]);
+    for (let n = 1; ; n++) {
+      const name = userAccountName(by, n);
+      if (!busy.has(name) && !sessionExists(name)) return name;
+    }
   }
 
   return {
     unavailable,
 
-    current() {
+    // by berilsa — shu odamning kirishi (Sozlamalar), aks holda — oxirgisi (admin «🛠 Boshqaruv»)
+    current(by) {
       sweep();
-      return view();
+      return view(latestOf(by));
     },
 
-    // { name, phone, by } → kod yuborilgan holat (yoki xato bilan «failed»). Tekshiruv xatolari — 400/409/429
-    async start({ name, phone, by = null } = {}) {
+    // { name, phone, by, mine } → kod yuborilgan holat (yoki xato bilan «failed»). Tekshiruv xatolari — 400/404/409/429.
+    // mine — oddiy foydalanuvchi: nomni server beradi (name — faqat o'z akkauntiga qayta kirish uchun)
+    async start({ name, phone, by = null, mine = false } = {}) {
       const problem = unavailable();
       if (problem) throw httpError(409, problem);
+      if (mine && by == null) throw httpError(401, "Kirish kerak");
       sweep();
-      if (login && ACTIVE.has(login.step)) {
-        throw httpError(409, `«${login.name}» akkauntiga kirish davom etyapti — avval uni tugating yoki «Bekor qilish» ni bosing`);
+      const previous = [...logins.values()].find((t) => t.by === by);
+      if (previous && ACTIVE.has(previous.step)) {
+        throw httpError(409, `«${previous.name}» akkauntiga kirish davom etyapti — avval uni tugating yoki «Bekor qilish» ni bosing`);
       }
-      const account = String(name ?? "").trim().toLowerCase();
-      if (account === MAIN_TG_ACCOUNT) throw httpError(400, `«${MAIN_TG_ACCOUNT}» — asosiy akkaunt nomi. Qo'shimcha akkauntga boshqa nom bering, masalan: ikkinchi`);
-      if (!TG_ACCOUNT_NAME.test(account)) throw httpError(400, "Nom kichik lotin harfi bilan boshlansin: 2–20 belgi (harf, raqam, _ yoki -). Masalan: ikkinchi");
+      if (mine && [...logins.values()].filter((t) => t.mine && ACTIVE.has(t.step)).length >= maxUserLogins) {
+        throw httpError(429, "Hozir boshqa foydalanuvchilar ham akkaunt ulayapti — bir necha daqiqadan keyin urinib ko'ring");
+      }
+
+      let account;
+      if (mine) account = userName(name, by);
+      else {
+        account = String(name ?? "").trim().toLowerCase();
+        if (account === MAIN_TG_ACCOUNT) throw httpError(400, `«${MAIN_TG_ACCOUNT}» — asosiy akkaunt nomi. Qo'shimcha akkauntga boshqa nom bering, masalan: ikkinchi`);
+        if (!TG_ACCOUNT_NAME.test(account)) throw httpError(400, "Nom kichik lotin harfi bilan boshlansin: 2–20 belgi (harf, raqam, _ yoki -). Masalan: ikkinchi");
+      }
       const row = store.listTgAccounts().find((a) => a.name === account);
       // Ishlab turgan akkauntning sessiyasi ustidan yozilmaydi; sessiyasi yo'qolgan (logged_out …) — qayta kirsa bo'ladi
       if (sessionExists(account) && (!row || row.status === "ok")) {
         throw httpError(409, `«${account}» nomli akkaunt allaqachon ulangan — boshqa nom tanlang`);
       }
+      if ([...logins.values()].some((t) => t.name === account && t.by !== by && ACTIVE.has(t.step))) {
+        throw httpError(409, `«${account}» nomli akkauntga hozir boshqa kirish davom etyapti`);
+      }
       const number = normalizeLoginPhone(phone);
       if (!number) throw httpError(400, "Telefon raqam tushunarsiz. Masalan: +998 90 123 45 67");
-      while (starts.length && now() - starts[0] > 60 * MINUTE) starts.shift();
-      if (starts.length >= startsPerHour) {
-        throw httpError(429, `Bir soatda ${startsPerHour} marta kod so'raldi — Telegram bloklamasligi uchun birozdan keyin urinib ko'ring`);
+
+      // Shu telefon raqamli akkaunt allaqachon collectorga ulangan bo'lsa — kod/parol so'ramasdan, yangi (dublikat) sessiya
+      // ochilmasdan rad etamiz. Raqamning o'zi emas, xeshi solishtiriladi (hashPhone). Faqat BOSHQA nom bilan ishlab
+      // turgan (ok/error) akkaunt to'xtatadi; sessiyasi yo'qolgani (logged_out) yoki o'z nomiga qayta kirish — mumkin.
+      const phoneHash = hashPhone(number);
+      const already = store.listTgAccounts().find((a) => a.phoneHash && a.phoneHash === phoneHash && a.name !== account && ["ok", "error"].includes(a.status));
+      if (already) throw httpError(409, `Bu raqam allaqachon «${already.name}» nomi bilan ulangan — ikkinchi marta ulanmaydi`);
+      // Hozir boshqa nom bilan shu raqamga kirish ketayotgan bo'lsa (xotiradagi davom etayotgan kirishlar)
+      if ([...logins.values()].some((t) => t.phoneHash === phoneHash && ACTIVE.has(t.step))) {
+        throw httpError(409, "Bu raqamga hozir boshqa kirish davom etyapti");
       }
-      starts.push(now());
+
+      const wait = "Telegram bloklamasligi uchun birozdan keyin urinib ko'ring";
+      if (mine) {
+        if (!perUser.has(by)) perUser.set(by, []);
+        within(perUser.get(by), userStartsPerHour, `Bir soatda ${userStartsPerHour} marta kod so'radingiz — ${wait}`);
+        within(starts.users, usersStartsPerHour, `Hozir juda ko'p kod so'ralgan — ${wait}`);
+        perUser.get(by).push(now());
+        starts.users.push(now());
+      } else {
+        within(starts.admin, startsPerHour, `Bir soatda ${startsPerHour} marta kod so'raldi — ${wait}`);
+        starts.admin.push(now());
+      }
 
       // Ishlab turgan akkauntlar: bir akkaunt ikki nom bilan ulanmasin (worker tekshiradi)
       const taken = Object.fromEntries(
@@ -255,10 +343,12 @@ export function createTgLogin({
           .filter((a) => a.userId && ["ok", "error"].includes(a.status))
           .map((a) => [a.userId, a.name]),
       );
+      if (previous) drop(previous); // shu odamning tugagan (done/failed) kirishi o'rniga yangisi
       const target = {
         id: randomUUID(),
         name: account,
         phone: maskPhone(number),
+        phoneHash, // raqamning xeshi: kirish tugaganda saqlanadi, in-flight dublikat tekshiruvi uchun ham
         step: "sending",
         via: null,
         codeLength: null,
@@ -266,49 +356,52 @@ export function createTgLogin({
         error: null,
         user: null,
         by,
+        mine,
         startedAt: now(),
         expiresAt: now() + idleMs,
         child: null,
         pending: null,
+        timer: null,
       };
-      login = target;
-      touch();
+      logins.set(target.id, target);
+      touch(target);
       try {
         target.child = spawn({ log });
       } catch (error) {
-        fail(`Kirish jarayonini ochib bo'lmadi: ${error.message}`);
-        return view();
+        fail(target, `Kirish jarayonini ochib bo'lmadi: ${error.message}`);
+        return view(target);
       }
       target.child.on("message", (reply) => target.pending?.(reply));
       target.child.on("exit", (code) => {
         const was = target.child;
         target.child = null;
         if (target.pending) target.pending({ type: "crash", code });
-        else if (was && login === target && ACTIVE.has(target.step)) fail("Kirish jarayoni kutilmaganda to'xtadi — qaytadan urinib ko'ring");
+        else if (was && logins.get(target.id) === target && ACTIVE.has(target.step)) fail(target, "Kirish jarayoni kutilmaganda to'xtadi — qaytadan urinib ko'ring");
       });
       target.child.on("error", () => {}); // «exit» baribir keladi
-      apply(target, await ask({ type: "start", name: account, phone: number, taken }));
-      return view();
+      apply(target, await ask(target, { type: "start", name: account, phone: number, taken }));
+      return view(target);
     },
 
-    async code(id, input) {
+    // by — oddiy foydalanuvchi yo'lida: faqat o'z kirishi (boshqaning id'si — 404)
+    async code(id, input, by) {
       const code = cleanCode(input);
       if (!code) throw httpError(400, "Kodni kiriting — Telegram yuborgan raqamlar");
-      return step(id, "code", { type: "code", code });
+      return step(id, by, "code", { type: "code", code });
     },
 
-    async password(id, input) {
+    async password(id, input, by) {
       const password = typeof input === "string" ? input : "";
       if (!password) throw httpError(400, "Parolni kiriting");
       if (password.length > 256) throw httpError(400, "Parol juda uzun");
-      return step(id, "password", { type: "password", password });
+      return step(id, by, "password", { type: "password", password });
     },
 
     // «Bekor qilish» / «Yopish»: davom etayotgan kirish to'xtatiladi, tugagani ro'yxatdan olinadi
-    cancel(id) {
-      if (!login || login.id !== id) return false;
-      const target = login;
-      login = null;
+    cancel(id, by) {
+      const target = logins.get(id);
+      if (!target || !owns(target, by)) return false;
+      drop(target);
       target.pending?.({ type: "cancelled" });
       stopChild(target);
       return true;
@@ -316,9 +409,11 @@ export function createTgLogin({
 
     // Server to'xtayapti
     close() {
-      clearTimeout(idleTimer);
-      if (login) stopChild(login);
-      login = null;
+      for (const target of logins.values()) {
+        clearTimeout(target.timer);
+        stopChild(target);
+      }
+      logins.clear();
     },
   };
 }

@@ -236,7 +236,7 @@ export function createAdminQueries(db, now) {
         ai: `${one("SELECT COUNT(*), MAX(updated_at) FROM ai_slots")}|${one("SELECT COUNT(*), MAX(id), SUM(enabled) FROM ai_keys")}`,
         sources: `${one(
           "SELECT COUNT(*), SUM(enabled), SUM(joined), SUM(poll_ms), SUM(watch = 'tops'), SUM(join_state IS NOT NULL), MAX(join_at), MAX(check_at), COUNT(check_state), COUNT(account) FROM sources",
-        )}|${one("SELECT COUNT(*), MAX(updated_at) FROM tg_accounts")}`,
+        )}|${one("SELECT COUNT(*), MAX(updated_at) FROM tg_accounts")}|${one("SELECT COUNT(*), MAX(at) FROM dialog_scans")}`,
       };
     },
 

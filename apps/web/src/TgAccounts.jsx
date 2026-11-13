@@ -5,28 +5,29 @@
 // boshqa akkauntga o'tib, qaytib «🛠 Boshqaruv» ni qayta ochsa — shu bosqichdan davom etadi.
 // Kod va parol faqat shu yerga yoziladi: chatga yozilgan kodni Telegram bekor qiladi, parol chat tarixida qolardi.
 import { useCallback, useEffect, useState } from "react";
-import { cancelTgLogin, getTgAccounts, sendTgCode, sendTgPassword, startTgLogin } from "./api.js";
+import { ADMIN_TG, MY_TG } from "./api.js";
 import { confirmAction, haptic } from "./telegram.js";
 import { Notice, Spinner } from "./ui.jsx";
-import { ACTIVE_STEPS, accountError, accountLabel, accountStatus, accountWho, codeWhere, suggestAccountName } from "./tgAccounts.js";
+import { ACTIVE_STEPS, accountError, accountLabel, accountStatus, accountWho, codeWhere, scanText, suggestAccountName } from "./tgAccounts.js";
 
 const POLL_MS = 10_000; // yangi akkaunt collector'ga ulanganini ko'rish uchun (≤ 30 s)
 
-function AccountRow({ account, onRelogin }) {
+function AccountRow({ account, mine, onRelogin }) {
   const status = accountStatus(account);
   const who = accountWho(account);
   return (
     <article className="user">
       <div className="user-head">
-        <strong>{accountLabel(account.name)}</strong>
+        <strong>{mine ? accountWho(account) || "Telegram akkaunt" : accountLabel(account.name)}</strong>
         <span className={`tag${status.problem ? " tag-bad" : ""}`}>
           {status.icon} {status.label}
         </span>
       </div>
       <p className="muted small">
-        {who ? `${who} · ` : ""}
+        {who && !mine ? `${who} · ` : ""}
         {account.dialogs} ta guruh/kanalga a'zo · {account.sources} ta manbani o'qiydi
       </p>
+      {scanText(account.scan) && <p className="muted small">{scanText(account.scan)}</p>}
       {status.problem && accountError(account) && <p className="error small">{accountError(account)}</p>}
       {status.hint && <p className="muted small">{status.hint}</p>}
       {status.relogin && (
@@ -41,7 +42,7 @@ function AccountRow({ account, onRelogin }) {
 }
 
 // Yangi kirish: nom + raqam
-function StartForm({ initial, busy, error, onSubmit, onCancel }) {
+function StartForm({ initial, mine, busy, error, onSubmit, onCancel }) {
   const [name, setName] = useState(initial.name);
   const [phone, setPhone] = useState("");
   return (
@@ -52,20 +53,26 @@ function StartForm({ initial, busy, error, onSubmit, onCancel }) {
         onSubmit(name.trim().toLowerCase(), phone);
       }}
     >
-      <h2>➕ Yangi Telegram akkaunt</h2>
+      <h2>{mine && name ? `🔑 «${name}» — qayta kirish` : "➕ Yangi Telegram akkaunt"}</h2>
       <p className="hint">Collector shu akkaunt bilan u a'zo bo'lgan guruhlarni (yopiqlarini ham) o'qiydi. Shaxsiy akkauntingizni emas — alohida raqamdagisini qo'shing.</p>
-      <label className="field">
-        <span>Nom</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ikkinchi" autoCapitalize="none" autoCorrect="off" spellCheck="false" maxLength={20} />
-      </label>
-      <p className="hint tg-under">Ro'yxatda shu nom bilan ko'rinadi: kichik lotin harflari, raqam, _ yoki -.</p>
+      {mine ? (
+        <p className="hint">⚠️ Akkaunt sessiyasi serverimizda saqlanadi: u orqali guruhlardagi e'lonlar o'qiladi. Istalgan vaqtda Telegram'da «Sozlamalar → Qurilmalar» dan bu seansni yopib, ulanishni bekor qilasiz.</p>
+      ) : (
+        <>
+          <label className="field">
+            <span>Nom</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ikkinchi" autoCapitalize="none" autoCorrect="off" spellCheck="false" maxLength={20} />
+          </label>
+          <p className="hint tg-under">Ro'yxatda shu nom bilan ko'rinadi: kichik lotin harflari, raqam, _ yoki -.</p>
+        </>
+      )}
       <label className="field">
         <span>Raqami</span>
         <input type="tel" inputMode="tel" autoComplete="off" placeholder="+998 90 123 45 67" value={phone} onChange={(e) => setPhone(e.target.value)} />
       </label>
       {error && <p className="error">{error}</p>}
       <div className="account-actions tg-actions">
-        <button type="submit" className="primary" disabled={busy || !name.trim() || !phone.trim()}>
+        <button type="submit" className="primary" disabled={busy || (!mine && !name.trim()) || !phone.trim()}>
           {busy ? "Yuborilyapti…" : "📨 Kod yuborish"}
         </button>
         <button type="button" className="secondary" disabled={busy} onClick={onCancel}>
@@ -123,7 +130,7 @@ function CodeStep({ login, busy, error, onSubmit, onCancel }) {
         <ol>
           <li>Telegram'da o'sha akkauntga o'ting (Android — chap menyu; iPhone — pastdagi «Sozlamalar» ni bosib turing).</li>
           <li>«Telegram» chatidagi kodni nusxalang.</li>
-          <li>Shu akkauntga qaytib, botda «🛠 Boshqaruv» ni qayta oching — shu yerdan davom etasiz (15 daqiqa ichida).</li>
+          <li>Shu akkauntga qaytib, ilovada shu bo'limni qayta oching — shu yerdan davom etasiz (15 daqiqa ichida).</li>
         </ol>
       </details>
       <p className="hint">⚠️ Kodni faqat shu yerga yozing — hech kimga va hech qanday chatga yubormang: chatga yozilgan kodni Telegram bekor qiladi.</p>
@@ -150,7 +157,10 @@ function PasswordStep({ login, busy, error, onSubmit, onCancel }) {
   );
 }
 
-export function TgAccounts({ onAuthLost }) {
+// mine — Sozlamalardagi «Telegram akkauntlarim» (istalgan foydalanuvchi, faqat o'zi qo'shganlari, nomni server beradi);
+// aks holda — admin «🛠 Boshqaruv» (collector'ning hamma akkauntlari)
+export function TgAccounts({ onAuthLost, mine = false }) {
+  const api = mine ? MY_TG : ADMIN_TG;
   const [data, setData] = useState(null); // { accounts, login, unavailable }
   const [loadError, setLoadError] = useState(null);
   const [form, setForm] = useState(null); // { name } — «Yangi akkaunt» formasi ochiq
@@ -159,13 +169,13 @@ export function TgAccounts({ onAuthLost }) {
 
   const load = useCallback(async () => {
     try {
-      setData(await getTgAccounts());
+      setData(await api.get());
       setLoadError(null);
     } catch (e) {
       if (e.code === "auth") onAuthLost();
       setLoadError(e);
     }
-  }, [onAuthLost]);
+  }, [api, onAuthLost]);
 
   useEffect(() => {
     load();
@@ -223,12 +233,12 @@ export function TgAccounts({ onAuthLost }) {
   const active = login && ACTIVE_STEPS.has(login.step);
   const openForm = (name) => {
     setError(null);
-    setForm({ name: name ?? suggestAccountName(data.accounts) });
+    setForm({ name: name ?? (mine ? "" : suggestAccountName(data.accounts)) });
   };
   const cancel = async () => {
     if (active && !(await confirmAction("Kirish bekor qilinsinmi? Kod kelgan bo'lsa ham ishlatilmaydi."))) return;
     setError(null);
-    await act(() => cancelTgLogin(login.id).then(() => ({ login: null })));
+    await act(() => api.cancel(login.id).then(() => ({ login: null })));
   };
 
   let panel;
@@ -237,9 +247,10 @@ export function TgAccounts({ onAuthLost }) {
       <StartForm
         key={form.name}
         initial={form}
+        mine={mine}
         busy={busy}
         error={error}
-        onSubmit={(name, phone) => act(() => startTgLogin(name, phone), { closeForm: true })}
+        onSubmit={(name, phone) => act(() => api.start(name || null, phone), { closeForm: true })}
         onCancel={() => {
           setForm(null);
           setError(null);
@@ -247,10 +258,10 @@ export function TgAccounts({ onAuthLost }) {
       />
     );
   } else if (login?.step === "code") {
-    panel = <CodeStep key={`code-${login.id}`} login={login} busy={busy} error={error ?? login.error} onSubmit={(code) => act(() => sendTgCode(login.id, code))} onCancel={cancel} />;
+    panel = <CodeStep key={`code-${login.id}`} login={login} busy={busy} error={error ?? login.error} onSubmit={(code) => act(() => api.code(login.id, code))} onCancel={cancel} />;
   } else if (login?.step === "password") {
     panel = (
-      <PasswordStep key={`pw-${login.id}`} login={login} busy={busy} error={error ?? login.error} onSubmit={(password) => act(() => sendTgPassword(login.id, password))} onCancel={cancel} />
+      <PasswordStep key={`pw-${login.id}`} login={login} busy={busy} error={error ?? login.error} onSubmit={(password) => act(() => api.password(login.id, password))} onCancel={cancel} />
     );
   } else if (active) {
     // Boshqa oynada so'rov ketyapti (kod yuborilyapti / tekshirilyapti)
@@ -266,10 +277,12 @@ export function TgAccounts({ onAuthLost }) {
         <h2>✅ «{login.name}» qo'shildi</h2>
         <p>{who ? `${who} akkauntiga kirildi.` : "Akkauntga kirildi."} Collector uni 30 soniya ichida o'qishga ulaydi — yuqoridagi ro'yxatda «✅ ishlayapti» bo'ladi.</p>
         <p className="hint">
-          Yopiq guruhni o'qitish: shu akkauntni guruhga qo'shing (guruh a'zosi qo'shadi), keyin kompyuterdagi boshqaruv markazida «Manbalar» → «Yopiq guruh qo'shish».
+          {mine
+            ? "Bu akkaunt a'zo bo'lgan guruh va kanallarni adminlar tekshiruvdan o'tkazadi: yuk e'lonlari bor bo'lganlari manbaga olinadi va ulardagi mos yuklar sizga ham keladi."
+            : "Yopiq guruhni o'qitish: shu akkauntni guruhga qo'shing (guruh a'zosi qo'shadi), keyin kompyuterdagi boshqaruv markazida «Manbalar» → «Yopiq guruh qo'shish»."}
         </p>
         <div className="account-actions tg-actions">
-          <button type="button" className="secondary" disabled={busy} onClick={() => act(() => cancelTgLogin(login.id).then(() => ({ login: null })))}>
+          <button type="button" className="secondary" disabled={busy} onClick={() => act(() => api.cancel(login.id).then(() => ({ login: null })))}>
             Yopish
           </button>
         </div>
@@ -284,7 +297,7 @@ export function TgAccounts({ onAuthLost }) {
           <button type="button" className="primary" disabled={busy} onClick={() => openForm(login.name)}>
             Qaytadan boshlash
           </button>
-          <button type="button" className="secondary" disabled={busy} onClick={() => act(() => cancelTgLogin(login.id).then(() => ({ login: null })))}>
+          <button type="button" className="secondary" disabled={busy} onClick={() => act(() => api.cancel(login.id).then(() => ({ login: null })))}>
             Yopish
           </button>
         </div>
@@ -301,11 +314,11 @@ export function TgAccounts({ onAuthLost }) {
   return (
     <>
       {data.accounts.length === 0 ? (
-        <div className="notice">Collector hali hech bir akkaunt haqida yozmagan (u ishga tushgach ko'rinadi).</div>
+        mine ? null : <div className="notice">Collector hali hech bir akkaunt haqida yozmagan (u ishga tushgach ko'rinadi).</div>
       ) : (
         <div className="users">
           {data.accounts.map((account) => (
-            <AccountRow key={account.name} account={account} onRelogin={(name) => !active && openForm(name)} />
+            <AccountRow key={account.name} account={account} mine={mine} onRelogin={(name) => !active && openForm(name)} />
           ))}
         </div>
       )}

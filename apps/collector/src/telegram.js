@@ -265,11 +265,20 @@ export async function searchPublicChats(client, query, { limit = 50 } = {}) {
 }
 
 // source — sources.js dagi normalizeSource natijasi
+// Raqamli id faqat akkaunt a'zo bo'lgan chatlar ro'yxatidan topiladi. Ro'yxat bir marta to'liq o'qilib, eslab qolinadi
+// (akkaunt guruhlarini avtomatik tekshirish yuzlab id so'raydi — har biriga butun ro'yxatni qayta varaqlamaymiz);
+// topilmasa — ko'pi bilan DIALOGS_TTL_MS da bir marta qayta o'qiladi (yangi qo'shilgan guruh)
+const DIALOGS_TTL_MS = 10 * 60_000;
+const dialogCache = new WeakMap(); // client → { at, byId: Map("-100…" → entity) }
 async function resolveEntity(client, source) {
   if (source.kind === "username") return client.getEntity(source.value);
-  // Raqamli id faqat akkaunt a'zo bo'lgan chatlar ro'yxatidan topiladi
-  for await (const dialog of client.iterDialogs({})) {
-    if (String(dialog.id) === source.value) return dialog.entity;
+  const cached = dialogCache.get(client);
+  if (cached?.byId.has(source.value)) return cached.byId.get(source.value);
+  if (!cached || Date.now() - cached.at >= DIALOGS_TTL_MS) {
+    const byId = new Map();
+    for await (const dialog of client.iterDialogs({})) byId.set(String(dialog.id), dialog.entity);
+    dialogCache.set(client, { at: Date.now(), byId });
+    if (byId.has(source.value)) return byId.get(source.value);
   }
   throw new Error(`id ${source.value} topilmadi: akkaunt bu chatga a'zo emas (npm run tg:dialogs)`);
 }
@@ -300,6 +309,24 @@ export function createReader(client) {
     async since(source, minId, limit = 200) {
       const messages = await client.getMessages(await entityOf(source), { minId, limit });
       return messages.map((m) => ({ id: m.id, text: m.message ?? "", date: m.date, sender: m.message ? senderUsername(m.sender) : null })).reverse();
+    },
+
+    // Yopiq guruhning taklif havolasi (t.me/+hash) — qaysi guruh va akkaunt unga a'zomi (messages.checkChatInvite,
+    // qo'shilmaydi). → { member: true, peerId, title, chatType, members } | { member: false, title }
+    // Havola yaroqsiz / muddati o'tgan — Telegram xatosi (INVITE_HASH_INVALID / INVITE_HASH_EXPIRED) tashlanadi
+    async checkInvite(hash) {
+      const result = await client.invoke(new Api.messages.CheckChatInvite({ hash }));
+      if (result instanceof Api.ChatInviteAlready) {
+        const chat = result.chat;
+        return {
+          member: true,
+          peerId: String(utils.getPeerId(chat)),
+          title: chat.title ?? null,
+          chatType: chat.broadcast ? "channel" : "group",
+          members: chat.participantsCount ?? null,
+        };
+      }
+      return { member: false, title: result.title ?? result.chat?.title ?? null };
     },
 
     // «Yangisi bormi»: guruhlarning oxirgi xabar raqami — hammasi BITTA so'rovda (messages.getPeerDialogs, 50 tadan).

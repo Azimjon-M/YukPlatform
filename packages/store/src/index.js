@@ -16,7 +16,7 @@ export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR }
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
 export { createCallLinks, createSessions, LINK_PERIOD_S, SESSION_TTL_S } from "./sessions.js";
 export { TUNNEL_URL_KEY, tunnelUrl } from "./tunnel.js";
-export { MAIN_TG_ACCOUNT, TG_ACCOUNT_NAME } from "./tgAccounts.js";
+export { hashPhone, MAIN_TG_ACCOUNT, TG_ACCOUNT_NAME } from "./tgAccounts.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // YUK_DB — boshqa fayl bilan sinash uchun (masalan, YUK_DB=data/sinov.db); yo'l YukPlatform papkasiga nisbatan
@@ -162,7 +162,39 @@ CREATE TABLE IF NOT EXISTS tg_accounts (
   status TEXT,                       -- ok | error | logged_out | duplicate
   error TEXT,
   dialogs_at INTEGER,                -- guruhlar ro'yxati oxirgi marta qachon olingan
+  added_by INTEGER,                  -- Mini App'dan kim qo'shgan (chat id); NULL — terminaldan / eski
+  phone_hash TEXT,                   -- telefon raqamining xeshi (hashPhone): bir raqam ikki nom bilan ulanmasin; raqamning o'zi saqlanmaydi
   updated_at INTEGER NOT NULL
+);
+-- Akkauntlar guruhlarini avtomatik tekshirish (2026-11-13, tgAccounts.js dialogsToScan): har guruh bir marta (qaysi
+-- akkaunt ko'rsa ham) «➕ Guruh qo'shish» dagi tekshiruvdan o'tadi. tg_dialogs har 30 daqiqada qayta yoziladi —
+-- natija shuning uchun alohida jadvalda
+CREATE TABLE IF NOT EXISTS dialog_scans (
+  peer_id TEXT PRIMARY KEY,
+  account TEXT,                      -- qaysi akkaunt tekshirdi
+  state TEXT NOT NULL,               -- passed (sinovga olindi) | rejected | error
+  note TEXT,
+  stats TEXT,                        -- JSON (probe.js judgeProbe stats)
+  at INTEGER NOT NULL
+);
+-- Yopiq guruhning taklif havolasi (t.me/+…) «➕ Guruh qo'shish» da (2026-11-13): qaysi guruh ekanini faqat Telegram
+-- akkaunti bila oladi (messages.checkChatInvite). Bot so'rovni yozadi, collector foydalanuvchi ulagan akkaunt(lar)i bilan
+-- tekshiradi, natijani bot o'qib, qo'shadi va javob yozadi
+CREATE TABLE IF NOT EXISTS invite_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id INTEGER NOT NULL,          -- yuborgan foydalanuvchi
+  hash TEXT NOT NULL,
+  accounts TEXT NOT NULL,            -- JSON: tekshiradigan akkauntlar (foydalanuvchiniki), navbat bilan
+  tried INTEGER NOT NULL DEFAULT 0,  -- nechtasi «a'zo emas» dedi
+  state TEXT NOT NULL,               -- new | found | not_member | invalid | error
+  peer_id TEXT,
+  account TEXT,                      -- guruhga a'zo akkaunt
+  title TEXT,
+  chat_type TEXT,
+  members INTEGER,
+  error TEXT,
+  reported INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tg_dialogs (
   account TEXT NOT NULL,
@@ -227,6 +259,17 @@ function migrate(db) {
   }
   // Qaysi Telegram akkaunti o'qiydi (2026-11-13, tgAccounts.js): NULL — asosiy; boshqasi — yopiq guruhga a'zo qo'shimcha akkaunt
   if (!sourceColumns.includes("account")) db.exec("ALTER TABLE sources ADD COLUMN account TEXT");
+  // Akkauntni kim qo'shgan (2026-11-13): oddiy foydalanuvchi Sozlamalarda faqat o'zinikini ko'radi
+  const tgColumns = db.prepare("PRAGMA table_info(tg_accounts)").all().map((c) => c.name);
+  if (!tgColumns.includes("added_by")) db.exec("ALTER TABLE tg_accounts ADD COLUMN added_by INTEGER");
+  // Guruhlarini tekshirish (2026-11-13): faqat boshqaruv markazida «🔎 Auto scan» bosilganda — scan_requested_at
+  // (navbat tugaguncha), scan_done_at — oxirgi tekshiruv tugagan vaqt
+  if (!tgColumns.includes("scan_requested_at")) db.exec("ALTER TABLE tg_accounts ADD COLUMN scan_requested_at INTEGER");
+  if (!tgColumns.includes("scan_done_at")) db.exec("ALTER TABLE tg_accounts ADD COLUMN scan_done_at INTEGER");
+  // Telefon-xesh (2026-11-13): shu raqamli akkaunt allaqachon ulangan bo'lsa, kod/parol so'ramasdan rad etish uchun
+  if (!tgColumns.includes("phone_hash")) db.exec("ALTER TABLE tg_accounts ADD COLUMN phone_hash TEXT");
+  // Manba akkaunt guruhlarini tekshirishdan kelgan (foydalanuvchiga har biri uchun xabar yuborilmaydi)
+  if (!sourceColumns.includes("auto_scan")) db.exec("ALTER TABLE sources ADD COLUMN auto_scan INTEGER");
 
   // Rollar (2026-11-06): role — haydovchi | yuk_beruvchi | NULL (hali tanlamagan);
   // plan — obuna (hozircha hammasi "free", pullik obuna keyin); is_admin — faqat boshqaruv markazidan yoqiladi

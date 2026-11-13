@@ -191,6 +191,13 @@ test("akkauntlar: holati va guruhlari; yopiq guruh shu akkaunt bilan qo'shiladi,
   const refresh = await send("POST", "/api/tg-accounts/refresh");
   assert.equal(typeof refresh.body.requestedAt, "number");
   assert.equal((await get("/api/tg-accounts")).body.refreshRequestedAt, refresh.body.requestedAt);
+
+  // «🔎 Auto scan»: faqat bosilganda; navbatdagi guruhlar soni ko'rinadi, ikkinchi bosish — o'sha navbat
+  assert.equal(body.accounts[1].scan.running, false);
+  assert.equal((await send("POST", "/api/tg-accounts/yoq/scan")).status, 404);
+  const scan = await send("POST", "/api/tg-accounts/ikkinchi/scan");
+  assert.deepEqual([scan.status, scan.body.scan.running, scan.body.scan.pending], [200, true, 0], "ikkala guruhi allaqachon manba");
+  assert.equal((await send("POST", "/api/tg-accounts/ikkinchi/scan")).body.scan.requestedAt, scan.body.scan.requestedAt);
   for (const n of ["-1001234567", "@ochiq_guruh"]) await send("DELETE", `/api/sources/${encodeURIComponent(n)}`);
 });
 

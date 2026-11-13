@@ -136,3 +136,99 @@ test("collector: yuk e'loni yo'q guruh rad etiladi va o'qilmaydi; topilmagan gur
   assert.equal(store.findSource("@sekin").checkState, "trial", "ikki marta xato, uchinchisida o'qildi (1 va 2 daqiqadan keyin)");
   assert.deepEqual(store.takeNewPosts(10).length, 3);
 });
+
+// --- Akkaunt guruhlarini tekshirish «🔎 Auto scan» (live.js scanNext, 2026-11-13) ---
+test("Auto scan: bosilmaguncha hech narsa tekshirilmaydi; bosilgach «➕ Guruh qo'shish» tekshiruvidan o'tgani sinovga (yopig'i — shu akkaunt bilan), egasiga xabar yo'q", async () => {
+  const clock = { t: NOW };
+  const store = openStore({ file: ":memory:", now: () => clock.t });
+  store.setTgAccountOwner("ufk-1", 560);
+  store.saveTgAccount("ufk-1", { userId: "90", status: "ok" });
+  store.setTgDialogs("ufk-1", [
+    { id: "-1001", title: "Yopiq yuklar", username: null, type: "guruh", members: 900 },
+    { id: "-1002", title: "Ochiq yuklar", username: "Ochiq_Yuk", type: "kanal", members: 500 },
+    { id: "-1003", title: "Oila", username: null, type: "guruh", members: 12 },
+    { id: "-1004", title: "Yuk Ekspert", username: "Yuk_Ekspert", type: "kanal", members: 50 },
+  ]);
+  const loads = messages([[LOAD(1), 120], [LOAD(2), 60], [LOAD(3), 30], [CHAT(1), 10]]);
+  const reads = [];
+  const reader = {
+    async latestId() {
+      return null;
+    },
+    async since(source, minId, limit) {
+      reads.push([source.kind, source.value, minId, limit]);
+      return source.value === "-1003" ? messages([[CHAT(1), 30], [CHAT(2), 20]]) : loads;
+    },
+  };
+  const run = (minutes) => simulate({ clock, minutes, sources: () => [], reader, store, scan: "ufk-1", scanExclude: ["@Yuk_Ekspert"] });
+  await run(3);
+  assert.deepEqual(reads, [], "so'rovsiz — tekshirilmaydi");
+  assert.equal(store.dialogScanSummary("ufk-1").pending, 0);
+
+  store.requestAccountScan("ufk-1");
+  assert.equal(store.dialogScanSummary("ufk-1").pending, 4);
+  const logs = await run(3);
+  // Uchala guruh 30 soniyada bittadan, a'zolar ko'pidan boshlab; o'zimizning kanal — tegilmadi
+  assert.deepEqual(reads.map((r) => r.slice(0, 2)), [["id", "-1001"], ["id", "-1002"], ["id", "-1003"]]);
+  assert.ok(reads.every((r) => r[2] === 0 && r[3] === 50));
+  const closed = store.findSource("-1001");
+  assert.deepEqual([closed.checkState, closed.enabled, closed.addedBy, closed.title], ["trial", true, 560, "Yopiq yuklar"]);
+  assert.equal(store.listSources().find((s) => s.name === "-1001").account, "ufk-1", "yopig'ini shu akkaunt o'qiydi");
+  const open = store.findSource("@ochiq_yuk");
+  assert.deepEqual([open.checkState, open.chatType], ["trial", "channel"]);
+  assert.equal(store.listSources().find((s) => s.name === "@Ochiq_Yuk").account, null, "ochig'ini asosiy akkaunt o'qiydi");
+  assert.equal(store.findSource("-1003"), null, "suhbat guruhi manbaga olinmadi");
+  // Birinchi guruhning oxirgi 3 soatdagi 4 ta xabari navbatga; ikkinchisida matnlar aynan o'sha — takror (AI'ga bormaydi)
+  assert.deepEqual(store.takeNewPosts(20).map((p) => p.source), ["-1001", "-1001", "-1001", "-1001"]);
+  // Egasiga hech qanday xabar: na har guruh uchun (sourceNotices), na umumiy (bot_notices)
+  assert.deepEqual(store.sourceNotices(), []);
+  assert.deepEqual(store.takeBotNotices(), []);
+  const summary = store.dialogScanSummary("ufk-1");
+  assert.equal(summary.running, false, "navbat tugadi — so'rov o'chdi");
+  assert.equal(summary.doneAt != null, true);
+  assert.deepEqual([summary.checked, summary.pending, summary.rejected, summary.trial], [3, 0, 1, 2]);
+  assert.ok(logs.some((l) => l.includes("«Yopiq yuklar»: akkaunt guruhi tekshirildi — -1001 sinovga olindi")));
+  assert.ok(logs.some((l) => l.startsWith("Auto scan tugadi: shu safar 3 ta guruh tekshirildi, 2 tasi sinovga olindi")));
+
+  // Keyin o'z-o'zidan qayta tekshirilmaydi; yana bosilsa — rad etilgani qayta ko'riladi, manbalarga tegilmaydi
+  await run(3);
+  assert.equal(reads.length, 3);
+  store.requestAccountScan("ufk-1");
+  await run(2);
+  assert.deepEqual(reads.slice(3).map((r) => r[1]), ["-1003"]);
+});
+
+test("yopiq guruh («➕ Guruh qo'shish»): foydalanuvchi akkaunti id bo'yicha tekshiradi; taklif havolasini ham shu akkaunt aniqlaydi", async () => {
+  const clock = { t: NOW };
+  const store = openStore({ file: ":memory:", now: () => clock.t });
+  store.addUserSource({ name: "-1001234567", chatId: 560, title: "Yopiq", account: "ufk-1" });
+  store.addUserSource({ name: "@ochiq", chatId: 560 });
+  const invite = store.addInviteCheck({ chatId: 560, hash: "AbCdEf123", accounts: ["ufk-1"] });
+  const missing = store.addInviteCheck({ chatId: 560, hash: "Yoq00000", accounts: ["ufk-1"] });
+  const reads = [];
+  const reader = {
+    async latestId() {
+      return null;
+    },
+    async since(source) {
+      reads.push([source.kind, source.value]);
+      return messages([[LOAD(1), 30], [LOAD(2), 20], [LOAD(3), 10]]);
+    },
+    async checkInvite(hash) {
+      if (hash === "Yoq00000") throw Object.assign(new Error("INVITE_HASH_EXPIRED"), { errorMessage: "INVITE_HASH_EXPIRED" });
+      return { member: true, peerId: "-1009999", title: "Taklifdagi", chatType: "group", members: 40 };
+    },
+  };
+  await simulate({ clock, minutes: 2, sources: () => [], reader, store, scan: "ufk-1", probeAccount: "ufk-1" });
+  assert.deepEqual(reads, [["id", "-1001234567"]], "faqat o'ziga biriktirilgan yopiq guruh; ochig'ini asosiy tekshiradi");
+  assert.equal(store.findSource("-1001234567").checkState, "trial");
+  assert.equal(store.findSource("@ochiq").checkState, "probe");
+  const results = store.inviteResults();
+  assert.deepEqual(
+    results.map((r) => [r.id, r.state, r.peerId, r.account, r.title]),
+    [
+      [invite, "found", "-1009999", "ufk-1", "Taklifdagi"],
+      [missing, "invalid", null, null, null],
+    ],
+  );
+});

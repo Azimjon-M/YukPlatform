@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GrammyError } from "grammy";
 import { openStore } from "@yuk/store";
-import { SOURCE_RULES, createSourceWatcher, existingText, parseSourceLink, resultText, reviewTrial } from "../src/userSources.js";
+import { SOURCE_RULES, createSourceIntake, createSourceWatcher, existingText, parseSourceLink, resultText, reviewTrial } from "../src/userSources.js";
 
 const HOUR = 3_600_000;
 
@@ -11,9 +11,11 @@ test("havola: t.me, https, /s/, xabar havolasi, @nomi — guruh nomi; yopiq takl
   for (const text of ["https://t.me/Yuk_Guruh", "t.me/Yuk_Guruh", "  http://www.t.me/Yuk_Guruh/123 ", "https://t.me/s/Yuk_Guruh", "telegram.me/Yuk_Guruh?x=1", "@Yuk_Guruh"]) {
     assert.deepEqual(parseSourceLink(text), { username: "Yuk_Guruh" }, text);
   }
-  assert.deepEqual(parseSourceLink("https://t.me/+AbCdEf123"), { error: "private" });
-  assert.deepEqual(parseSourceLink("t.me/joinchat/AbCdEf"), { error: "private" });
-  assert.deepEqual(parseSourceLink("https://t.me/c/123456/78"), { error: "private" });
+  // Yopiq guruh (2026-11-13): taklif havolasi — hash, xabar havolasi — guruh id'si
+  assert.deepEqual(parseSourceLink("https://t.me/+AbCdEf123"), { invite: "AbCdEf123" });
+  assert.deepEqual(parseSourceLink("t.me/joinchat/AbCdEf"), { invite: "AbCdEf" });
+  assert.deepEqual(parseSourceLink("https://t.me/c/123456/78"), { peerId: "-100123456" });
+  assert.deepEqual(parseSourceLink("https://t.me/+ab"), { error: "invalid" });
   assert.deepEqual(parseSourceLink("@Yuk_Ekspert_agent_bot"), { error: "bot" });
   assert.deepEqual(parseSourceLink("t.me/ab"), { error: "invalid" });
   assert.equal(parseSourceLink("Toshkentdan Samarqandga yuk bor"), null);
@@ -104,4 +106,89 @@ test("kuzatuvchi: Telegram rad etsa (bloklagan) — qayta urinmaydi; aloqa yo'q 
   await watcher.runOnce();
   assert.equal(store.sourceNotices().length, 0, "bloklagan — boshqa urinilmaydi");
   assert.deepEqual(sent, []);
+});
+
+// --- Yopiq guruh va «🔎 Auto scan» qo'shgan guruh (2026-11-13) ---
+function privateSetup() {
+  const clock = { t: Date.UTC(2026, 10, 13, 8, 0) };
+  const store = openStore({ file: ":memory:", now: () => clock.t });
+  const api = {
+    getChats: [],
+    async getChat(name) {
+      api.getChats.push(name);
+      return { id: -100777, type: "supergroup", title: "Ochiq yuk", username: String(name).replace(/^@/, "") };
+    },
+    async getChatMemberCount() {
+      return 500;
+    },
+  };
+  const intake = createSourceIntake({ api, store, log: () => {}, now: () => clock.t });
+  store.setTgAccountOwner("ufk-1", 560);
+  store.saveTgAccount("ufk-1", { userId: "90", status: "ok" });
+  store.setTgDialogs("ufk-1", [{ id: "-1001234567", title: "Haydovchilar (yopiq)", type: "guruh", members: 80 }]);
+  return { clock, store, api, intake };
+}
+
+test("yopiq guruh: akkaunt ulanmagan — /account_qosh; xabar havolasi — akkaunt guruhlaridan darhol, o'sha akkaunt bilan tekshiruvga; a'zo emas — aytiladi", async () => {
+  const { store, intake } = privateSetup();
+  assert.match(await intake.submit(561, parseSourceLink("https://t.me/c/1234567/5")), /\/account_qosh/, "boshqa odamda akkaunt yo'q");
+  assert.match(await intake.submit(560, parseSourceLink("https://t.me/c/999999/5")), /akkauntingiz bu guruhga a'zo emas/);
+
+  const text = await intake.submit(560, parseSourceLink("https://t.me/c/1234567/5"));
+  assert.match(text, /^🔎 <b>Haydovchilar \(yopiq\)<\/b> \(-1001234567\) qabul qilindi/);
+  const row = store.findSource("-1001234567");
+  assert.deepEqual([row.checkState, row.addedBy, row.account, row.chatType, row.autoScan], ["probe", 560, "ufk-1", "group", false]);
+  assert.deepEqual(store.sourcesToProbe({ account: "ufk-1" }).map((s) => s.name), ["-1001234567"], "uni foydalanuvchining akkaunti tekshiradi");
+  assert.deepEqual(store.sourcesToProbe({ account: null }), []);
+  assert.match(await intake.submit(560, parseSourceLink("https://t.me/c/1234567/9")), /siz allaqachon yuborgansiz/);
+});
+
+test("yopiq guruh taklif havolasi: collector aniqlaydi, javobni bot yozadi (topildi / a'zo emas / yaroqsiz)", async () => {
+  const { store, intake } = privateSetup();
+  assert.match(await intake.submit(560, parseSourceLink("https://t.me/+AbCdEf123")), /Havola qabul qilindi/);
+  assert.match(await intake.submit(560, parseSourceLink("https://t.me/+ZzZzZz999")), /Havola qabul qilindi/);
+  assert.match(await intake.submit(560, parseSourceLink("https://t.me/+Eskisi0001")), /Havola qabul qilindi/);
+  const [first, second, third] = store.inviteChecksFor("ufk-1", { limit: 5 });
+  assert.equal(first.hash, "AbCdEf123");
+  store.finishInviteCheck(first.id, { state: "found", account: "ufk-1", peerId: "-1001234567", title: "Haydovchilar (yopiq)", chatType: "group", members: 80 });
+  store.finishInviteCheck(second.id, { state: "not_member", title: "Boshqa guruh" });
+  store.finishInviteCheck(third.id, { state: "invalid", error: "INVITE_HASH_EXPIRED" });
+  assert.deepEqual(store.inviteChecksFor("ufk-1"), []);
+
+  const sent = [];
+  const watcher = createSourceWatcher({ store, send: async (chatId, text) => sent.push([chatId, text]), onInvite: intake.finishInvite, log: () => {} });
+  await watcher.runOnce();
+  assert.equal(sent.length, 3);
+  assert.match(sent[0][1], /^🔎 <b>Haydovchilar \(yopiq\)<\/b> \(-1001234567\) qabul qilindi/);
+  assert.match(sent[1][1], /akkauntingiz bu guruhga a'zo emas/);
+  assert.match(sent[2][1], /yaroqsiz yoki muddati o'tgan/);
+  assert.equal(store.findSource("-1001234567").account, "ufk-1");
+  await watcher.runOnce();
+  assert.equal(sent.length, 3, "bir marta yoziladi");
+});
+
+test("«🔎 Auto scan» qo'shgan guruhni foydalanuvchi yuborsa — «qo'shildi» (avvaldan mavjud emas), endi uniki; limitlarga kirmaydi", async () => {
+  const { store, intake, api } = privateSetup();
+  for (let i = 0; i < 4; i++) store.addScannedSource({ name: `@auto_${i}`, addedBy: 560, title: `Auto ${i}`, chatType: "group" });
+  store.addScannedSource({ name: "-1001234567", account: "ufk-1", addedBy: 560, title: "Haydovchilar (yopiq)", chatType: "group" });
+  assert.equal(store.userSourceCounts(560).checking, 0, "auto scan — foydalanuvchining limitiga kirmaydi");
+
+  const open = await intake.submit(560, parseSourceLink("https://t.me/auto_1"));
+  assert.match(open, /^✅ <b>Auto 1<\/b> \(@auto_1\) qo'shildi!\n🧪 Hozir sinovda: 0\/5 yuk e'loni/);
+  assert.doesNotMatch(open, /avvaldan mavjud|allaqachon/);
+  assert.deepEqual(api.getChats, [], "Telegram'ga so'rov yo'q");
+  const row = store.findSource("@auto_1");
+  assert.deepEqual([row.autoScan, row.addedBy, row.checkState], [false, 560, "trial"]);
+  assert.deepEqual(store.sourceNotices(), [], "«sinovga olindi» ni javobning o'zi aytdi");
+  // Sinovdan o'tsa — endi unga yoziladi
+  store.finishTrial("@auto_1", { ok: true, note: "Sinov paytida 6 ta yuk e'loni chiqdi" });
+  assert.deepEqual(store.sourceNotices().map((s) => [s.name, s.checkState]), [["@auto_1", "ok"]]);
+
+  // Yopig'i ham; boshqa odam yuborsa — ham «qo'shildi» (u endi o'shaniki)
+  assert.match(await intake.submit(560, parseSourceLink("https://t.me/c/1234567/1")), /^✅ <b>Haydovchilar \(yopiq\)<\/b> \(-1001234567\) qo'shildi!/);
+  store.finishTrial("@auto_2", { ok: true });
+  store.setTgAccountOwner("ufl-1", 561);
+  assert.match(await intake.submit(561, parseSourceLink("@auto_2")), /^✅ <b>Auto 2<\/b> \(@auto_2\) qo'shildi! Undagi mos e'lonlar sizga ham keladi\.$/);
+  // Foydalanuvchining o'zi yuborgan oddiy guruh — oldingidek «siz allaqachon yuborgansiz»
+  assert.match(await intake.submit(560, parseSourceLink("@auto_1")), /siz allaqachon yuborgansiz/);
 });

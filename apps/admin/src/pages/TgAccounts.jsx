@@ -4,7 +4,7 @@
 // «Telegram akkauntlari», apps/web TgAccounts.jsx) bitta telefondan kiradi; asosiysiga — serverda terminalda (tg:login).
 import { useState } from "react";
 import { get, post } from "../api.js";
-import { dialogSource, formatNumber, loginCommand, MAIN_TG_ACCOUNT, MINIAPP_LOGIN, pickableDialogs, tgAccountView } from "../format.js";
+import { dialogSource, formatNumber, loginCommand, MAIN_TG_ACCOUNT, MINIAPP_LOGIN, pickableDialogs, scanView, tgAccountView } from "../format.js";
 import { useApi } from "../hooks.js";
 import { Badge, Button, Card, Field, TimeAgo, useToast } from "../ui.jsx";
 
@@ -17,7 +17,48 @@ export function useTgAccounts() {
   return useApi(() => get("/api/tg-accounts"), [], { live: ["sources", "processes"], liveGapMs: 3000 });
 }
 
-function AccountRow({ account, now }) {
+// «🔎 Auto scan» (2026-11-13, Azimjon: «dashboarddan foydalanuvchini tanlab auto scanni bossam anashu bog'langan
+// accountimda auto scan qilinsin … bildirishnoma borishi shart emas»): akkauntning hali manba bo'lmagan guruh/kanallari
+// «➕ Guruh qo'shish» tekshiruvidan o'tadi (collector, 30 soniyada bittadan); o'tgani — 24 soatlik sinovga «Manbalar» da.
+// Akkaunt egasiga xabar yuborilmaydi. onDone — ro'yxatni yangilash (jonli yangilanish ham keladi)
+export function AutoScan({ account, onDone }) {
+  const notify = useToast();
+  const [busy, setBusy] = useState(false);
+  const view = scanView(account.scan);
+  async function start() {
+    setBusy(true);
+    try {
+      const { scan } = await post(`/api/tg-accounts/${encodeURIComponent(account.name)}/scan`);
+      notify(
+        scan.pending
+          ? `Auto scan boshlandi: ${scan.pending} ta guruh/kanal navbatda — 30 soniyada bittadan tekshiriladi`
+          : "Tekshiriladigan yangi guruh yo'q (hammasi manba yoki tekshirilgan)",
+        "good",
+      );
+      onDone?.();
+    } catch (e) {
+      notify(e.message, "critical");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!account.scan) return null; // eski server
+  return (
+    <div className="auto-scan">
+      {view?.text && <p className="small">{view.text}</p>}
+      <Button
+        onClick={start}
+        busy={busy}
+        disabled={account.status !== "ok" || view?.running}
+        title="Akkaunt a'zo bo'lgan, hali manba bo'lmagan guruh va kanallar «➕ Guruh qo'shish» tekshiruvidan o'tadi; yuk e'lonlari borlari sinovga olinadi"
+      >
+        {view?.running ? "🔎 Tekshirilyapti…" : "🔎 Auto scan"}
+      </Button>
+    </div>
+  );
+}
+
+function AccountRow({ account, now, onChanged }) {
   const view = tgAccountView(account);
   return (
     <li className="tg-account">
@@ -41,6 +82,7 @@ function AccountRow({ account, now }) {
           (qo'shimchada maslahat Mini App yo'lini ham aytadi, shuning uchun doim ko'rsatiladi) */}
       {view.hint && (account.name !== MAIN_TG_ACCOUNT || !(account.error ?? "").includes("tg:login")) && <p className="small">{view.hint}</p>}
       {account.error && account.status !== "ok" && <p className="inline-error small">{account.error}</p>}
+      <AutoScan account={account} onDone={onChanged} />
     </li>
   );
 }
@@ -95,7 +137,7 @@ export function TgAccountsCard({ state, now }) {
           ) : (
             <ul className="tg-account-list">
               {data.accounts.map((account) => (
-                <AccountRow key={account.name} account={account} now={now} />
+                <AccountRow key={account.name} account={account} now={now} onChanged={state.reload} />
               ))}
             </ul>
           )}

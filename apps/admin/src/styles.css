@@ -1833,6 +1833,20 @@ input[type="checkbox"] {
   margin: 4px 0 0;
 }
 
+/* «🔎 Auto scan»: holat matni va tugma — tor ekranda ustma-ust */
+.auto-scan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+.auto-scan p {
+  margin: 0;
+  flex: 1 1 240px;
+}
+
 .dialog-row {
   display: flex;
   align-items: center;

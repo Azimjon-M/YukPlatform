@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BLOCKED_TEXT, ROLES, decodeProfile, routeLabel, validRole, validRouteScope } from "@yuk/shared";
 import { AccountCard } from "./AccountCard.jsx";
+import { TgAccounts } from "./TgAccounts.jsx";
 import { AdminPage } from "./AdminPage.jsx";
 import { getConfig, logout, onBlocked, resume, setActive, setRole, signOut } from "./api.js";
 import { LoadFormPage } from "./LoadFormPage.jsx";
@@ -42,7 +43,16 @@ const ROLE_TEXT = {
 const params = new URLSearchParams(window.location.search);
 const TAB_IDS = new Set([...Object.values(ROLE_TABS).flat(), ADMIN_TAB].map((t) => t.id));
 // Bot sozlamalar tugmasida ?v=sozlamalar&r=<rol>&p=<hozirgi profil>&s=<doira> beradi
-const requestedTab = TAB_IDS.has(params.get("v")) ? params.get("v") : params.has("p") ? "sozlamalar" : null;
+// ?v=akkaunt — botdagi /account_qosh: Sozlamalar ochilib, «📡 Telegram akkauntlarim» bo'limiga o'tadi
+const tgAccountsRequest = params.get("v") === "akkaunt";
+const requestedTab = TAB_IDS.has(params.get("v")) ? params.get("v") : params.has("p") || tgAccountsRequest ? "sozlamalar" : null;
+let tgAccountsScrolled = false;
+// Bo'lim sarlavhasi chizilganda — bir marta unga suriladi (sozlamalar formasi tepada turadi)
+const scrollToTgAccounts = (el) => {
+  if (!el || !tgAccountsRequest || tgAccountsScrolled) return;
+  tgAccountsScrolled = true;
+  setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+};
 // ?r= — bot bilgan rol; ?p= shu rolning profili (eski bot havolasida r= yo'q edi — u haydovchi profili)
 const roleHint = validRole(params.get("r"));
 const profileRole = roleHint ?? "haydovchi";
@@ -428,6 +438,17 @@ export function App() {
         )}
         {/* Yuk beruvchi sozlamasida rol qatori yo'q (Azimjon, 2026-11-12) — faqat haydovchiga ko'rsatiladi */}
         {role === "haydovchi" && !registering && roleLine}
+        {/* Telegram akkauntini collector'ga ulash — istalgan foydalanuvchi, faqat o'zinikilari (Azimjon, 2026-11-13:
+            «adminlik bermasdan shunchaki sozlamalar ichiga qo'shib ber») */}
+        {online && !registering && (
+          <>
+            <h2 className="group-title" id="tg-akkauntlar" ref={scrollToTgAccounts}>
+              📡 Telegram akkauntlarim
+            </h2>
+            <p className="hint">Yopiq yuk guruhlariga a'zo alohida Telegram akkauntingizni ulang — o'sha guruhlardagi e'lonlar ham o'qiladi.</p>
+            <TgAccounts mine onAuthLost={onAuthLost} />
+          </>
+        )}
         {online && !registering && <AccountCard me={me} onSignedOut={onSignedOut} onDeleted={onDeleted} />}
       </>
     );

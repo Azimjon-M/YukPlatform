@@ -2,7 +2,9 @@
 // GramJS onError'dan true qaytsa kirishni to'xtatadi, false qaytsa savolni qayta beradi.
 // Mini App'dagi kirish (loginWorker.js) ham shu matnlarni ishlatadi — faqat «qaytadan qanday boshlash» boshqa (again).
 
-export const MAX_RETRIES = 3;
+// Bir bosqichda (kod yoki 2FA parol) jami nechta urinishga ruxsat: 1-chi urinish + MAX_RETRIES ta qayta.
+// 2 → jami 3 urinish: xato parol 3-marta ham noto'g'ri bo'lsa, kirish to'xtaydi (Telegram ham ko'p urinishni bloklaydi).
+export const MAX_RETRIES = 2;
 
 // Qayta so'rasa bo'ladigan xatolar (foydalanuvchi noto'g'ri yozgan)
 const RETRYABLE = {

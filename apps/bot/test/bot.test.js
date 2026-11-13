@@ -1260,8 +1260,9 @@ test("guruh qo'shish: raqamsizga — avval raqam; raqami borga — tushuntirish,
   assert.match(texts(calls).at(-1), /Siz qo'shgan guruhlar:<\/b>\n🔎 <b>Yangi &lt;guruh&gt;<\/b> \(@Yangi_Guruh\) — oxirgi xabarlari ko'rib chiqilyapti/);
 
   // Noto'g'ri havolalar
+  // Yopiq guruh havolasi — Telegram akkaunt ulanmagan bo'lsa, avval /account_qosh
   await message(PRIVATE, "https://t.me/+AbCdEf123");
-  assert.match(texts(calls).at(-1), /yopiq guruhning taklif havolasi/);
+  assert.match(texts(calls).at(-1), /Bu yopiq guruh havolasi\. .*\/account_qosh/);
   await message(PRIVATE, "@yuk_ekspert_agent_bot");
   assert.match(texts(calls).at(-1), /botning manzili/);
   await message(PRIVATE, "@ali_odam");
@@ -1513,4 +1514,24 @@ test("«📦 Yuk berish» tugmasi: forma bor — Mini App (?v=yuk); formadan kel
   await webAppData(JSON.stringify({ type: "load", load: { from: "andijon", to: "toshkent_sh", weight: "20", phones: ["90 000 00 03"] } }));
   assert.match(texts(calls).at(-1), /faqat yuk beruvchilar uchun/);
   assert.equal(store.shipperPosts(42).length, 1);
+});
+
+test("/account_qosh: rolsiz — /start; ro'yxatdan o'tmagan haydovchi — avval ro'yxat; aks holda Mini App «akkaunt» tugmasi", async () => {
+  const { store, calls, command } = setup({ appUrl: () => "https://yuk.example.uz/" });
+  await command("/account_qosh");
+  assert.equal(texts(calls).at(-1), "Iltimos, rolingizni tanlang 👇");
+
+  store.saveDriver(42, { role: "haydovchi", active: true, phoneAskedAt: 1 });
+  calls.length = 0;
+  await command("/account_qosh");
+  assert.match(texts(calls).at(-1), /Avval ro'yxatdan o'ting/);
+
+  store.saveDriver(42, { role: "yuk_beruvchi", active: true, phoneAskedAt: 1 });
+  calls.length = 0;
+  await command("/account_qosh");
+  assert.match(texts(calls).at(-1), /Telegram akkauntingizni ulang/);
+  const button = lastMarkup(calls).inline_keyboard[0][0];
+  assert.equal(button.text, "📡 Telegram akkauntni ulash");
+  const url = new URL(button.web_app.url);
+  assert.deepEqual([url.origin, url.searchParams.get("v"), url.searchParams.get("r"), url.searchParams.has("t")], ["https://yuk.example.uz", "akkaunt", "yuk_beruvchi", false]);
 });

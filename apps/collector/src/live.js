@@ -15,6 +15,7 @@
 // Kim a'zo — har membershipMs (10 daq) da bitta so'rov bilan tekshiriladi.
 import { setTimeout as wait } from "node:timers/promises";
 import { DEFAULT_DEDUPE_WINDOW_MS, telegramUsername } from "@yuk/shared";
+import { MAIN_TG_ACCOUNT } from "@yuk/store";
 import { MISSING_ERROR, PROBE, judgeProbe } from "./probe.js";
 import { cleanText } from "./samples.js";
 
@@ -178,7 +179,16 @@ export async function runLive({
   // Qo'shimcha akkaunt (accounts.js, 2026-11-13) faqat o'ziga biriktirilgan yopiq guruhlarni o'qiydi: foydalanuvchi
   // qo'shgan guruhlarni tekshirish (probe) va a'zo bo'lish navbati (joins) — faqat asosiy akkauntda
   probe = true,
+  // Qaysi foydalanuvchi qo'shgan guruhlarni shu akkaunt tekshiradi: undefined — hammasini (eski chaqiruvlar, testlar);
+  // null — asosiy o'qiydiganlarni (ochiq guruhlar); nom — shu akkauntga biriktirilgan yopiq guruhlarni (2026-11-13)
+  probeAccount = undefined,
   joins = true,
+  // Akkaunt guruhlarini avtomatik tekshirish (2026-11-13): scan — shu akkaunt nomi (accounts.js beradi; null — o'chiq).
+  // Har scanGapMs da bitta hali manba bo'lmagan guruh shu akkaunt bilan «➕ Guruh qo'shish» tekshiruvidan (judgeProbe)
+  // o'tadi; o'tgani — sinovga. scanExclude — o'zimizning kanal/guruhlar (.env CHANNEL_ID, REQUIRED_CHATS)
+  scan = null,
+  scanGapMs = 30_000,
+  scanExclude = [],
   // Har aylanish boshida chaqiriladi (accounts.js: guruhlar ro'yxatini vaqti-vaqti bilan yangilash). Xatosi — o'zida
   tick = null,
   emptyText = "Kuzatiladigan guruh yo'q: boshqaruv markazining «Manbalar» bo'limidan qo'shing.",
@@ -399,10 +409,13 @@ export async function runLive({
   let nextProbeAt = -Infinity;
   async function probeNext() {
     if (!probe || !store.sourcesToProbe || !reader.since || now() < nextProbeAt || now() < pauseUntil) return;
-    const row = store.sourcesToProbe({ limit: 20 }).find((r) => now() >= (probeTries.get(r.name)?.retryAt ?? -Infinity));
+    const row = store
+      .sourcesToProbe({ limit: 20, ...(probeAccount === undefined ? {} : { account: probeAccount }) })
+      .find((r) => now() >= (probeTries.get(r.name)?.retryAt ?? -Infinity));
     if (!row) return;
     nextProbeAt = now() + probeGapMs;
-    const source = { kind: "username", value: row.name.replace(/^@/, "") };
+    // Yopiq guruh (2026-11-13) — raqamli id, shu akkauntning dialoglaridan o'qiladi
+    const source = /^-?\d+$/.test(row.name) ? { kind: "id", value: row.name } : { kind: "username", value: row.name.replace(/^@/, "") };
     const label = sourceLabel(source);
     await pace();
     if (signal?.aborted) return;
@@ -437,6 +450,112 @@ export async function runLive({
       const backoff = MINUTE * 2 ** (tries - 1);
       probeTries.set(label, { tries, retryAt: now() + backoff });
       log(`${label}: foydalanuvchi qo'shgan guruhni o'qib bo'lmadi — ${errorText(error)} (${durationText(backoff)} dan keyin qayta)`);
+    }
+  }
+
+  // --- Akkaunt guruhlarini tekshirish «🔎 Auto scan» (store dialogsToScan; Azimjon: «"+ Guruh qo'shish" dagi tekshirish
+  // algoritmidek», faqat boshqaruv markazida bosilganda, egasiga xabarsiz) — probeNext bilan bir xil baho (judgeProbe:
+  // oxirgi 50 xabar, ≥ 3 aloqali yuk e'loni, 7 kundan jim emas), keyin o'sha 24 soatlik sinov (bot reviewTrial).
+  // Guruh shu akkauntning o'zi bilan o'qiladi (yopig'i ham): id bo'yicha — telegram.js dialoglar keshidan,
+  // resolveUsername so'ralmaydi. Ochiq guruh manbaga @username bilan (asosiy akkaunt a'zo bo'lmasdan o'qiydi),
+  // yopig'i — id va shu akkaunt bilan qo'shiladi. Navbat tugaganda so'rov o'chadi (finishAccountScan).
+  let nextScanAt = -Infinity;
+  let scanBatch = { checked: 0, passed: 0 };
+  async function scanNext() {
+    if (!scan || !store.dialogsToScan || !reader.since || now() < nextScanAt || now() < pauseUntil) return;
+    const since = store.listTgAccounts().find((a) => a.name === scan)?.scanRequestedAt ?? null;
+    if (since == null) {
+      nextScanAt = now() + 15_000; // so'rov yo'q — bazaga 15 soniyada bir qaraladi
+      return;
+    }
+    const [dialog] = store.dialogsToScan(scan, { limit: 1, since, exclude: scanExclude });
+    if (!dialog) {
+      // Qolganlari — faqat o'zimizning kanal/guruhlar (scanExclude): «navbatda» bo'lib ko'rinib turmasin
+      for (const d of store.dialogsToScan(scan, { limit: 1000, since })) {
+        store.finishDialogScan(d.peerId, { account: scan, state: "skipped", note: "O'zimizning kanal yoki guruh" });
+      }
+      store.finishAccountScan(scan);
+      const summary = store.dialogScanSummary(scan);
+      log(
+        `Auto scan tugadi: shu safar ${scanBatch.checked} ta guruh tekshirildi, ${scanBatch.passed} tasi sinovga olindi; ` +
+          `jami ${summary.trial + summary.ok + summary.failed} tasi manbaga olingan, ${summary.rejected} tasi yuk guruhi emas`,
+      );
+      scanBatch = { checked: 0, passed: 0 };
+      return;
+    }
+    nextScanAt = now() + scanGapMs;
+    const peer = { kind: "id", value: dialog.peerId };
+    const where = `«${dialog.title || dialog.peerId}»`;
+    await pace();
+    if (signal?.aborted) return;
+    try {
+      const messages = await call(reader.since(peer, 0, PROBE.limit));
+      const verdict = judgeProbe(messages, { now: now(), requireContact });
+      ok();
+      scanBatch.checked++;
+      if (!verdict.ok) {
+        store.finishDialogScan(dialog.peerId, { account: scan, state: "rejected", note: verdict.note, stats: verdict.stats });
+        log(`${where}: akkaunt guruhi tekshirildi — manbaga olinmadi: ${verdict.note}`);
+        return;
+      }
+      // Manba nomi: ochig'i — @username (asosiy akkaunt o'qiydi), yopig'i — id (shu akkaunt o'qiydi; asosiy — NULL)
+      const source = dialog.username ? { kind: "username", value: dialog.username } : peer;
+      const label = sourceLabel(source);
+      const account = dialog.username || scan === MAIN_TG_ACCOUNT ? null : scan;
+      const owner = store.listTgAccounts().find((a) => a.name === scan)?.addedBy ?? null;
+      const added = store.addScannedSource({
+        name: label,
+        account,
+        title: dialog.title || null,
+        chatType: dialog.type === "kanal" ? "channel" : "group",
+        members: dialog.members,
+        addedBy: owner,
+        note: verdict.note,
+        stats: verdict.stats,
+      });
+      let queued = 0;
+      if (added) {
+        for (const message of messages) {
+          if (message.date * 1000 < now() - probeBackfillMs) continue;
+          const result = addMessage(source, message, store, { via: "poll" });
+          if (result && result !== "short" && result.status === "new") queued++;
+        }
+        store.setCursor(label, Math.max(...messages.map((m) => m.id)));
+        scanBatch.passed++;
+      }
+      store.finishDialogScan(dialog.peerId, { account: scan, state: "passed", note: verdict.note, stats: { ...verdict.stats, queued } });
+      const tail = queued ? `; oxirgi ${Math.round(probeBackfillMs / HOUR)} soatdagi ${queued} ta e'lon navbatga qo'yildi` : "";
+      log(`${where}: akkaunt guruhi tekshirildi — ${added ? `${label} sinovga olindi` : "allaqachon manba"}: ${verdict.note}${tail}`);
+    } catch (error) {
+      if (handleFlood(error)) return;
+      scanBatch.checked++;
+      store.finishDialogScan(dialog.peerId, { account: scan, state: "error", note: errorText(error) });
+      log(`${where}: akkaunt guruhini o'qib bo'lmadi — ${errorText(error)} (1 kundan keyin qayta)`);
+    }
+  }
+
+  // --- Yopiq guruhning taklif havolasi («➕ Guruh qo'shish», 2026-11-13): bot so'rovni yozadi (store invite_checks),
+  // foydalanuvchi ulagan akkaunt shu yerda tekshiradi — qaysi guruh va u a'zomi. Qo'shish va javob — botda
+  let nextInviteAt = -Infinity;
+  async function inviteNext() {
+    if (!scan || !store.inviteChecksFor || !reader.checkInvite || now() < nextInviteAt || now() < pauseUntil) return;
+    const [check] = store.inviteChecksFor(scan);
+    nextInviteAt = now() + (check ? 5_000 : 10_000);
+    if (!check) return;
+    await pace();
+    if (signal?.aborted) return;
+    try {
+      const result = await call(reader.checkInvite(check.hash));
+      ok();
+      if (result.member) store.finishInviteCheck(check.id, { state: "found", account: scan, ...result });
+      else store.finishInviteCheck(check.id, { state: "not_member", title: result.title });
+      log(`Taklif havolasi (${check.chatId}): ${result.member ? `«${result.title}» ${result.peerId}` : "akkaunt a'zo emas"}`);
+    } catch (error) {
+      if (handleFlood(error)) return;
+      const text = errorText(error);
+      const invalid = /INVITE_HASH_(INVALID|EXPIRED)/.test(text);
+      store.finishInviteCheck(check.id, { state: invalid ? "invalid" : "error", error: text });
+      log(`Taklif havolasi (${check.chatId}) tekshirilmadi — ${text}`);
     }
   }
 
@@ -600,6 +719,10 @@ export async function runLive({
       if (signal?.aborted) break;
       // Yangi (foydalanuvchi qo'shgan) guruhni ko'rib chiqish — kuzatiladigan guruh bo'lmasa ham
       await probeNext();
+      if (signal?.aborted) break;
+      await inviteNext();
+      if (signal?.aborted) break;
+      await scanNext();
       if (signal?.aborted) break;
       const list = current();
       active = new Set(list.map(sourceLabel));

@@ -21,6 +21,7 @@ import {
 } from "../format.js";
 import { useApi } from "../hooks.js";
 import { Async, Button, ExternalLink, useToast } from "../ui.jsx";
+import { AutoScan } from "./TgAccounts.jsx";
 
 // "09.11.2026, 08:41 (5 daq oldin)"
 function When({ ts, now }) {
@@ -174,7 +175,8 @@ function Feeds({ data, driver }) {
 }
 
 export function DriverDetails({ driver, now, onPurged, idleSince = null }) {
-  const state = useApi(() => get(`/api/drivers/${driver.chatId}`), [driver.chatId], { live: ["drivers"], liveGapMs: 2000 });
+  // sources — «🔎 Auto scan» jarayoni (dialog_scans, tg_accounts) ham jonli ko'rinsin
+  const state = useApi(() => get(`/api/drivers/${driver.chatId}`), [driver.chatId], { live: ["drivers", "sources"], liveGapMs: 2000 });
   const shown = driverShown(driver);
   const activity = activityView(driver, now);
   // Yuborish holati — faqat ko'rsatiladi (o'zgartirish foydalanuvchining o'zida); faolda — avtomatik pauza qachon
@@ -310,6 +312,26 @@ export function DriverDetails({ driver, now, onPurged, idleSince = null }) {
           }}
         </Async>
       </div>
+
+      {/* Mini App'dan ulagan Telegram akkauntlari — «🔎 Auto scan» (2026-11-13). Akkaunt egasiga xabar yuborilmaydi */}
+      {state.data?.tgAccounts?.length > 0 && (
+        <div className="detail-block">
+          <h4>📡 Telegram akkauntlari</h4>
+          <ul className="tg-account-list">
+            {state.data.tgAccounts.map((account) => (
+              <li key={account.name} className="tg-account">
+                <div className="source-name">
+                  <strong>{[account.firstName, account.username ? `@${account.username}` : null].filter(Boolean).join(" ") || account.name}</strong>
+                  <span className="muted small">
+                    {account.name} · {account.status === "ok" ? "✅ ishlayapti" : `⚠ ${account.status ?? "noma'lum"}`} · {formatNumber(account.dialogs)} ta guruh/kanalga a'zo
+                  </span>
+                </div>
+                <AutoScan account={account} onDone={state.reload} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Yuklanish / xato yuqoridagi Async'da bir marta ko'rsatiladi */}
       {state.data && <Feeds data={state.data} driver={driver} />}

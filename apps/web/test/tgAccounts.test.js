@@ -35,3 +35,13 @@ test("kod qayerga ketdi — tushunarli matn", () => {
   assert.match(codeWhere({ phone: "+998 90 ••• •• 67", via: "sms" }), /SMS orqali/);
   assert.match(codeWhere({ phone: "x", via: "setup_email" }), /pochta bog'lash/);
 });
+
+test("scanText: akkaunt guruhlarini tekshirish natijasi bir qatorda", async () => {
+  const { scanText } = await import("../src/tgAccounts.js");
+  assert.equal(scanText(null), null);
+  assert.equal(scanText({ checked: 0, pending: 0, trial: 0, ok: 0, failed: 0, rejected: 0 }), null);
+  assert.equal(
+    scanText({ checked: 12, pending: 30, trial: 2, ok: 1, failed: 0, rejected: 9 }),
+    "🔎 12 ta guruh tekshirildi · 3 tasi manbaga olindi (2 tasi sinovda) · 9 tasi yuk guruhi emas · yana 30 tasi navbatda",
+  );
+});

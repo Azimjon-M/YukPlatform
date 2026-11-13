@@ -41,7 +41,13 @@ export function parseSourceLink(text) {
   if (!LINK_RE.test(raw)) return null;
   if (raw.startsWith("@")) return checkName(raw.slice(1));
   const path = raw.replace(/^(?:https?:\/\/)?(?:www\.)?(?:t|telegram)\.(?:me|dog)\//i, "");
-  if (/^(\+|joinchat\/|c\/)/i.test(path)) return { error: "private" };
+  // Yopiq guruh (2026-11-13): xabar havolasi t.me/c/<id>/<raqam> — id ichida; taklif havolasi t.me/+hash yoki joinchat/hash
+  // — qaysi guruh ekanini foydalanuvchi ulagan Telegram akkaunti aniqlaydi (collector). Qo'shiladi, agar shu akkaunt a'zo bo'lsa
+  const internal = /^c\/(\d{5,})/i.exec(path);
+  if (internal) return { peerId: `-100${internal[1]}` };
+  const invite = /^(?:\+|joinchat\/)([\w-]{5,})/i.exec(path);
+  if (invite) return { invite: invite[1] };
+  if (/^(\+|joinchat\/|c\/)/i.test(path)) return { error: "invalid" };
   const parts = path.split(/[/?#]/);
   return checkName(parts[0].toLowerCase() === "s" ? parts[1] : parts[0]);
 }
@@ -84,6 +90,8 @@ export function intakeText(sources = [], { trialStats = () => null, rules = SOUR
     "Yuk e'lonlari chiqadigan <b>ochiq</b> Telegram guruh yoki kanal havolasini shu yerga yuboring, masalan:",
     "https://t.me/guruh_nomi yoki @guruh_nomi",
     "",
+    "🔒 <b>Yopiq guruh</b> ham qo'shiladi — agar unga a'zo Telegram akkauntingizni ulagan bo'lsangiz (/account_qosh): guruhning taklif havolasini (https://t.me/+…) yoki undagi istalgan xabar havolasini yuboring.",
+    "",
     "<b>Qanday tekshiramiz:</b>",
     "1. Darhol — oxirgi 50 ta xabarini ko'ramiz: yuk e'lonlari bo'lmasa, qo'shilmaydi.",
     `2. Keyin ${Math.round(rules.trialMs / HOUR)} soat sinov: kamida ${rules.minLoads} ta yuk e'loni chiqsa — doimiy qo'shiladi, chiqmasa — o'chiriladi.`,
@@ -101,7 +109,12 @@ export const INTAKE = {
   needPhone: (withLink = false) =>
     `${ADD_GROUP_TEXT}\n\nBu imkoniyat — raqamini ulashganlar uchun. Pastdagi «${MENU.phone}» tugmasini bosing — ` +
     (withLink ? "yuborgan havolangizni shundan keyin darhol tekshiramiz." : "keyin guruh havolasini yuborasiz."),
-  private: "🔒 Bu yopiq guruhning taklif havolasi. Faqat <b>ochiq</b> guruh yoki kanal qo'shiladi — uning havolasi https://t.me/nomi ko'rinishida bo'ladi.",
+  private:
+    "🔒 Bu yopiq guruh havolasi. Yopiq guruhni qo'shish uchun avval shu guruhga a'zo Telegram akkauntingizni ulang: /account_qosh — keyin havolani qayta yuboring.",
+  notMember:
+    "🔒 Ulangan Telegram akkauntingiz bu guruhga a'zo emas. Akkauntni guruhga qo'shing (yoki qo'shilganiga 30 daqiqa bo'lmagan bo'lsa — biroz kuting), keyin havolani qayta yuboring.",
+  inviteInvalid: "Bu taklif havolasi yaroqsiz yoki muddati o'tgan. Guruhdan yangi havola oling yoki undagi biror xabar havolasini yuboring.",
+  inviteQueued: "🔎 Havola qabul qilindi — ulangan akkauntingiz orqali qaysi guruh ekanini aniqlayapmiz, 1 daqiqada javob beramiz.",
   bot: "🤖 Bu botning manzili. Yuk e'lonlari chiqadigan guruh yoki kanal havolasini yuboring.",
   invalid: "Havola tushunarsiz. Masalan: https://t.me/guruh_nomi yoki @guruh_nomi",
   person: (name) => `👤 @${escapeHtml(name)} — guruh emas, odamning manzili. Guruh yoki kanal havolasini yuboring.`,
@@ -148,6 +161,21 @@ export function existingText(source, { now, trial = null, rules = SOURCE_RULES, 
   return `${head}\n${state}`;
 }
 
+// «🔎 Auto scan» allaqachon qo'shgan guruhni foydalanuvchi o'zi yubordi (Azimjon, 2026-11-13: «"avval qo'shilgan" emas
+// "qo'shildi" degan ma'noda»): u endi shu odamniki (store.claimScannedSource) — javob yangi qo'shilgandek
+export function addedText(source, { trial = null, rules = SOURCE_RULES } = {}) {
+  const title = sourceTitle(source);
+  if (source.checkState === "trial") {
+    return [
+      `✅ ${title} qo'shildi!`,
+      `🧪 Hozir sinovda: ${trial?.loads ?? 0}/${rules.minLoads} yuk e'loni, ${untilText(source.checkUntil)} gacha — kamida ${rules.minLoads} ta chiqsa, doimiy qo'shiladi.`,
+      "Shu paytdan undagi mos e'lonlar sizga ham keladi.",
+    ].join("\n");
+  }
+  if (!source.enabled) return `✅ ${title} qo'shildi.\n⏸ Hozir kuzatuvdan vaqtincha o'chirib qo'yilgan.`;
+  return `✅ ${title} qo'shildi! Undagi mos e'lonlar sizga ham keladi.`;
+}
+
 // api — bot.api; ours — bizning kanal va guruhlar (@nomi, kichik harf bilan solishtiriladi)
 export function createSourceIntake({ api, store, log = console.log, now = Date.now, ours = [], rules = SOURCE_RULES }) {
   const own = new Set(ours.filter(Boolean).map((name) => String(name).replace(/^@/, "").toLowerCase()));
@@ -168,16 +196,40 @@ export function createSourceIntake({ api, store, log = console.log, now = Date.n
     }
   }
 
-  // → HTML matn (javob)
-  async function submit(chatId, username) {
-    if (own.has(username.toLowerCase())) return INTAKE.ours;
-    // Bizda bor manba — limitlardan oldin: u yangi guruh emas, hech narsa sarflamaydi
-    const existing = store.findSource(username);
-    if (existing && existingOf(existing, chatId)) return existingOf(await described(existing), chatId);
+  // Bizda bor manba: «🔎 Auto scan» qo'shgani — endi shu odamniki, «qo'shildi»; aks holda «avvaldan mavjud» (yoki null —
+  // qayta tekshirsa bo'ladi: rad etilganiga vaqt o'tgan / auto scan sinovidan o'tmagani)
+  async function existingReply(existing, chatId) {
+    if (existing.autoScan) {
+      if (existing.checkState === "failed") return null;
+      store.claimScannedSource(existing.name, chatId);
+      log(`Foydalanuvchi ${chatId} Auto scan qo'shgan guruhni o'zi ham yubordi: ${existing.name} — endi uniki`);
+      return addedText(await described(existing), { trial: existing.checkState === "trial" ? trialOf(existing) : null, rules });
+    }
+    const text = existingOf(existing, chatId);
+    return text ? existingOf(await described(existing), chatId) : null;
+  }
+
+  function limitText(chatId) {
     const counts = store.userSourceCounts(chatId);
     if (counts.checking >= rules.checkingMax) return INTAKE.checking(counts.checking);
     if (counts.today >= rules.perDay) return INTAKE.perDay(counts.today);
     if (counts.all >= rules.allPerDay) return INTAKE.allPerDay;
+    return null;
+  }
+
+  // → HTML matn (javob). link — parseSourceLink natijasi ({ username } | { peerId } | { invite }) yoki eski chaqiruvda nom
+  async function submit(chatId, link) {
+    const { username, peerId, invite } = typeof link === "string" ? { username: link } : link;
+    if (peerId || invite) return submitPrivate(chatId, { peerId, invite });
+    if (own.has(username.toLowerCase())) return INTAKE.ours;
+    // Bizda bor manba — limitlardan oldin: u yangi guruh emas, hech narsa sarflamaydi
+    const existing = store.findSource(username);
+    if (existing) {
+      const reply = await existingReply(existing, chatId);
+      if (reply) return reply;
+    }
+    const limit = limitText(chatId);
+    if (limit) return limit;
 
     let chat;
     try {
@@ -203,10 +255,55 @@ export function createSourceIntake({ api, store, log = console.log, now = Date.n
     return INTAKE.accepted(source);
   }
 
+  // Yopiq guruh (2026-11-13): faqat foydalanuvchi ulagan (ishlab turgan) Telegram akkaunti a'zo bo'lsa. Xabar havolasidagi
+  // id — akkauntlarning guruhlar ro'yxatidan (store tg_dialogs) darhol; taklif havolasi — collector aniqlaydi (invite_checks),
+  // javobni finishInvite yozadi
+  const ownAccounts = (chatId) => (store.listTgAccounts?.() ?? []).filter((a) => a.addedBy === Number(chatId) && a.status === "ok").map((a) => a.name);
+  async function submitPrivate(chatId, { peerId, invite }) {
+    const accounts = ownAccounts(chatId);
+    if (!accounts.length) return INTAKE.private;
+    if (invite) {
+      const limit = limitText(chatId);
+      if (limit) return limit;
+      store.addInviteCheck({ chatId, hash: invite, accounts });
+      log(`Foydalanuvchi ${chatId} yopiq guruh taklif havolasini yubordi — akkaunti (${accounts.join(", ")}) tekshiradi`);
+      return INTAKE.inviteQueued;
+    }
+    for (const account of accounts) {
+      const dialog = store.tgDialogs({ account }).find((d) => d.peerId === peerId);
+      if (dialog) {
+        return addPrivate(chatId, { peerId, account, title: dialog.title || null, chatType: dialog.type === "kanal" ? "channel" : "group", members: dialog.members });
+      }
+    }
+    return INTAKE.notMember;
+  }
+
+  async function addPrivate(chatId, { peerId, account, title, chatType, members }) {
+    const existing = store.findSource(peerId);
+    if (existing) {
+      const reply = await existingReply({ ...existing, title: existing.title ?? title, chatType: existing.chatType ?? chatType }, chatId);
+      if (reply) return reply;
+    }
+    const limit = limitText(chatId);
+    if (limit) return limit;
+    const source = { name: peerId, title, members, chatType, account };
+    if (!store.addUserSource({ ...source, chatId })) return INTAKE.later;
+    log(`Foydalanuvchi ${chatId} yopiq guruh qo'shdi: ${peerId} «${title ?? ""}» (akkaunt ${account}) — tekshiruvga`);
+    return INTAKE.accepted(source);
+  }
+
+  // Collector taklif havolasini tekshirib bo'ldi → javob matni (createSourceWatcher yuboradi)
+  async function finishInvite(check) {
+    if (check.state === "found") return addPrivate(check.chatId, check);
+    if (check.state === "not_member") return INTAKE.notMember;
+    if (check.state === "invalid") return INTAKE.inviteInvalid;
+    return INTAKE.later;
+  }
+
   // «➕ Guruh qo'shish» xabari (shu odam qo'shganlari bilan)
   const intro = (chatId) => intakeText(store.userSourcesOf(chatId), { trialStats: trialOf, rules });
 
-  return { submit, intro };
+  return { submit, intro, finishInvite };
 }
 
 // Sinov natijasi (sof funksiya). stats — store.trialStats; until — sinov tugash vaqti.
@@ -262,7 +359,8 @@ const lowerFirst = (text) => (text ? text[0].toLowerCase() + text.slice(1) : tex
 // Har everyMs da: (1) qo'shgan odamga hali aytilmagan natijalar; (2) har reviewMs da sinovdagi manbalar hisobi.
 // send(chatId, html) — bot.js (pastki menyu bilan). Telegram rad etsa (403 bloklagan, 400) ham «aytildi» deb yoziladi —
 // qayta-qayta urinmaymiz; tarmoq xatosi — keyingi safar
-export function createSourceWatcher({ store, send, log = console.log, now = Date.now, everyMs = 10_000, reviewMs = MINUTE, rules = SOURCE_RULES }) {
+// onInvite(check) → matn: yopiq guruh taklif havolasi tekshirildi (createSourceIntake finishInvite)
+export function createSourceWatcher({ store, send, onInvite = null, log = console.log, now = Date.now, everyMs = 10_000, reviewMs = MINUTE, rules = SOURCE_RULES }) {
   let timer = null;
   let busy = false;
   let reviewedAt = -Infinity;
@@ -275,6 +373,21 @@ export function createSourceWatcher({ store, send, log = console.log, now = Date
       if (!verdict.done) continue;
       store.finishTrial(source.name, { ok: verdict.ok, note: verdict.note, stats });
       log(`${source.name}: foydalanuvchi qo'shgan guruh sinovdan ${verdict.ok ? "o'tdi" : "o'tmadi, o'chirildi"} — ${verdict.note}`);
+    }
+  }
+
+  async function invites() {
+    if (!onInvite || !store.inviteResults) return;
+    for (const check of store.inviteResults()) {
+      try {
+        await send(check.chatId, await onInvite(check));
+      } catch (error) {
+        if (!(error instanceof GrammyError)) {
+          log(`Yopiq guruh natijasi yuborilmadi (${check.chatId}): ${error.message}`);
+          return; // tarmoq — keyingi safar
+        }
+      }
+      store.markInviteReported(check.id);
     }
   }
 
@@ -300,6 +413,7 @@ export function createSourceWatcher({ store, send, log = console.log, now = Date
     busy = true;
     try {
       if (now() - reviewedAt >= reviewMs) review();
+      await invites();
       await notify();
     } catch (error) {
       log(`Foydalanuvchi guruhlari tekshirilmadi: ${error.message}`);
