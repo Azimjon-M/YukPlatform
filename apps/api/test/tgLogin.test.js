@@ -6,6 +6,7 @@ import { openStore } from "@yuk/store";
 import { createPublicApp } from "../src/public.js";
 import { createSessions } from "../src/telegramAuth.js";
 import { cleanCode, createTgLogin, maskPhone, normalizeLoginPhone } from "../src/tgLogin.js";
+import { createLoginSession } from "../../collector/src/loginWorker.js";
 
 const ENV = { TG_API_ID: "1", TG_API_HASH: "test" };
 const USER = { userId: "77", username: "yuk_ikki", firstName: "Ikkinchi" };
@@ -387,4 +388,68 @@ test("Mini App API /pub/me/tg-accounts: har kim faqat o'zinikini ko'radi, admin 
   } finally {
     server.close();
   }
+});
+
+// Server (tgLogin) + HAQIQIY worker (createLoginSession) birga — fork o'rniga in-process ulanadi.
+// Boshqa testlar ikkalasini ALOHIDA soxtalashtiradi; bu — ular orasidagi shartnomani (xato parol → qayta so'rash)
+// uchidan-uchiga qulflaydi. Azimjon hodisasi: «2FA 1 marta xato bo'lsa boshidan» — bu bo'lmasligi kerak.
+function bridgeWorkerStore() {
+  const USER = { id: 77, username: "yuk_ikki", firstName: "Ikki" };
+  const err = (code) => Object.assign(new Error(code), { errorMessage: code });
+  const telegram = {
+    createClient: async () => ({ fake: true }),
+    sendLoginCode: async () => ({ phoneCodeHash: "h1", via: "app", length: 5 }),
+    signInWithCode: async (c, { code }) => (code === "22222" ? { password: true, hint: "mushuk" } : { user: USER }),
+    signInWithPassword: async (c, pw) => {
+      if (pw !== "good") throw err("PASSWORD_HASH_INVALID");
+      return { user: USER };
+    },
+    userInfo: (u) => ({ userId: String(u.id), username: u.username, firstName: u.firstName }),
+    saveSession: async () => {},
+    closeAuthorization: async () => {},
+    disconnect: async () => {},
+  };
+  const spawn = () => {
+    const child = new EventEmitter();
+    child.sent = [];
+    const session = createLoginSession({ telegram, send: async (m) => void child.emit("message", m) });
+    child.send = (m) => {
+      child.sent.push(m);
+      if (m?.type === "cancel") return void child.emit("exit", 0);
+      session.handle(m);
+    };
+    child.kill = () => child.emit("exit", null);
+    return child;
+  };
+  const store = openStore({ file: ":memory:" });
+  stores.push(store);
+  return createTgLogin({ store, env: ENV, spawn, log: () => {} });
+}
+
+test("haqiqiy worker bilan: 2FA bir marta xato bo'lsa — parol bosqichida qoladi, 3 urinishdan keyin to'xtaydi", async () => {
+  const tgLogin = bridgeWorkerStore();
+  const s = await tgLogin.start({ name: "ikkinchi", phone: "+998901234567", by: 5 });
+  assert.equal((await tgLogin.code(s.id, "22222", 5)).step, "password");
+
+  // 1-xato: boshiga QAYTMAYDI — parol bosqichida qoladi, «Qayta kiriting»
+  const p1 = await tgLogin.password(s.id, "yomon", 5);
+  assert.equal(p1.step, "password", "bir marta xato — kirish boshidan boshlanmasligi kerak");
+  assert.match(p1.error, /Qayta kiriting/);
+
+  // 2-xato ham: hali qayta urinsa bo'ladi
+  assert.equal((await tgLogin.password(s.id, "yomon2", 5)).step, "password");
+
+  // 3-xato: urinishlar tugadi
+  const p3 = await tgLogin.password(s.id, "yomon3", 5);
+  assert.equal(p3.step, "failed");
+  assert.match(p3.error, /Urinishlar tugadi/);
+});
+
+test("haqiqiy worker bilan: xato parol, keyin to'g'ri parol — kirish tugaydi", async () => {
+  const tgLogin = bridgeWorkerStore();
+  const s = await tgLogin.start({ name: "ikkinchi", phone: "+998901234567", by: 5 });
+  await tgLogin.code(s.id, "22222", 5);
+  assert.equal((await tgLogin.password(s.id, "yomon", 5)).step, "password");
+  const done = await tgLogin.password(s.id, "good", 5);
+  assert.deepEqual([done.step, done.user.userId], ["done", "77"]);
 });
