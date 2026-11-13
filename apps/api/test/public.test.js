@@ -306,7 +306,12 @@ test("yuk beruvchi: rol almashsa sozlamalar saqlanib, qaytganda tiklanadi; bo'sh
   assert.equal(switched.status, 200);
   assert.equal(switched.body.role, "yuk_beruvchi");
   assert.equal(switched.body.profile, null);
-  assert.equal((await call("GET", "/pub/trucks", { token })).body.code, "no_profile");
+  // Profil (ro'yxatdan o'tish) shart emas (Azimjon, 2026-11-12) — bo'sh profil bilan ham mos mashinalar keladi
+  const profileless = await call("GET", "/pub/trucks", { token });
+  assert.equal(profileless.status, 200, "profilisiz yuk beruvchiga ham mashinalar");
+  assert.deepEqual(profileless.body.items.map((i) => i.load.fromCity).sort(), ["Andijon", "Samarqand"]);
+  assert.equal((await call("PATCH", "/pub/me", { token, body: { active: false } })).body.active, false);
+  assert.equal((await call("PATCH", "/pub/me", { token, body: { active: true } })).body.active, true, "profilisiz ham yoqiladi");
   assert.equal((await call("GET", "/pub/loads", { token })).body.code, "role");
   assert.equal((await call("GET", "/pub/loads?view=all", { token })).status, 200, "yuklarni ko'rish mumkin");
 
@@ -341,6 +346,36 @@ test("yuk beruvchi: rol almashsa sozlamalar saqlanib, qaytganda tiklanadi; bo'sh
   const driverAgain = await call("PUT", "/pub/me/role", { token, body: { role: "haydovchi" } });
   assert.equal(driverAgain.body.profile.vehicle.truckClass, "isuzu");
   assert.equal(driverAgain.body.profiles, undefined, "yashirilgan sozlamalar javobda yo'q");
+});
+
+test("«Mashinalar» xaritadan tanlangan nuqtaga yaqin masofa bo'yicha (near=lat,lng)", async () => {
+  // Yuk beruvchi profilisiz: Samarqand shimolidagi nuqta tanlandi
+  store.saveDriver(561, { name: "Yaqindan izlovchi" });
+  const token = sessions.issue(561);
+  assert.equal((await call("PUT", "/pub/me/role", { token, body: { role: "yuk_beruvchi" } })).status, 200);
+
+  const near = await call("GET", "/pub/trucks?near=39.65,66.96&r=50", { token });
+  assert.equal(near.status, 200);
+  assert.deepEqual(near.body.near, { lat: 39.65, lon: 66.96 });
+  assert.equal(near.body.r, 50);
+  // Faqat Samarqand (≈2 km) — Andijon (≈475 km) Radiusdan tashqarida
+  assert.deepEqual(near.body.items.map((i) => i.load.fromCity), ["Samarqand"]);
+  assert.equal(near.body.items[0].distanceKm, 2, "kartochka uchun masofa km da");
+  assert.equal(near.body.total, 1);
+
+  // Radius katta bo'lsa — ikkalasi, eng yaqini tepada
+  const wide = await call("GET", "/pub/trucks?near=39.65,66.96&r=1000", { token });
+  assert.deepEqual(wide.body.items.map((i) => [i.load.fromCity, i.distanceKm]), [["Samarqand", 2], ["Andijon", 475]]);
+
+  // near — view=all da ham ishlaydi va «Qayerda» filtri bilan birga
+  const filtered = await call("GET", "/pub/trucks?view=all&near=40.7,71.6&r=100", { token });
+  assert.deepEqual(filtered.body.items.map((i) => [i.load.fromCity, i.distanceKm]), [["Andijon", 64]]);
+
+  // noto'g'ri near — filtr yo'q, oddiy ro'yxat (eski server bilan ham buzilmasin)
+  const bad = await call("GET", "/pub/trucks?near=bo'lib+qoldi", { token });
+  assert.equal(bad.status, 200);
+  assert.equal(bad.body.near, undefined);
+  assert.equal(bad.body.items[0].distanceKm, undefined, "near bo'lmasa masofa yo'q");
 });
 
 test("hisobdan chiqish: rol va sozlamalar yashiriladi, mos yuklar yo'q, botga xabar; rolni tanlasa — tiklanadi", async () => {
@@ -471,11 +506,11 @@ test("web fayllari: / va boshqa sahifalar index.html; noma'lum /pub — JSON 404
   assert.equal(missing.body.error, "Topilmadi");
 });
 
-test("boshqaruv markazi: haydovchi nomidan web havolasi (token # ichida)", async () => {
+test("boshqaruv markazi: haydovchi nomidan web havolasi (token ?t= da — nginx /admin Redirect'iga tushmasin)", async () => {
   const response = await fetch(`${adminBase}/api/drivers/555/web-link`, { method: "POST", headers: { "x-yuk-admin": "1" } });
   const { url } = await response.json();
-  assert.match(url, /^http:\/\/localhost:3001\/#token=/);
-  assert.equal(sessions.verify(url.split("#token=")[1]), 555);
+  assert.match(url, /^http:\/\/localhost:3001\/\?t=/);
+  assert.equal(sessions.verify(url.split("?t=")[1]), 555);
   const missing = await fetch(`${adminBase}/api/drivers/1/web-link`, { method: "POST", headers: { "x-yuk-admin": "1" } });
   assert.equal(missing.status, 404);
 });

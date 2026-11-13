@@ -27,3 +27,6 @@ data/secret.key
 # Tashqi dasturlar (nginx.exe — nginx.org dan yuklanadi, README) va nginx ish papkasi (sozlama, loglar)
 tools/
 data/nginx/
+
+# Sinovlardan qolgan bo'sh baza nusxalari
+data/*.bo-shaq

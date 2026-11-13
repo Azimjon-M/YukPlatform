@@ -50,7 +50,7 @@ Profili yo'q haydovchi «Hammasi» ni ko'radi va ilova uni sozlamalarga olib bor
 - **Saytda** — avval «📲 Telegram'da ochish» (botga), keyin «Telegram bilan kirish» vidjeti. Vidjet faqat
   @BotFather → `/setdomain` da ko'rsatilgan domenda ishlaydi; boshqa joyda «Bot domain invalid» chiqadi.
   **Telegram ichida kirish sahifasi va vidjet hech qachon chiqmaydi.**
-- **Sinash uchun** — boshqaruv markazi → Haydovchilar → «Web'da ochish» (havola `#token=...` bilan, 12 soat).
+- **Sinash uchun** — boshqaruv markazi → Haydovchilar → «Web'da ochish» (havola `?t=...` bilan, 12 soat).
 
 Server bergan token brauzerda saqlanadi (`localStorage`, 30 kun). Telefon raqamlari faqat kirgan haydovchiga ko'rinadi.
 
@@ -73,7 +73,7 @@ npm run web:build    # yig'ish: apps/web/dist
 ```
 
 `npm run web` da `/pub` so'rovlari haydovchilar serveriga (3001) uzatiladi — server ishlab turishi kerak
-(`npm start` yoki `npm run api`). Kirish uchun boshqaruv markazidagi «Web'da ochish» havolasidagi `#token=...`
+(`npm start` yoki `npm run api`). Kirish uchun boshqaruv markazidagi «Web'da ochish» havolasidagi `?t=...`
 qismini 5173 manziliga qo'shing.
 
 ## Internetga chiqarish

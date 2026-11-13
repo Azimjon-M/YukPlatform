@@ -29,6 +29,16 @@ export class ApiError extends Error {
   }
 }
 
+// Sessiya muddati tugaganda (401) barcha sahifalar bir marta xabar oladi — App.jsx kirish sahifasini qayta ochadi
+const unauthorizedListeners = new Set();
+export function onUnauthorized(fn) {
+  unauthorizedListeners.add(fn);
+  return () => unauthorizedListeners.delete(fn);
+}
+function noteUnauthorized(status) {
+  if (status === 401) for (const fn of unauthorizedListeners) fn();
+}
+
 // Javob matni → ma'lumot yoki ApiError. API xatolari doim { error: "..." } JSON bo'ladi;
 // JSON bo'lmagan xato (Vite proxy 500, server yig'ilmagan) — server ishlamayapti deb hisoblaymiz.
 // meta — xato qaysi so'rovda chiqqani (method, path, durationMs): «Xatolar» bo'limida ko'rinadi
@@ -79,7 +89,11 @@ async function request(method, path, { params, body, timeoutMs = method === "GET
     }
     return readResponse(status, text, meta());
   } catch (error) {
-    if (error instanceof ApiError) recordError(error);
+    if (error instanceof ApiError) {
+      noteUnauthorized(error.status);
+      // 401 — parol/sessiya masalasi, «Xatolar» jurnaliga yozilmaydi (sahifani chalg'itmasligi uchun)
+      if (error.status !== 401) recordError(error);
+    }
     throw error;
   } finally {
     clearTimeout(timer);

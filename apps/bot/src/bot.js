@@ -124,8 +124,10 @@ const ROLE_TEXT = {
   },
   yuk_beruvchi: {
     chosen: "📦 Yuk beruvchisiz.",
-    // Ro'yxatdan o'tish (sozlamalar) nima beradi — yuk beruvchida u ixtiyoriy
-    register: "bo'sh mashina e'lonlari ham kerak bo'lsa: yo'nalishingiz va qanday mashina kerakligi (1 daqiqalik forma)",
+    // Sozlamalar nima beradi — yuk beruvchida u IXTIYORIY (Azimjon, 2026-11-12: ro'yxatdan o'tish umuman shart emas,
+    // «1 daqiqalik forma» deb majbur qilinmaydi). «🚚 Ro'yxatdan o'tish» so'zi yuk beruvchida endi ishlatilmaydi.
+    // Shaxsiy avtomatik xabarlar uchun profil kerak (store.activeUsers `profile IS NOT NULL`) — matn shuni ma'qul ko'radi.
+    register: "ixtiyoriy: yo'nalish va mashina tanlasangiz, mos bo'sh mashinalar botga shaxsiy xabar bo'lib keladi",
     one: "bo'sh mashina",
     many: "bo'sh mashinalar",
     matches: "oxirgi 24 soatdagi mos bo'sh mashinalar",
@@ -150,17 +152,27 @@ function helpText(driver) {
   const roleLine = `${MENU.role} — haydovchi va yuk beruvchi`;
   // Yuk beruvchida birinchi qator — «📦 Yuk berish» (menu.js)
   const loadLine = role === "yuk_beruvchi" ? [`${MENU.giveLoad} — yukingizni haydovchilarga yuborish: forma yoki shu yerga oddiy xabar`] : [];
-  const menuLines = driver?.profile
+  // Sozlamalar qatori: profil bo'lsa — nima tanlangani, bo'lmasa — nima uchun kerakligi. Yuk beruvchida u qator
+  // «ixtiyoriy» ni aytadi (t.register), haydovchida — «1 daqiqalik forma» (/start oxirida)
+  const settingsLine = driver?.profile
+    ? `${settingsLabel(driver)} — ${t.settings}`
+    : `${settingsLabel(driver)} — ${t.register ?? "sizga qanday e'lonlar yo'naltirishimiz haqida"}`;
+  // Yuk beruvchi (Azimjon, 2026-11-12): ro'yxat shart emas — menyuda hamma tugma bor, yordamda ham shular ro'yxati.
+  // Haydovchida esa ro'yxatgacha faqat 2 qator (qolgan tugmalar menyuda yo'q).
+  // Azimjon, 2026-11-12 (ya'ni qoida): «⏸ Pauza / ▶️ Davom ettirish» va «➕ Guruh qo'shish» FAQAT haydovchi uchun —
+  // yuk_beruvchi yordamida bu qatorlar yo'q (menyu bilan bir xil, menu.js)
+  const isShipper = role === "yuk_beruvchi";
+  const menuLines = driver?.profile || isShipper
     ? [
         `${matchesLabel(driver)} — ${t.matches}`,
-        `${MENU.pause} / ${MENU.resume} — yuborishni to'xtatish va yoqish`,
+        ...(isShipper ? [] : [`${MENU.pause} / ${MENU.resume} — yuborishni to'xtatish va yoqish`]),
         roleLine,
-        driver.phone
+        driver.phone && !isShipper
           ? ADD_GROUP_TEXT
           : `${MENU.phone} — raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi va joyidan davom etasiz`,
-        `${settingsLabel(driver)} — ${t.settings}`,
+        settingsLine,
       ]
-    : [`${settingsLabel(driver)} — ${t.register ?? "sizga qanday e'lonlar yo'naltirishimiz haqida"}`, roleLine]; // «1 daqiqalik forma» — /start oxirida
+    : [settingsLine, roleLine];
   return [
     INTRO,
     "",
@@ -394,10 +406,12 @@ export function createBot({
   }
 
   // Oxirgi 24 soatdagi mos e'lonlar: haydovchiga yuklar, yuk beruvchiga bo'sh mashinalar
+  // Profil bo'lmasa (yuk beruvchi — Azimjon, 2026-11-12: ro'yxatdan o'tish shart emas) — {} bilan tekshiramiz:
+  // matchTruck uchun bo'sh cheklovlar = cheklov yo'q, ya'ni ro'yxatsiz yuk beruvchi FILTRSIZ ro'yxat oladi
   function matching(user) {
     const kind = ROLE_KIND[roleOf(user)];
     const matches = KIND_MATCHERS[kind];
-    return store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind }).filter((row) => matches(row.load, user.profile).ok);
+    return store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind }).filter((row) => matches(row.load, user.profile ?? {}).ok);
   }
 
   // Yangi xabar yoki o'sha xabarni o'zgartirish (tugma bosilganda). "message is not modified" — o'sha tugma ikki marta bosildi.
@@ -456,7 +470,12 @@ export function createBot({
     rememberRouteMessage(ctx.chat.id, await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit));
   }
 
-  // «Iltimos, rolingizni tanlang» (yoki /rol da — hozirgi rol) — ikki tugma (r:haydovchi / r:yuk_beruvchi)
+  // «Iltimos, rolingizni tanlang» (yoki /rol da — hozirgi rol) — ikki tugma (r:haydovchi / r:yuk_beruvchi).
+  // Azimjon, 2026-11-12 (aniqlik): pastki menyu (reply keyboard) va menyuni ochib-yopuvchi tugma FAQAT rol
+  // tanlanmagan hisobda yo'q bo'ladi; rol tanlangan odamda «🔄 Rolni almashtirish» / /rol so'rovi paytida
+  // ham pastki menyu KO'RINIB TURADI. Shuning uchun bu yerda remove_keyboard yo'q — oddiy bitta xabar va
+  // inline roleKeyboard(); inline tugmalar reply keyboardni yashirmaydi. Menyu faqat menu()ning
+  // remove_keyboard'ida (rol yo'q) va /start oldidan o'chiriladi.
   async function askRole(ctx, driver = null) {
     const role = roleOf(driver);
     const text = role
@@ -486,12 +505,20 @@ export function createBot({
     await showStep(ctx, draft);
   }
 
-  // Sozlamalar: Mini App bo'lsa — pastki menyudagi tugma uni ochadi; bo'lmasa — chatda savol-javob
+  // Sozlamalar: Mini App bo'lsa — pastki menyudagi tugma uni ochadi; bo'lmasa — chatda savol-javob.
+  // Yuk beruvchida savol-javob yo'q (Azimjon, 2026-11-12: ro'yxatdan o'tish shart emas) — iqtisodiy qisqa javob:
+  // uning uchun sozlamalar IXTIYORIY, «🚚 Bo'sh mashinalar» sozlamasiz ham ochiladi
   async function openSettings(ctx) {
     const driver = rememberUser(ctx);
     const role = roleOf(driver);
     if (!role) return showStart(ctx);
-    if (!appUrl()) return startWizard(ctx, driver.profile, role);
+    if (!appUrl()) {
+      if (role === "yuk_beruvchi") {
+        await ctx.reply(`⚙️ Sozlamalar — ${ROLE_TEXT.yuk_beruvchi.register}.\n\n«${MENU.trucks}» sozlamalarsiz ham ochiladi.`, menu(driver));
+        return;
+      }
+      return startWizard(ctx, driver.profile, role);
+    }
     await ctx.reply(`Pastdagi «${settingsLabel(driver)}» tugmasini bosing — forma ochiladi. To'ldirib, «Saqlash» ni bosasiz.`, menu(driver));
   }
 
@@ -586,19 +613,24 @@ export function createBot({
 
   async function setActive(ctx, active) {
     const driver = rememberUser(ctx);
-    if (!driver.profile) return openSettings(ctx);
+    // Azimjon, 2026-11-12: «⏸ Pauza / ▶️ Davom ettirish» tugmalari pastki menyuda FAQAT haydovchida. Lekin handler
+    // O'CHIRILMAGAN — eski menyuda bosilsa yoki idle DM'dagi inline «▶️ Davom ettirish» kelib qolsa ishlayveradi,
+    // shuning uchun yuk beruvchida ham pauza profilsiz qabul qilinadi (profil faqat shaxsiy avtomatik xabarlar uchun)
+    if (!driver.profile && roleOf(driver) !== "yuk_beruvchi") return openSettings(ctx);
     const updated = store.saveDriver(ctx.chat.id, { active });
     await ctx.reply(active ? "▶️ Yuk yuborish yoqildi." : `⏸ Yuk yuborish to'xtatildi. Qayta yoqish: «${MENU.resume}»`, menu(updated));
   }
 
   // «📋 Mos yuklar» (haydovchi) yoki «🚚 Bo'sh mashinalar» (yuk beruvchi) — eski menyu tugmasi bosilsa ham hozirgi rol bo'yicha.
-  // Haydovchidan avval yo'nalish so'raladi (route.js), yuk beruvchiga — darhol ro'yxat
+  // Haydovchidan avval yo'nalish so'raladi (route.js), yuk beruvchiga — darhol ro'yxat.
+  // Yuk beruvchi profilsiz ham darhol ro'yxatni oladi (Azimjon, 2026-11-12: ro'yxatdan o'tish shart emas) — filtr
+  // bo'lmagani cheklov yo'qligi (matching → matchTruck({})). Haydovchida esa avvalgi xatti-harakat: profil so'raladi
   async function showMatches(ctx) {
     const driver = rememberUser(ctx);
     const role = roleOf(driver);
     if (!role) return showStart(ctx);
     const t = ROLE_TEXT[role];
-    if (!driver.profile) {
+    if (!driver.profile && role !== "yuk_beruvchi") {
       await ctx.reply(`Avval ${t.setup} kiriting: «${settingsLabel(driver)}».`, menu(driver));
       return;
     }

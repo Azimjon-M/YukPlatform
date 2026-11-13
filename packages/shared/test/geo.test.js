@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CITY_COORDS, COUNTRIES, REGIONS, lookupCity, normalizePlaces, placePoint } from "../src/index.js";
+import { CITY_COORDS, COUNTRIES, REGIONS, distanceKm, lookupCity, normalizePlaces, placePoint } from "../src/index.js";
 
 // Koordinatasini bilmagan joylar — xaritada viloyat nuqtasiga tushadi
 const UNKNOWN = new Set(["Jomasho'y", "Ravon", "Qarluq"]);
@@ -70,4 +70,18 @@ test("xorijiy shaharlarning boshqa yozilishi parserda ham bitta nomga keladi", (
   const out = normalizePlaces({ toCity: "Almata", toCountry: "Qozog'iston" });
   assert.equal(out.toCity, "Olmaota");
   assert.equal(out.toRegion, "xorij");
+});
+
+// distanceKm — yuk beruvchi xaritadan tanlagan nuqtadan masofa (Azimjon, 2026-11-12)
+test("distanceKm — ma'lum masofalar", () => {
+  const tashkent = { lat: 41.2995, lon: 69.2401 };
+  const samarkand = { lat: 39.6542, lon: 66.9597 };
+  assert.equal(distanceKm(tashkent, tashkent), 0);
+  // Toshkent → Samarqand ≈ 275 km (tavsiy etiladigan yo'l ~ 275–280 km)
+  assert.ok(Math.abs(distanceKm(tashkent, samarkand) - 275) < 12, distanceKm(tashkent, samarkand));
+  // tartib muhim emas
+  assert.equal(distanceKm(tashkent, samarkand), distanceKm(samarkand, tashkent));
+  // 1 gradus enlama ~ 85 km (41° kenglikda)
+  const one = distanceKm({ lat: 41.3, lon: 69.24 }, { lat: 41.3, lon: 70.24 });
+  assert.ok(one > 80 && one < 90, one);
 });

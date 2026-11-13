@@ -264,19 +264,60 @@ test("pastki menyudagi «🔄 Rolni almashtirish» — /rol bilan bir xil: hozir
   const { store, calls, message, press } = setup({ config: { miniappUrl: MINIAPP, admins: [42] } });
   store.saveDriver(42, { role: "haydovchi", profile: PROFILE, active: true, phoneAskedAt: 1 });
   await message(PRIVATE, MENU.role);
-  const sent = calls.filter((c) => c.method === "sendMessage").at(-1);
-  assert.match(sent.payload.text, /Hozir siz: <b>🚚 Haydovchi[\s\S]*alohida saqlanadi/);
-  assert.deepEqual(inlineButtons(sent).map((b) => b.callback_data), ["r:haydovchi", "r:yuk_beruvchi"]);
+  // Azimjon, 2026-11-12 (aniqlik): rol TANLANGAN hisobda pastki menyu qoladi — «🔄 Rolni almashtirish» so'rovi
+  // inline tugmalar bilan yuboriladi va remove_keyboard BO'LMAYDI (menyu faqat rol tanlanmagan hisobda yo'q)
+  const roleMsg = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.deepEqual(inlineButtons(roleMsg).map((b) => b.callback_data), ["r:haydovchi", "r:yuk_beruvchi"]);
+  assert.ok(!roleMsg.payload.reply_markup?.remove_keyboard, "rol so'rovi pastki menyuni o'chirmaydi");
+  assert.match(roleMsg.payload.text, /Hozir siz: <b>🚚 Haydovchi[\s\S]*alohida saqlanadi/);
   await press("r:yuk_beruvchi");
   assert.equal(store.getDriver(42).role, "yuk_beruvchi");
   const rows = () => lastMarkup(calls).keyboard.map((row) => row.map((b) => b.text));
-  // Yuk beruvchi sifatida hali ro'yxatdan o'tmagan — «📦 Yuk berish» + 3 tugma (admin bo'lsa ham). Ro'yxat shart emas
-  // (Azimjon, 2026-11-10: forma faqat bo'sh mashina e'lonlari uchun)
-  assert.deepEqual(rows(), [[MENU.giveLoad], [MENU.register], [MENU.role, MENU.help]]);
+  // Yuk beruvchi sifatida hali ro'yxatdan o'tmagan, lekin TO'LIQ menyu oladi (admin bo'lsa ham): «🚚 Ro'yxatdan o'tish»
+  // endi yuk beruvchida yo'q — tugma «⚙️ Sozlamalar», u IXTIYORIY. Azimjon, 2026-11-12: «Bizga yuk beruvchi uchun
+  // Ro'yxatdan o'tish kerak emas!» + «⏸ Pauza/"davom etish" va "➕ Guruh qo'shish" faqat haydovchi roli uchun!» —
+  // yuk beruvchi tartibi: [📦 Yuk berish] / [🚚 Bo'sh mashinalar + 🔄 Rolni almashtirish] /
+  // [📱 Raqam ulashish + ❓ Yordam] / [⚙️ Sozlamalar] / [🛠 Boshqaruv] — Pauza yo'q
+  assert.deepEqual(rows(), [[MENU.giveLoad], [MENU.trucks, MENU.role], [MENU.phone, MENU.help], [MENU.settings], [MENU.admin]]);
+  assert.ok(!buttons(lastMarkup(calls)).some((b) => b.text === MENU.register), "yuk beruvchida «🚚 Ro'yxatdan o'tish» tugmasi yo'q");
   // Haydovchiga qaytdi — sozlamalari tiklandi, to'liq menyu. Tartib (Azimjon, 2026-11-10): mos yuklar, pauza, rol, raqam,
   // yordam, sozlamalar; admin tugmasi alohida pastda
   await press("r:haydovchi");
   assert.deepEqual(rows(), [[MENU.loads, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings], [MENU.admin]]);
+});
+
+// Azimjon, 2026-11-12: «Botda Yuk beruvchi rolida muammo bor: men ushbu rejimda pastki menyuda pauza/"davom etish"
+// va "➕ Guruh qo'shish" ni ko'rdim va ushbu sozlama faqat haydovchi roli uchun!» — qoida: «⏸ Pauza / ▶️ Davom
+// ettirish» va «➕ Guruh qo'shish» FAQAT haydovchi menyuda. Handlerlar o'chirilmagan (eski menyuda bosilsa ishlaydi).
+test("«⏸ Pauza / ▶️ Davom ettirish» va «➕ Guruh qo'shish» FAQAT haydovchi menyuda (yuk beruvchida yo'q)", async () => {
+  const { store, calls, message } = setup();
+  // Haydovchi: raqami bor — menyuda pauza VA «➕ Guruh qo'shish» bor
+  store.saveDriver(42, { role: "haydovchi", profile: PROFILE, active: true, phone: "+998901234567", phoneAskedAt: 1 });
+  await message(PRIVATE, MENU.help);
+  let texts_ = buttons(lastMarkup(calls)).map((b) => b.text);
+  assert.ok(texts_.includes(MENU.pause), "haydovchida «⏸ Pauza» bor");
+  assert.ok(texts_.includes(MENU.addGroup), "haydovchida raqam bor — «➕ Guruh qo'shish» bor");
+  // Pauzaga tushdi — tugma «▶️ Davom ettirish» bo'lib qoladi (faqat haydovchida)
+  await message(PRIVATE, MENU.pause);
+  assert.equal(store.getDriver(42).active, false);
+  texts_ = buttons(lastMarkup(calls)).map((b) => b.text);
+  assert.ok(texts_.includes(MENU.resume), "haydovchi pauzada — «▶️ Davom ettirish» bor");
+  assert.ok(!texts_.includes(MENU.pause), "pauzada «⏸ Pauza» tugmasi yo'q");
+  await message(PRIVATE, MENU.resume);
+
+  // Yuk beruvchi: ro'yxatga kirgan (profil+raqam bilan) bo'lsa ham — pauza/resume/addGroup YO'Q
+  store.saveDriver(42, { role: "yuk_beruvchi", profile: { fromAreas: ["toshkent"], truckClasses: [] }, active: true, phone: "+998901234567", phoneAskedAt: 1 });
+  await message(PRIVATE, MENU.help);
+  texts_ = buttons(lastMarkup(calls)).map((b) => b.text);
+  assert.deepEqual(texts_, [MENU.giveLoad, MENU.trucks, MENU.role, MENU.phone, MENU.help, MENU.settings]);
+  assert.ok(!texts_.includes(MENU.pause) && !texts_.includes(MENU.resume), "yuk beruvchida pauza tugmasi yo'q");
+  assert.ok(!texts_.includes(MENU.addGroup), "yuk beruvchida «➕ Guruh qo'shish» yo'q");
+  // Handler o'chirilmagan: yuk beruvchi eski menyudan «⏸ Pauza» ni yuborsa — baribir ishlaydi (FAQAT tugma ko'rsatilmaydi)
+  await message(PRIVATE, MENU.pause);
+  assert.equal(store.getDriver(42).active, false, "eski menyudagi «⏸ Pauza» bosilsa ishlaydi");
+  assert.ok(!buttons(lastMarkup(calls)).some((b) => b.text === MENU.resume), "yangi menyuda «▶️ Davom ettirish» ham yo'q");
+  await message(PRIVATE, MENU.resume);
+  assert.equal(store.getDriver(42).active, true);
 });
 
 test("Mini App formasi saqlanadi → «Qayerdan? Qayerga?»; yo'nalish keyingi saqlashda ham qoladi", async () => {
@@ -594,20 +635,57 @@ test("tunnel manzili o'zgarsa: «📞 Telefon qilish» va pastki menyu yangi man
   assert.ok(buttons(markup).some((b) => b.text === MENU.settings));
 });
 
-test("yuk beruvchi: rol → «Yuk berish» haqida; «Ro'yxatdan o'tish» → savol-javob → saqlash; menyuda «🚚 Bo'sh mashinalar»", async () => {
-  const { store, calls, command, press, message } = setup();
+test("yuk beruvchi: rol → «Yuk berish»; ro'yxat shart emas — «🚚 Bo'sh mashinalar» filtrsiz, «⚙️ Sozlamalar» ixtiyoriy", async () => {
+  const { store, calls, command, press, message, webAppData } = setup();
   await command("/start");
   await press("r:yuk_beruvchi");
-  // Rol tanlangach savol-javob boshlanmaydi: yuk berish uchun ro'yxat shart emas (Azimjon, 2026-11-10: «Shart emas»)
-  assert.match(texts(calls).at(-1), /^📦 Yuk beruvchisiz\.[\s\S]*Yuk berish[\s\S]*oddiy xabar[\s\S]*\n«🚚 Ro'yxatdan o'tish» — bo'sh mashina e'lonlari ham kerak bo'lsa/);
+  // Rol tanlangach savol-javob boshlanmaydi: yuk berish uchun ro'yxat shart emas (Azimjon, 2026-11-10: «Shart emas»).
+  // Oxirgi qator o'zgardi (Azimjon, 2026-11-12: «Bizga yuk beruvchi uchun Ro'yxatdan o'tish kerak emas!»): yuk
+  // beruvchida «🚚 Ro'yxatdan o'tish» so'zi umuman qolmadi — tugma «⚙️ Sozlamalar» va u IXTIYORIY e'lan qilinadi.
+  // Azimjon, 2026-11-12 (yangi): «bot chatiga yuk haqida ma'lumotni yozib tushsam ham bo'lishligini 1-o'rinda va bold
+  // qilib yozib ber» — loadIntro endi «yozib yuboring» (bold) ni formadan OLDIN qo'yadi (tartib index bilan tekshiriladi)
+  const introMsg = texts(calls).at(-1);
+  assert.match(introMsg, /^📦 Yuk beruvchisiz\.[\s\S]*<b>Shu chatga yuk haqida ma'lumotni yozib yuboring<\/b> — masalan:\n<b>Andijondan Toshkentga[\s\S]*\n«⚙️ Sozlamalar» — ixtiyoriy: yo'nalish va mashina tanlasangiz/);
+  // Bu stendda miniapp yo'q (form=false) — forma qatori va raqamlash umuman bo'lmasligi kerak
+  assert.ok(!introMsg.includes("forma (1 daqiqa)"), "web forma manzili yo'q — 2️⃣ qatori yo'q");
+  assert.ok(!introMsg.includes("1️⃣") && !introMsg.includes("2️⃣"), "forma bo'lmasa raqam ham yo'q");
   assert.equal(store.getDriver(42).draft, null);
-  assert.deepEqual(buttons(lastMarkup(calls)).map((b) => b.text), [MENU.giveLoad, MENU.register, MENU.role, MENU.help]);
-  await message(PRIVATE, MENU.register);
-  assert.match(texts(calls).at(-1), /Yukingiz qayerda yuklanadi/);
-  for (const data of ["w:from:t.samarqand", "w:from:ok", "w:to:ok", "w:classes:t.fura", "w:classes:ok", "w:bodies:ok", "w:intl:yoq"]) {
-    await press(data);
-  }
-  await press("w:done:save");
+  // Eski kutish 3 tugma edi ([📦 Yuk berish] / [🚚 Ro'yxatdan o'tish] / [🔄 Rol + ❓ Yordam]) — endi ro'yxatsiz yuk
+  // beruvchi ham TO'LIQ menyuni oladi (Azimjon, 2026-11-12); «🚚 Ro'yxatdan o'tish» tugmasi yo'q.
+  // Azimjon, 2026-11-12 ( Yangi qoida): «⏸ Pauza» va «➕ Guruh qo'shish» FAQAT haydovchi uchun — yuk beruvchi
+  // menyularida ular yo'q. Tartib: [📦 Yuk berish] / [🚚 Bo'sh mashinalar + 🔄 Rolni almashtirish] /
+  // [📱 Raqam ulashish + ❓ Yordam] / [⚙️ Sozlamalar]
+  const shipperMenuTexts = () => buttons(lastMarkup(calls)).map((b) => b.text);
+  assert.deepEqual(shipperMenuTexts(), [MENU.giveLoad, MENU.trucks, MENU.role, MENU.phone, MENU.help, MENU.settings]);
+  assert.ok(!shipperMenuTexts().includes(MENU.pause) && !shipperMenuTexts().includes(MENU.resume), "yuk beruvchida pauza tugmasi yo'q");
+  assert.ok(!shipperMenuTexts().includes(MENU.addGroup), "yuk beruvchida «➕ Guruh qo'shish» tugmasi yo'q");
+
+  // 24 soatdagi bo'sh mashinalar (profil yo'q): FILTRSIZ ro'yxat — Samarqanddagi ham, Nukusdagi ham keladi; yuk
+  // e'loni (kind "yuk") emas. Azimjon, 2026-11-12: ««Mashinalar» Sozlamalar formasiga bog'liq bo'lmasin» — profil
+  // bo'lmasa matchTruck({}) bilan tekshiriladi (bo'sh cheklov = cheklov yo'q)
+  const post = store.addPost({ source: "@yuk_guruh", messageId: 9, link: "https://t.me/yuk_guruh/9", text: "Samarqanddan bo'sh fura bor", postedAt: Date.now() });
+  store.addLoad({ postId: post.id, key: "m1", kind: "mashina", load: { fromCity: "Samarqand", fromRegion: "samarqand", truckClass: "fura", bodyType: "tent", weightT: 22, phones: ["+998900000009"] } });
+  store.addLoad({ postId: post.id, key: "m2", kind: "mashina", load: { fromCity: "Nukus", fromRegion: "qoraqalpogiston", truckClass: "fura", phones: ["+998900000008"] } });
+  store.addLoad({ postId: post.id, key: "y1", load: { fromCity: "Samarqand", fromRegion: "samarqand", toCity: "Toshkent", weightT: 20, phones: ["+998900000007"] } });
+  calls.length = 0;
+  await message(PRIVATE, MENU.trucks);
+  let sent = calls.filter((c) => c.method === "sendMessage");
+  assert.equal(sent.length, 3, "profil bo'lmasa — ikkala bo'sh mashina ham (filtr yo'q)");
+  assert.match(sent[0].payload.text, /mos 2 ta bo'sh mashina/);
+  // Eskisidan yangisigacha: chatda eng pastda eng yangisi (Nukus) turadi
+  assert.match(sent[1].payload.text, /Bo'sh mashina: Samarqand → istalgan joyga[\s\S]*22 tonna ko'taradi[\s\S]*\+998900000009/);
+  assert.match(sent[2].payload.text, /Bo'sh mashina: Qoraqalpog'iston, Nukus → istalgan joyga/);
+
+  // «⚙️ Sozlamalar» ilovasiz chatda yuk beruvchiga savol-javobni boshlamaydi (Azimjon, 2026-11-12: ro'yxat funksiyasi
+  // olib tashlandi) — qisqa tushuntirish qaytadi, qoralama (draft) ochilmaydi. Eski testda shu yerda savol-javob
+  // («Yukingiz qayerda yuklanadi») boshlanardi; chatdagi savol-javob endi faqat haydovchida
+  await message(PRIVATE, MENU.settings);
+  assert.match(texts(calls).at(-1), /⚙️ Sozlamalar — ixtiyoriy[\s\S]*sozlamalarsiz ham ochiladi/);
+  assert.equal(store.getDriver(42).draft, null);
+
+  // Sozlamalar ixtiyoriy — xohlasa formadan saqlaydi (sendData; eskisidagi chat savol-javobi endi haydovchiga xos).
+  // Samarqand + fura tanlanadi: profil bo'lgach moslash filtrli ishlaydi (eski xatti-harakat saqlanadi)
+  await webAppData(JSON.stringify({ type: "profile", role: "yuk_beruvchi", profile: { fromAreas: ["samarqand"], truckClasses: ["fura"] } }));
   const user = store.getDriver(42);
   assert.equal(user.role, "yuk_beruvchi");
   assert.equal(user.active, true);
@@ -616,22 +694,16 @@ test("yuk beruvchi: rol → «Yuk berish» haqida; «Ro'yxatdan o'tish» → sav
   assert.equal(texts(calls).at(-2), "✅ Saqlandi.");
   assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi/);
   await message(PRIVATE, PHONE.later);
-  assert.deepEqual(buttons(lastMarkup(calls)).map((b) => b.text), [MENU.giveLoad, MENU.trucks, MENU.pause, MENU.role, MENU.phone, MENU.help, MENU.settings]);
+  assert.deepEqual(shipperMenuTexts(), [MENU.giveLoad, MENU.trucks, MENU.role, MENU.phone, MENU.help, MENU.settings]);
   assert.doesNotMatch(texts(calls).at(-1), /qayerdan qayerga/, "yuk beruvchidan yo'nalish so'ralmaydi — formada bor");
-  // Qayta saqlash — sozlamalar ro'yxati bilan
-  await command("/sozlamalar");
-  for (const data of ["w:from:ok", "w:to:ok", "w:classes:ok", "w:bodies:ok", "w:intl:yoq"]) await press(data);
-  await press("w:done:save");
+  // Qayta saqlash — sozlamalar ro'yxati bilan (/sozlamalar endi qisqa javob beradi, shuning uchun forma yuboriladi)
+  await webAppData(JSON.stringify({ type: "profile", role: "yuk_beruvchi", profile: { fromAreas: ["samarqand"], truckClasses: ["fura"] } }));
   assert.match(texts(calls).at(-1), /Saqlandi\. Endi mos bo'sh mashinalar[\s\S]*Yuk qayerda: Samarqand/);
 
-  // 24 soatdagi bo'sh mashinalar: mos keladigani (Samarqand, fura); boshqa viloyat va yuk e'loni — yo'q
-  const post = store.addPost({ source: "@yuk_guruh", messageId: 9, link: "https://t.me/yuk_guruh/9", text: "Samarqanddan bo'sh fura bor", postedAt: Date.now() });
-  store.addLoad({ postId: post.id, key: "m1", kind: "mashina", load: { fromCity: "Samarqand", fromRegion: "samarqand", truckClass: "fura", bodyType: "tent", weightT: 22, phones: ["+998900000009"] } });
-  store.addLoad({ postId: post.id, key: "m2", kind: "mashina", load: { fromCity: "Nukus", fromRegion: "qoraqalpogiston", truckClass: "fura", phones: ["+998900000008"] } });
-  store.addLoad({ postId: post.id, key: "y1", load: { fromCity: "Samarqand", fromRegion: "samarqand", toCity: "Toshkent", weightT: 20, phones: ["+998900000007"] } });
+  // Profil paydo bo'ldi — ro'yxat yana filtrli: mos keladigani (Samarqand, fura); boshqa viloyat va yuk e'loni — yo'q
   calls.length = 0;
   await message(PRIVATE, MENU.trucks);
-  const sent = calls.filter((c) => c.method === "sendMessage");
+  sent = calls.filter((c) => c.method === "sendMessage");
   assert.equal(sent.length, 2);
   assert.match(sent[0].payload.text, /mos 1 ta bo'sh mashina/);
   assert.match(sent[1].payload.text, /Bo'sh mashina: Samarqand → istalgan joyga[\s\S]*22 tonna ko'taradi[\s\S]*\+998900000009/);
@@ -642,10 +714,18 @@ test("yuk beruvchi: rol → «Yuk berish» haqida; «Ro'yxatdan o'tish» → sav
 });
 
 test("/rol: boshqa rolga o'tsa sozlamalari saqlanadi, qaytsa tiklanadi; o'sha rol — hech narsa o'zgarmaydi", async () => {
-  const { store, calls, command, press } = setup();
+  const { store, calls, command, press, message } = setup();
   store.saveDriver(42, { profile: PROFILE, active: true, phoneAskedAt: 1 }); // rollardan oldingi haydovchi (role ustuni bo'sh)
   await command("/rol");
-  assert.match(texts(calls).at(-1), /Hozir siz: <b>🚚 Haydovchi/);
+  // Azimjon, 2026-11-12 (aniqlik): rol tanlangan hisobda /rol so'rovi paytida ham pastki menyu qoladi —
+  // xabar inline rol tugmalari bilan yuboriladi, remove_keyboard BO'LMAYDI. Eski testda faqat matn tekshirilardi
+  const roleMsg = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.ok(!roleMsg.payload.reply_markup?.remove_keyboard, "/rol pastki menyuni o'chirmaydi");
+  assert.deepEqual(inlineButtons(roleMsg).map((b) => b.callback_data), ["r:haydovchi", "r:yuk_beruvchi"]);
+  assert.match(roleMsg.payload.text, /Hozir siz: <b>🚚 Haydovchi/);
+  // Inline tugmalar bosilmay boshqa narsa yozilsa — menyu qaytadi (keyingi javob menu(driver) bilan) (Azimjon, 2026-11-12)
+  await message(PRIVATE, "salom");
+  assert.deepEqual(buttons(lastMarkup(calls)).map((b) => b.text), [MENU.loads, MENU.pause, MENU.role, MENU.phone, MENU.help, MENU.settings]);
   await press("r:haydovchi");
   assert.match(texts(calls).at(-1), /hech narsa o'zgarmadi/);
   assert.deepEqual(store.getDriver(42).profile, PROFILE);
@@ -1294,6 +1374,20 @@ const shipperSetup = (result, extra = {}) => {
 };
 const lastSent = (calls) => calls.filter((c) => c.method === "sendMessage" || c.method === "editMessageText").at(-1).payload;
 const callbacks = (payload) => payload.reply_markup.inline_keyboard.flat().map((b) => b.callback_data ?? b.text);
+
+// Azimjon, 2026-11-12: «bot chatiga yuk haqida ma'lumotni yozib tushsam ham bo'lishligini 1-o'rinda va bold qilib
+// yozib ber. hozirda u 2-o'rinda va ko'rimsiz» — web forma BOR bo'lganda ham chatga yozish 1️⃣ va QALIN, forma 2️⃣
+test("«📦 Yuk berish» matni (forma bor): chatga yozish 1️⃣ va bold, forma 2️⃣; misol ham bold", async () => {
+  const { calls, message } = shipperSetup(null, { config: { miniappUrl: MINIAPP } });
+  await message(PRIVATE, MENU.giveLoad); // eski stildagi oddiy tugma bosilgandek (forma Mini App'da ochiladi, chatda matn yo'q)
+  const intro = texts(calls).at(-1);
+  assert.match(intro, /^📦 <b>Yuk berish<\/b> — yukingiz mos haydovchilarga darhol boradi/);
+  assert.ok(intro.includes("1️⃣ <b>Shu chatga yuk haqida ma'lumotni yozib yuboring</b> — masalan:\n<b>Andijondan Toshkentga 20 tonna un bor, tent fura kerak, 3 mln, ertaga. 90 123 45 67</b>"),
+    "1️⃣ qatori bold va misol ham bold");
+  assert.ok(intro.endsWith("\n2️⃣ Yoki pastdagi «📦 Yuk berish» tugmasi orqali forma (1 daqiqa)."), "forma 2️⃣ — oddiy qator");
+  assert.ok(intro.indexOf("yozib yuboring") < intro.indexOf("forma (1 daqiqa)"), "chatga yozish formadan OLDIN");
+  assert.ok(!intro.includes("<i>"), "eski <i> kursiv ishlatilmaydi");
+});
 
 test("yuk beruvchi oddiy xabar yozdi: raqamli — darhol ko'rinish, «✅ Yuborish» → navbatga, natija chatga", async () => {
   const { store, calls, message, press, queued, parsed, directDone } = shipperSetup({ ok: true, postType: "yuk_bor", loads: [{ ...LOAD, phones: ["+998900000001"] }], by: "rules" });

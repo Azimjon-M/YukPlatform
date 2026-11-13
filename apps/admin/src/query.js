@@ -1,7 +1,8 @@
 // So'rov qatori: { from: "andijon", q: "", hours: null } → "?from=andijon". Bo'sh qiymatlar tashlanadi.
-export function buildQuery(params = {}) {
+// params — null ham bo'lishi mumkin («parametr yo'q» deb yuborilganda), shuning uchun ?? {}
+export function buildQuery(params) {
   const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
+  for (const [key, value] of Object.entries(params ?? {})) {
     if (value === undefined || value === null || value === "") continue;
     search.append(key, String(value));
   }

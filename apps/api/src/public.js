@@ -39,10 +39,12 @@ import {
   KIND_ROLE,
   SHIPPER_LOAD_LIMIT,
   applyRoute,
+  distanceKm,
   formatContactPhone,
   isAdmin,
   parseAdminIds,
   phoneText,
+  placePoint,
   placeText,
   roleOf,
   routeCounts,
@@ -102,6 +104,16 @@ function atArea(load, side, area) {
 }
 
 const text = (value) => (typeof value === "string" && value.trim() ? value.trim().slice(0, 60) : null);
+
+// near=lat,lng — xaritadan tanlangan nuqta. noto'g'ri bo'lsa null (filtr yo'q, oddiy ro'yxat qaytadi)
+function parseNear(value) {
+  const parts = String(value ?? "").split(",");
+  if (parts.length !== 2) return null;
+  const lat = Number(parts[0]);
+  const lon = Number(parts[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
 
 // Web'dan hisobdan chiqilganda bot chatiga yoziladigan xabar (pastki menyu ham olib tashlanadi — eski tugmalar eskirdi)
 export const SIGNED_OUT_TEXT =
@@ -347,7 +359,9 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (typeof active !== "boolean") throw httpError(400, "active: true yoki false bo'lishi kerak");
     const role = roleOf(req.driver);
     if (active && !role) throw httpError(409, NEED_ROLE, "no_role");
-    if (active && !req.driver.profile) throw httpError(409, NEED_PROFILE[role], "no_profile");
+    // Yuk beruvchiga sozlamalar shart emas (Azimjon, 2026-11-12: «Ro'yxatdan o'tish kerak emas») — bo'sh profil
+    // bilan ham yuborish yoqiladi; haydovchiga mos yuklar profil bo'lmasa hisoblanmaydi
+    if (active && !req.driver.profile && role === "haydovchi") throw httpError(409, NEED_PROFILE[role], "no_profile");
     res.json(meOf(store.saveDriver(req.driver.chatId, { active })));
   });
 
@@ -425,27 +439,53 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const to = text(req.query.to);
     const { profile } = req.driver;
     const role = roleOf(req.driver);
-    if (view === "mine") {
+    // «Menga mos» — yuk beruvchi uchun sozlamalar shart EMAS (Azimjon, 2026-11-12: «yuk beruvchi uchun Ro'yxatdan
+    // o'tish kerak emas»). Bo'sh profil = cheklov yo'q (matchTruck), «Mashinalar» endi xaritadagi nuqta bo'yicha
+    if (view === "mine" && role !== KIND_ROLE[kind]) {
       if (!role) throw httpError(409, NEED_ROLE, "no_role");
-      if (role !== KIND_ROLE[kind]) {
-        throw httpError(409, kind === "yuk" ? "«Menga mos» yuklar — haydovchilar uchun" : "«Menga mos» mashinalar — yuk beruvchilar uchun", "role");
-      }
-      if (!profile) throw httpError(409, NEED_PROFILE[role], "no_profile");
+      throw httpError(409, kind === "yuk" ? "«Menga mos» yuklar — haydovchilar uchun" : "«Menga mos» mashinalar — yuk beruvchilar uchun", "role");
     }
+    // Haydovchiga mos yuklar profil (transport) bo'lmasa hisoblanmaydi; yuk beruvchiga esa sozlamalar shart emas
+    if (view === "mine" && kind === "yuk" && role === "haydovchi" && !profile) throw httpError(409, NEED_PROFILE.haydovchi, "no_profile");
+    // near=lat,lng — shu nuqtaga yaqin e'lonlar (km, default 50, <5000 km). Yuk beruvchi «🚚 Mashinalar» da
+    // xaritadan tanlagan nuqta; masofa @yuk/shared geo.js distanceKm bilan hisoblanadi
+    const nearPoint = parseNear(req.query.near);
+    const radius = clamp(Number(req.query.r) || 50, 1, 5000);
     const matches = KIND_MATCHERS[kind];
 
-    const rows = store
+    let rows = store
       .recentLoads({ sinceMs: hours * HOUR, limit: 5000, kind })
       .filter(({ load }) => routeInScope(load, scope) && atArea(load, "from", from) && atArea(load, "to", to))
-      .filter(({ load }) => view === "all" || matches(load, profile).ok)
+      // profile = null (ro'yxatdan o'tmagan) — matchTruck bo'sh profil bilan ishlaydi (cheklovlar yo'q)
+      .filter(({ load }) => view === "all" || matches(load, profile ?? {}).ok);
+    if (nearPoint) {
+      // Yaqinligi noma'lum (joyi yozilmagan / bilmaymiz) e'lonlar ro'yxatga kirmaydi
+      rows = rows
+        .map((row) => {
+          const point = placePoint(row.load, "from");
+          return point ? { ...row, distanceKm: distanceKm(nearPoint, point) } : null;
+        })
+        .filter((row) => row && row.distanceKm <= radius)
+        // Eng yaqini tepada; bir xil masofada — eng yangisi
+        .sort((a, b) => a.distanceKm - b.distanceKm || b.post.postedAt - a.post.postedAt || b.id - a.id);
+    } else {
       // E'lon guruhda chiqqan vaqt bo'yicha: bot navbatdagi eng yangi e'lonni birinchi oladi,
       // shuning uchun bazadagi tartib (id) e'lon vaqti bilan har doim ham bir xil emas
-      .sort((a, b) => b.post.postedAt - a.post.postedAt || b.id - a.id);
+      rows.sort((a, b) => b.post.postedAt - a.post.postedAt || b.id - a.id);
+    }
     res.json({
       view,
       hours,
+      ...(nearPoint ? { near: nearPoint, r: radius } : {}),
       total: rows.length,
-      items: rows.slice(offset, offset + limit).map(({ id, load, post, createdAt }) => ({ id, load, post, createdAt })),
+      // distanceKm — faqat near=... bilan so'ralganda (xaritadagi nuqtadan masofa, kartochkada ko'rsatiladi)
+      items: rows.slice(offset, offset + limit).map(({ id, load, post, createdAt, distanceKm: d }) => ({
+        id,
+        load,
+        post,
+        createdAt,
+        ...(d != null ? { distanceKm: Math.round(d) } : {}),
+      })),
     });
   };
   pub.get("/loads", listing("yuk"));

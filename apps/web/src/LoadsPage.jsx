@@ -3,11 +3,14 @@
 // Haydovchining «Menga mos» i — tanlangan yo'nalish bo'yicha (tepada «🧭 Qayerdan → Qayerga», «O'zgartirish»).
 // Yo'nalish hali tanlanmagan bo'lsa, ro'yxat o'rniga avval «📍 Qayerdan?» → «🏁 Qayerga?» (RoutePicker) — botdagidek.
 // «Hammasi» da va yuk beruvchida — oddiy «📍 Qayerdan» filtri.
+// «🚚 Mashinalar» (yuk beruvchi, Azimjon 2026-11-12): sozlamalarga bog'liq EMAS — nuqta XARITADAN tanlanadi
+// (TruckMapPage), ro'yxat o'sha nuqtaga yaqin mashinalarni massofa bo'yicha chiqaradi (near=lat,lng&r=km).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { REGIONS, regionLabel, routeChosen, routeLabel, scopeCountries } from "@yuk/shared";
 import { getLoads, getTrucks } from "./api.js";
 import { LoadCard, TruckCard } from "./LoadCard.jsx";
 import { RoutePicker, hoursText } from "./RoutePicker.jsx";
+import { TruckMapPage } from "./TruckMapPage.jsx";
 import { Notice, Segmented, Spinner } from "./ui.jsx";
 
 const PAGE = 30;
@@ -33,8 +36,10 @@ const KINDS = {
     Card: TruckCard,
     one: "bo'sh mashina",
     fromLabel: "Qayerda",
-    needProfile: "«Menga mos» mashinalarni ko'rsatish uchun yukingiz qayerdan qayerga borishi kerak.",
-    needTitle: "Yo'nalishingizni kiriting",
+    needProfile: "",
+    needTitle: "",
+    // Nuqta xaritadan tanlanadi (Sozlamalar shart emas) — TruckMapPage
+    fromMap: true,
   },
 };
 
@@ -54,10 +59,14 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteS
   const [state, setState] = useState({ items: [], total: 0, loading: true, error: null });
   const [now, setNow] = useState(() => Date.now());
   const [picking, setPicking] = useState(false);
+  // «🚚 Mashinalar»: xaritadan tanlangan nuqta ({lat,lng}) va radius (km). Nuqta bo'lmasa — oddiy ro'yxat
+  const [point, setPoint] = useState(null);
+  const [radius, setRadius] = useState(50);
   const shown = useRef(PAGE);
   // Yo'nalish bo'yicha ro'yxat: haydovchi, «Menga mos», sozlamalari bor
   const routed = kind === "yuk" && view === "mine" && Boolean(profile);
-  const choosing = routed && (picking || !routeChosen(profile));
+  // «🚚 Mashinalar» da tanlash oynasi ochiq bo'lsa ro'yxat so'ralmaydi (nuqta tanlangach qayta so'raladi)
+  const choosing = routed ? picking || !routeChosen(profile) : k.fromMap && picking;
   const area = routed ? "" : from; // «Menga mos» da joyni yo'nalish belgilaydi
 
   // count — nechta yuk ko'rsatiladi (yangilashda ham shuncha qoladi); silent — ro'yxat o'rniga spinner chiqmasin
@@ -65,7 +74,12 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteS
     async (count, { silent = false } = {}) => {
       if (!silent) setState((s) => ({ ...s, loading: true, error: null }));
       try {
-        const data = await k.fetch({ view, from: area, hours, limit: Math.min(count, 500) });
+        const params = { view, from: area, hours, limit: Math.min(count, 500) };
+        if (point) {
+          params.near = `${point.lat},${point.lng}`;
+          params.r = radius;
+        }
+        const data = await k.fetch(params);
         shown.current = count;
         setNow(Date.now());
         setState({ items: data.items, total: data.total, loading: false, error: null });
@@ -74,7 +88,7 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteS
         setState((s) => ({ ...s, loading: false, error: silent && s.items.length ? null : error }));
       }
     },
-    [k, view, area, hours, onAuthLost],
+    [k, view, area, hours, point, radius, onAuthLost],
   );
 
   // Yo'nalish tanlanayotganda ro'yxat so'ralmaydi; tanlangach (choosing → false) yangi yo'nalish bilan so'raladi
@@ -108,8 +122,30 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteS
             </button>
           </div>
         )}
+        {/* «🚚 Mashinalar»: qayer xaritadan tanlanadi (Sozlamalar shart emas) */}
+        {k.fromMap && (
+          <div className="route-bar">
+            <span>
+              {point ? (
+                <>
+                  📍 <b>{radius} km</b> ichida · {point.lat.toFixed(3)}, {point.lng.toFixed(3)}
+                </>
+              ) : (
+                <span className="muted">📍 Joy tanlanmadi — butun mamlakat bo'yicha</span>
+              )}
+            </span>
+            <button type="button" className="link" onClick={() => setPicking(true)}>
+              {point ? "Joyini o'zgartirish" : "🗺 Xaritadan tanlash"}
+            </button>
+            {point && (
+              <button type="button" className="link" onClick={() => setPoint(null)}>
+                Bekor qilish
+              </button>
+            )}
+          </div>
+        )}
         <div className="filters">
-          {!routed && (
+          {!routed && !k.fromMap && (
             <label className="select">
               <span className="sr-only">{k.fromLabel}</span>
               <select value={from} onChange={(e) => setFrom(e.target.value)}>
@@ -135,7 +171,18 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteS
         </div>
       </div>
 
-      {choosing ? (
+      {choosing && k.fromMap ? (
+        <TruckMapPage
+          point={point}
+          radius={radius}
+          onRadius={setRadius}
+          onPick={(picked) => {
+            setPoint(picked);
+            setPicking(false);
+          }}
+          onCancel={() => setPicking(false)}
+        />
+      ) : choosing ? (
         <RoutePicker
           profile={profile}
           hours={hours}
@@ -172,18 +219,20 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteS
         <Notice
           title={`Hozircha ${k.one} yo'q`}
           action={
-            routed && (
+            (routed || point) && (
               <button type="button" className="primary" onClick={() => setPicking(true)}>
-                🧭 Yo'nalishni o'zgartirish
+                🗺 Joyni o'zgartirish
               </button>
             )
           }
         >
-          {routed
-            ? `Oxirgi ${hoursText(hours)}da bu yo'nalishda mashinangizga mos yuk chiqmadi. Yangisi chiqishi bilan botda xabar beramiz.`
-            : view === "mine"
-              ? `Oxirgi ${hoursText(hours)}da sizga mos ${k.one} chiqmadi. Yangisi chiqishi bilan botda ham xabar beramiz.`
-              : `Oxirgi ${hoursText(hours)}da bu yo'nalishda ${k.one} yo'q.`}
+          {point
+            ? `Oxirgi ${hoursText(hours)}da tanlangan joydan ${radius} km ichida ${k.one} yo'q. Radiusni kattalashtiring yoki boshqa joyni bosing.`
+            : routed
+              ? `Oxirgi ${hoursText(hours)}da bu yo'nalishda mashinangizga mos yuk chiqmadi. Yangisi chiqishi bilan botda xabar beramiz.`
+              : view === "mine"
+                ? `Oxirgi ${hoursText(hours)}da sizga mos ${k.one} chiqmadi. Yangisi chiqishi bilan botda ham xabar beramiz.`
+                : `Oxirgi ${hoursText(hours)}da bu yo'nalishda ${k.one} yo'q.`}
         </Notice>
       ) : (
         <>

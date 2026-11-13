@@ -357,13 +357,18 @@ export function App() {
   const current = tabs.some((t) => t.id === tab) ? tab : (tabs[0]?.id ?? null);
   const switchTab = (id) => {
     haptic.select();
+    // Rol almashtirish oynasida pastki menyu ko'rinadi (rol tanlangan hisobda) — tab bosilsa o'sha oyna yopiladi,
+    // aks holda sahifa o'zgarmas qolardi (Azimjon, 2026-11-12)
+    if (changingRole) setChangingRole(false);
     setTab(id);
     window.scrollTo(0, 0);
   };
   // ?p= dagi profil faqat o'sha rolniki bo'lsa (rol keyin almashtirilgan bo'lishi mumkin)
   const initialProfile = role === profileRole ? decodeProfile(params.get("p"), { scope, role }) : null;
-  // Ro'yxatdan o'tish (profil hali yo'q): qadamlar, pastdagi bo'limlar yashiriladi — chalg'itmasin
-  const registering = Boolean(role) && !changingRole && current === "sozlamalar" && !(me?.profile ?? initialProfile);
+  // Ro'yxatdan o'tish (qadamlar) faqat haydovchida: yuk beruvchi uchun sozlamalar ixtiyoriy va bitta sahifa
+  // (Azimjon, 2026-11-12: «yuk beruvchi uchun Ro'yxatdan o'tish kerak emas — bu funksionallikni olib tashla»)
+  const registering =
+    role === "haydovchi" && !changingRole && current === "sozlamalar" && !(me?.profile ?? initialProfile);
   // Ro'yxat / xarita / boshqaruv so'ralgan, lekin server bilan aloqa yo'q
   const listNotice =
     !online && requestedTab && requestedTab !== "sozlamalar" && !offlineTabs.some((t) => t.id === requestedTab) ? (
@@ -407,7 +412,11 @@ export function App() {
     page = (
       <>
         {listNotice}
-        {role === "yuk_beruvchi" ? <ShipperSettings key={settingsKey} {...settingsProps} /> : <SettingsPage key={settingsKey} {...settingsProps} />}
+        {role === "yuk_beruvchi" ? (
+          <ShipperSettings key={settingsKey} me={me} initialProfile={initialProfile} scope={scope} onSaved={onSaved} />
+        ) : (
+          <SettingsPage key={settingsKey} {...settingsProps} />
+        )}
         {online && !registering && (
           <PhoneCard
             me={me}
@@ -417,7 +426,8 @@ export function App() {
             }}
           />
         )}
-        {!registering && roleLine}
+        {/* Yuk beruvchi sozlamasida rol qatori yo'q (Azimjon, 2026-11-12) — faqat haydovchiga ko'rsatiladi */}
+        {role === "haydovchi" && !registering && roleLine}
         {online && !registering && <AccountCard me={me} onSignedOut={onSignedOut} onDeleted={onDeleted} />}
       </>
     );
@@ -425,7 +435,7 @@ export function App() {
     page = (
       <>
         <LoadFormPage key={`${me?.chatId ?? "offline"}-yuk`} me={me} scope={scope} draft={loadDraftRequest} onAuthLost={onAuthLost} />
-        {!me?.profile && roleLine}
+        {/* Azimjon, 2026-11-12: yuk berish formasi pastida «Siz: ... Rolni almashtirish» qatori kerak emas */}
       </>
     );
   } else if (current === "admin") {
@@ -449,7 +459,12 @@ export function App() {
     );
   }
 
-  const showTabs = online && role && !changingRole && !registering && !mapOpen;
+  // Pastki menyu sozlamalar (birinchi qadam) da ham ko'rinadi — menyu yo'qolib qolsa orqaga qaytib bo'lmaydi
+  // (Azimjon, 2026-11-12: «Sozlamalarga o'tsam pastgi menyu yo'q bo'lib qolmoqda»).
+  // Rol almashtirish oynasida ham MENYU BOR (Azimjon, 2026-11-12: «rol tanlansa pastgi menu va btn bor bo'lsin» —
+  // pastki menyu FAQAT rol tanlanmagan hisobda yo'q). Rol tanlangan odam oynani yopmasdan ham boshqa bo'limga
+  // o'ta oladi: switchTab changingRole ni o'chiradi.
+  const showTabs = online && role && !mapOpen;
   return (
     <div className="app">
       <header className="top">
@@ -458,12 +473,18 @@ export function App() {
           {me?.name && <p>{me.name}</p>}
         </div>
         <div className="top-actions">
-          {me?.profile && (
+          {/* Pauza — yuk qidirishni to'xtatish: bu FAQAT haydovchi sozlamasi (Azimjon, 2026-11-12: «pauza/davom
+              etish va «➕ Guruh qo'shish» faqat haydovchi roli uchun»). Yuk beruvchi yukni o'zi yuboradi —
+              pauza unga kerak emas */}
+          {me?.profile && role === "haydovchi" && (
             <button type="button" className={`pill${me.active ? "" : " paused"}`} onClick={toggleActive} title="Botdagi shaxsiy xabarlar">
               {me.active ? "⏸ Pauza" : "▶️ Yoqish"}
             </button>
           )}
-          {!inTelegram && (!role || changingRole || registering) && (
+          {/* «Chiqish» FAQAT pastki menyu yo'q bo'lgan holatlarda: rol tanlanmagan yoki ro'yxatdan o'tish bosqichida.
+              Rol tanlangan odamda (almashtirish oynasi dahil) pastki menyu bor — u yerdan bo'limga o'tadi
+              (Azimjon, 2026-11-12: «rol tanlansa pastgi menu va btn bor bo'lsin») */}
+          {!inTelegram && (!role || registering) && (
             <button type="button" className="pill ghost" onClick={headerLogout}>
               Chiqish
             </button>
@@ -472,7 +493,7 @@ export function App() {
       </header>
 
       <main>
-        {me && !me.active && me.profile && showTabs && !["sozlamalar", "admin", LOAD_TAB.id].includes(current) && (
+        {me && !me.active && me.profile && role === "haydovchi" && showTabs && !["sozlamalar", "admin", LOAD_TAB.id].includes(current) && (
           <div className="notice">⏸ Pauzadasiz: botga yangi {ROLE_TEXT[role].many} kelmaydi. Bu yerda ko'rish mumkin.</div>
         )}
         {page}

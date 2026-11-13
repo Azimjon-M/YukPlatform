@@ -23,20 +23,25 @@ export const LOAD_CALLBACKS = { send: "yb:send", cancel: "yb:no", phone: /^yb:ph
 
 const EXAMPLE = "Andijondan Toshkentga 20 tonna un bor, tent fura kerak, 3 mln, ertaga. 90 123 45 67";
 
-// «Yuk berish» haqida (rol tanlangach, /yordam, menyudagi tugma — forma yo'q bo'lsa). form — web forma bormi (https manzil)
+// «Yuk berish» haqida (rol tanlangach, /yordam, menyudagi tugma — forma yo'q bo'lsa). form — web forma bormi (https manzil).
+// Azimjon, 2026-11-12: «roldan yuk beruvchilikni tanlaganda bot chatiga yuk haqida ma'lumotni yozib tushsam ham
+// bo'lishligini 1-o'rinda va bold qilib yozib ber» — chatga yozish yo'li BIRINCHI va QALIN, web forma ikkinchi va
+// oddiy qator. Manzil bo'lmasa (form=false) 2️⃣ qatori umuman yo'q, 1️⃣ raqami ham tushiriladi.
 export function loadIntro({ form = true } = {}) {
   return [
     `📦 <b>Yuk berish</b> — yukingiz mos haydovchilarga darhol boradi, ular sizga o'zlari qo'ng'iroq qilishadi.`,
-    form ? `• pastdagi «${LOAD_BUTTON}» tugmasi — forma (1 daqiqa);` : null,
-    `• ${form ? "yoki " : ""}shu yerga oddiy xabar qilib yozing, masalan:\n<i>${EXAMPLE}</i>`,
+    "",
+    `${form ? "1️⃣ " : ""}<b>Shu chatga yuk haqida ma'lumotni yozib yuboring</b> — masalan:\n<b>${EXAMPLE}</b>`,
+    form ? `\n2️⃣ Yoki pastdagi «${LOAD_BUTTON}» tugmasi orqali forma (1 daqiqa).` : null,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
 export const LOAD_TEXT = {
+  // Azimjon, 2026-11-12: misol endi QALIN (<b>) — loadIntro bilan bir xil ko'rinish
   notLoad: (form) =>
-    `🤔 Bu xabardan yukni tushunmadim. Qayerdan, qayerga, nima yuk va necha tonna ekanini yozing, masalan:\n<i>${EXAMPLE}</i>` +
+    `🤔 Bu xabardan yukni tushunmadim. Qayerdan, qayerga, nima yuk va necha tonna ekanini yozing, masalan:\n<b>${EXAMPLE}</b>` +
     (form ? `\n\nYoki pastdagi «${LOAD_BUTTON}» formasini to'ldiring.` : ""),
   truck: "🤔 Bu bo'sh mashina e'loniga o'xshaydi. Siz yuk beruvchisiz — yukingizni yozing (qayerdan, qayerga, necha tonna). " +
     "Haydovchi bo'lsangiz — «🔄 Rolni almashtirish».",

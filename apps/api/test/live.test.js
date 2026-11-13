@@ -47,6 +47,36 @@ test("createLive: ulanganda ready, o'zgarishda change, uzilganda taymer to'xtayd
   assert.equal(live.clients(), 0);
 });
 
+test("createLive: tunnel orqali kelgan ulanishga har kadr izoh bilan kattalashadi (Cloudflare buferi uchun)", () => {
+  let marks = { drivers: "1" };
+  // tunnelSarlavha — cf-ray bor (Cloudflare tunnel); yo'q — oddiy lokal brauzer
+  const tunnelClient = () => { const c = fakeClient(); c.req.headers = { "cf-ray": "abc" }; c.req.get = (n) => c.req.headers[n.toLowerCase()]; return c; };
+  const live = createLive({ marks: () => marks, intervalMs: 60_000, tunnelPadBytes: 5000 });
+  const viaTun = tunnelClient();
+  const local = fakeClient();
+  live.handler(viaTun.req, viaTun.res);
+  live.handler(local.req, local.res);
+  // ready: tunnelga izoh (5000 x «x») bilan, lokalga sof
+  assert.match(viaTun.text(), /: x{5000}\nevent: ready/);
+  assert.doesNotMatch(local.text(), /x{5000}/);
+  // change: tunnelga yana izoh bilan, lokalga izohsiz
+  marks = { drivers: "2" };
+  live.tick();
+  assert.equal((viaTun.text().match(/x{5000}/g) ?? []).length, 2, "har kadr oldida izoh");
+  assert.match(viaTun.text(), /: x{5000}\nevent: change/);
+  assert.match(local.text(), /event: change/);
+  live.close();
+});
+
+test("createLive: tunnelPadBytes=0 — izoh yo'q (ichki server / o'chirish)", () => {
+  const live = createLive({ marks: () => ({ a: "1" }), intervalMs: 60_000, tunnelPadBytes: 0 });
+  const c = fakeClient();
+  c.req.get = () => "cf-ray-value";
+  live.handler(c.req, c.res);
+  assert.doesNotMatch(c.text(), /: [x ]*\n/);
+  live.close();
+});
+
 test("createLive: baza band bo'lsa — xato yutiladi, keyingi safar davom etadi", () => {
   let fail = false;
   const logs = [];

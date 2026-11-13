@@ -68,42 +68,115 @@ function citiesOf(area) {
   return REGIONS.find((r) => r.id === area)?.cities ?? COUNTRIES.find((c) => c.name === area)?.cities ?? [];
 }
 
+// Shahar selectidagi «Boshqa» tanlovi: ro'yxatda yo'q joy yoziladi (Azimjon, 2026-11-12: «selectda "Boshqa" tanlasa
+// select input bo'lsin va yozsin»)
+const OTHER = "__boshqa";
+
 const withPhones = (form, phones) => ({ ...form, phones: phones.length ? phones.map(formatContactPhone).slice(0, SHIPPER_LOAD_PHONES) : [""] });
 
+// Narx: holatda faqat raqam saqlanadi, ko'rinishda har 3 xonadan so'ng nuqta (Azimjon, 2026-11-12: «3000000 =>
+// 3.000.000 — adashmaslik uchun»). Foydalanuvchi nuqta/bo'shlik yozsa yoki o'chirsa ham raqam buzilmaydi.
+const groupPrice = (digits) => String(digits ?? "").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+const groupDigitsOnly = (value) => String(value ?? "").replace(/\D/g, "").slice(0, 11); // 11 xona = 10 mlrd chegarasi
+
+// Joy: viloyat/davlat selecti + shahar/tuman selecti. Shahar ro'yxatda yo'q bo'lsa — «Boshqa»: tanlangach pastida
+// yozish maydoni ochiladi. Ikkinchalasida ham ko'rinadigan label va izoh bor (Azimjon, 2026-11-12: «Label qo'sh va
+// kiritish ixtiyoriy degan ma'noda desc yoz. placeholder yetarli emas!»).
+// Ikki select qatorini chalkashtiradigan xatolardan himoya: «Shahar» selecti viloyat tanlanmaguncha o'chilgan holda
+// turadi va unda nima tanlanayotgani yozib ko'rsatiladi (masalan «Toshkent viloyati: shahar, tuman»).
 function Place({ side, form, areas, error, onChange }) {
   const area = form[side];
+  const city = form[`${side}City`] ?? "";
   const cities = citiesOf(area);
-  const listId = `lf-${side}-cities`;
   const title = side === "from" ? "📍 Yuk qayerdan olinadi?" : "🏁 Yuk qayerga boradi?";
+  const areaLabel = side === "from" ? "Qayerdan" : "Qayerga";
+  const areaTitle = side === "from" ? "Viloyat yoki davlat" : "Boradigan viloyat yoki davlat";
+  // Ro'yxatda yo'q joy yozilgan bo'lsa (bot qoralamasi, eski yuk) — input darhol ochiq turadi
+  const [manual, setManual] = useState(() => Boolean(city) && !cities.includes(city));
+  // Viloyat almashtirilsa: eski shahar yangi viloyatga tegishli emas — tozalanadi, input yopiladi
+  const pickArea = (value) => {
+    setManual(false);
+    onChange({ [side]: value, [`${side}City`]: "" });
+  };
+  const pickCity = (value) => {
+    if (value === OTHER) {
+      // Ro'yxatdan tanalgan shahar «Boshqa»ga o'tganda tozalanadi — foydalanuvchi yangi nomni yozadi
+      if (city && cities.includes(city)) onChange({ [`${side}City`]: "" });
+      setManual(true);
+      return;
+    }
+    setManual(false);
+    onChange({ [`${side}City`]: value });
+  };
+  // Ro'yxatdagi shahar tanlanganmi yoki «Boshqa» — select shuni ko'rsatadi. Bot qoralamasida yozilgan joy ro'yxatda
+  // bo'lmasa ham input ochiq turadi (tanov holatiga asoslanmaymiz: holda bazadan kelgan qiymat yo'qolib qolardi)
+  const otherTyped = Boolean(city) && cities.length > 0 && !cities.includes(city);
+  const showInput = manual || otherTyped || Boolean(area && cities.length === 0);
+  const showSelect = !showInput;
+  const cityChoice = manual || otherTyped ? OTHER : city;
+
   return (
     <Section id={`lf-${side}`} title={title} error={error}>
-      <label className="select">
-        <span className="sr-only">{side === "from" ? "Qayerdan" : "Qayerga"}</span>
-        <select value={area} onChange={(e) => onChange({ [side]: e.target.value })}>
-          <option value="">Viloyat yoki davlatni tanlang</option>
+      <label className="ctrl">
+        <span className="ctrl-label">
+          {areaTitle} <em className={area ? "ctrl-opt" : "ctrl-req"}>{area ? "tanlandi" : "majburiy"}</em>
+        </span>
+        <select value={area} onChange={(e) => pickArea(e.target.value)}>
+          <option value="">— {areaLabel}ni tanlang —</option>
           {areas.map((a) => (
             <option key={a.id} value={a.id}>
               {a.label}
             </option>
           ))}
         </select>
+        <span className="ctrl-desc">Viloyat yoki davlatni tanlang — keyingi maydon shunga qarab to'ldiriladi.</span>
       </label>
-      <label className="field">
-        <span>Shahar, tuman</span>
-        <input
-          list={cities.length ? listId : undefined}
-          maxLength={SHIPPER_LOAD_LIMITS.city}
-          placeholder="ixtiyoriy"
-          value={form[`${side}City`]}
-          onChange={(e) => onChange({ [`${side}City`]: e.target.value })}
-        />
-      </label>
-      {cities.length > 0 && (
-        <datalist id={listId}>
-          {cities.map((city) => (
-            <option key={city} value={city} />
-          ))}
-        </datalist>
+
+      {/* Viloyat tanlanmaganda ham shahar maydoni ko'rinadi (o'chilgan holda) — «qayerga»ni «qayerdan»ga o'xshatib
+          xato tanlash olmasligi uchun (Azimjon: «shahar/tuman tanlash selecti ba'zida aljirab ishlamoqda») */}
+      {showSelect && (
+        <label className="ctrl">
+          <span className="ctrl-label">
+            Shahar yoki tuman <em className="ctrl-opt">ixtiyoriy</em>
+          </span>
+          <select value={cityChoice} disabled={!area} onChange={(e) => pickCity(e.target.value)}>
+            <option value="">{area ? `Aniqlasangiz — ${areaLabel} ichidan tanlang` : "Avval viloyatni tanlang"}</option>
+            {cities.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+            {area && <option value={OTHER}>➕ Boshqa shahar / tuman (yozaman)</option>}
+          </select>
+          <span className="ctrl-desc">Ixtiyoriy: tanlamasangiz butun viloyat bo'yicha izlanadi. Ro'yxatda bo'lmasa — «Boshqa» ni tanlab yozing.</span>
+        </label>
+      )}
+
+      {showInput && (
+        <label className="ctrl">
+          <span className="ctrl-label">
+            Shahar yoki tuman <em className="ctrl-opt">ixtiyoriy</em>
+          </span>
+          <input
+            maxLength={SHIPPER_LOAD_LIMITS.city}
+            placeholder="masalan: Chirchiq, Olmaliq yoki navoiy tumani"
+            value={city}
+            onChange={(e) => onChange({ [`${side}City`]: e.target.value })}
+          />
+          <span className="ctrl-desc">
+            {cities.length
+              ? "Ro'yxatda yo'q joy — nomini yozing (ixtiyoriy)."
+              : area === "xorij"
+                ? "Qaysi davlat va shahar bo'lsa, shuni yozing (ixtiyoriy)."
+                : "Bu davlat uchun shahar yoki tumanni yozing (ixtiyoriy)."}
+          </span>
+          {/* Ro'yxatga qaytish — yozish maydoni ochilgan joylarda (qoralamadan kelgan nom ham tozalanadi) */}
+          {showInput && cities.length > 0 && (
+            <button type="button" className="link ctrl-back" onClick={() => { setManual(false); onChange({ [`${side}City`]: "" }); }}>
+              ↩️ Ro'yxatdan tanlash
+            </button>
+          )}
+        </label>
       )}
     </Section>
   );
@@ -312,7 +385,14 @@ export function LoadFormPage({ me, scope, draft: wantDraft = false, onAuthLost }
       <Section id="lf-price" title="💰 Narxi" hint="Ixtiyoriy. Yozilmasa — «narx kelishiladi»." error={errorFor("price")}>
         <label className="field">
           <span>Narx</span>
-          <input inputMode="numeric" placeholder="masalan: 3 000 000" value={form.price} onChange={(e) => update({ price: e.target.value })} />
+          {/* Har 3 xonadan so'ng nuqta (Azimjon, 2026-11-12: «3000000 => 3.000.000, adashmaslik uchun»).
+              Holatda faqat raqam saqlanadi — nuqtalar faqat ko'rinishda, serverga toza son ketadi. */}
+          <input
+            inputMode="numeric"
+            placeholder="masalan: 3.000.000"
+            value={groupPrice(form.price)}
+            onChange={(e) => update({ price: groupDigitsOnly(e.target.value) })}
+          />
           <span className="unit">{CURRENCY_LABEL[form.currency]}</span>
         </label>
         <div className="field-under">

@@ -29,15 +29,24 @@ const frame = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n
 
 // marks() → { topic: belgi }. Taymer faqat kamida bitta sahifa ulanib turganda ishlaydi.
 // intervalMs — bazani qanchalik tez-tez tekshirish; heartbeatMs — ulanish uzilmasligi uchun bo'sh «ping»
-export function createLive({ marks, intervalMs = 1000, heartbeatMs = 25_000, log = () => {} }) {
-  const clients = new Set();
+// tunnelPadBytes — yuqoridagi izohning hajmi (0 — o'chiriladi)
+export function createLive({ marks, intervalMs = 1000, now = Date.now, heartbeatMs = 10_000, log = () => {}, tunnelPadBytes = 70_000 }) {
+  const clients = new Map(); // res → { padded }
   let last = null;
   let timer = null;
   let ping = null;
   let failing = false;
 
+  // Izoh (SSE «comment»): EventSource uni o'qimaydi, lekin bayt hisoblanadi. Cloudflare quick-tunnel
+  // (bizning «internetga chiqarish»imiz) kichik kadrlarni o'zida saqlab qoladi — resmiiy hujjatda ham
+  // «Quick Tunnels do not support Server-Sent Events» deyilgan; ~30-40 KB yig'ilsagina chiqaradi.
+  // Shuning uchun tunnel orqali kelgan ulanishga har kadrdan oldin uzun izoh yuboriladi (2026-11-11
+  // o'lchov: ~100 baytli kadr 60 s dan ko'p kechikadi, ~50-70 KB izohli kadr bir necha soniyada yetib boradi).
+  const pad = tunnelPadBytes > 0 ? `: ${"x".repeat(tunnelPadBytes)}\n` : "";
+
+  // Har mijozga o'z matnini yuboramiz: tunnel orqali kelganlarga kattalashtirilgan, lokalga — oddiy
   const send = (text) => {
-    for (const res of clients) res.write(text);
+    for (const [res, meta] of clients) res.write(meta.padded ? `${pad}${text}` : text);
   };
 
   function tick() {
@@ -62,7 +71,13 @@ export function createLive({ marks, intervalMs = 1000, heartbeatMs = 25_000, log
     last = null;
     tick(); // boshlang'ich belgilar
     timer = setInterval(tick, intervalMs);
-    ping = setInterval(() => send(": ping\n\n"), heartbeatMs);
+    // «ping» — nomli hodisa: izoh (`: ping`) brauzerga ko'rinmaydi, nomli kadr esa ko'rinadi.
+    // Brauzer shu orqali «oqim tirik, faqat ma'lumot o'zgarmadi» dey oladi (apps/admin/src/live.js) —
+    // aks holda jim o'tirgan panelda tunnel kechkirtdimi-yo'qmi bilib bo'lmaydi. intervalMs dan kichik
+    // bo'lishi shart emas: u faqat o'lik ulanishni payqash uchun (heartbeatMs).
+    ping = setInterval(() => send(frame("ping", { at: now() })), heartbeatMs);
+    // (Alohida «flush» taymeri shart emas: tunnel mijoziga ketgan HAR bir kadr allaqachon pad bilan katta,
+    // shuning uchun Cloudflare buferi yig'ilmaydi — kadr darhol chiqib ketadi.)
     timer.unref?.();
     ping.unref?.();
   }
@@ -74,6 +89,9 @@ export function createLive({ marks, intervalMs = 1000, heartbeatMs = 25_000, log
     timer = ping = null;
   }
 
+  // Cloudflare («cf-ray») yoki Tailscale Funnel orqali kelgan ulanish — kadrlar yo'lda saqlanib qoladi
+  const viaTunnel = (req) => typeof req.get === "function" && Boolean(req.get("cf-ray") ?? req.get("tailscale-funnel-request"));
+
   // Express marshruti: GET /api/live
   function handler(req, res) {
     res.writeHead(200, {
@@ -83,8 +101,9 @@ export function createLive({ marks, intervalMs = 1000, heartbeatMs = 25_000, log
       "x-accel-buffering": "no",
     });
     // retry — uzilsa brauzer necha ms dan keyin qayta ulanadi; ready — sahifa «jonli» belgisini yoqadi
-    res.write(`retry: 3000\n\n${frame("ready", { intervalMs })}`);
-    clients.add(res);
+    const padded = pad && viaTunnel(req);
+    res.write(`retry: 3000\n\n${padded ? pad : ""}${frame("ready", { intervalMs })}`);
+    clients.set(res, { padded });
     start();
     req.on("close", () => {
       clients.delete(res);
@@ -94,7 +113,7 @@ export function createLive({ marks, intervalMs = 1000, heartbeatMs = 25_000, log
 
   // Server to'xtaganda: ochiq ulanishlarni yopamiz
   function close() {
-    for (const res of clients) res.end();
+    for (const [res] of clients) res.end();
     clients.clear();
     stopIfIdle();
   }

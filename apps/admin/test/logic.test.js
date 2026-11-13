@@ -12,6 +12,10 @@ test("so'rov qatori bo'sh qiymatlarni tashlaydi", () => {
   assert.equal(buildQuery({ from: "andijon", q: "", hours: null, to: undefined, limit: 50, offset: 0 }), "?from=andijon&limit=50&offset=0");
   assert.equal(buildQuery({ q: "sement un" }), "?q=sement+un");
   assert.equal(buildQuery({}), "");
+  // get("/api/session", null) — parametr yo'q deb yuboriladi: bunda portilamasligi kerak
+  // (2026-11-11: aynan shu kirish sahifasini «Server javob bermayapti» deb ko'rsatib qo'ygandi)
+  assert.equal(buildQuery(null), "");
+  assert.equal(buildQuery(undefined), "");
 });
 
 test("sahifalash raqamlari", () => {

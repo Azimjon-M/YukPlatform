@@ -2503,3 +2503,150 @@ a.btn {
   margin: 48px auto;
   width: calc(100% - 32px);
 }
+
+/* --- Kirish sahifasi (LoginPage.jsx): server paroli bilan ochiladi (adminAuth.js) --- */
+.login {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--page);
+}
+
+.login-card {
+  width: min(400px, 100%);
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px; /* elementlar orasi ixcham (sichqoncha bilan ishlatiladigan oynada katta bo'sh joy kerak emas) */
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.login-brand strong,
+.login-brand small {
+  display: block;
+}
+
+.login-brand strong {
+  font-size: 15px;
+}
+
+.login-brand small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.login-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* Hisob oynasi: maydonlar bir-birdan bo'sh joy bilan ajralib turadi */
+.modal-body .field + .field {
+  margin-top: 12px;
+}
+
+.login-card .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: none; /* umumiy .field 230px bilan cheklangan — kirish oynasida to'liq kenglik kerak */
+  flex: 0 0 auto; /* DIKKAT: umumiy .field'dagi «flex: 1 1 150px» bu yerda VERTIKAL o'qib, maydonni 150px gacha cho'zardi */
+}
+
+/* DIKKAT: `input[type]` tanlovi — checkbox'ni ham 40px qilib yubormasin («Meni eslab qol» qatori shishi bo'lsin) */
+.login-card input[type="text"],
+.login-card input[type="password"] {
+  min-height: 40px;
+  font-size: 15px;
+}
+
+.login-card .btn-primary {
+  min-height: 40px;
+}
+
+.login-remember {
+  color: var(--text-2);
+  margin-top: 2px;
+}
+
+.login-error {
+  min-height: 18px;
+  margin: -2px 0; /* xato bo'lmasa ham joy egallaydi (matn sakrashining oldini oladi) — ixcham */
+  color: var(--critical-text);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+/* Telefon: barmoq uchun maydonlar balandroq, shrift 16px (iOS kichik shriftda kataklab yuboradi) */
+@media (max-width: 560px) {
+  .login-card input[type="text"],
+  .login-card input[type="password"] {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .login-card .btn-primary {
+    min-height: 44px;
+  }
+}
+
+/* Kichik telefonlar (≤380px) */
+@media (max-width: 380px) {
+  .login {
+    padding: 16px 10px;
+  }
+
+  .login-card {
+    padding: 18px 16px;
+    gap: 12px;
+  }
+
+  .login-card h1 {
+    font-size: 20px;
+  }
+}
+
+/* Katta desktop: karta bir oz kengroq va ichki bo'sh joylar yana ham ixchamroq */
+@media (min-width: 1400px) {
+  .login-card {
+    width: min(420px, 100%);
+    padding: 28px 26px;
+  }
+}
+
+.login-card .btn-primary {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Yon paneldagi «Chiqish» */
+.sidebar-exit-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+  padding-top: 8px;
+}
+
+.sidebar-exit {
+  color: var(--text-2);
+}

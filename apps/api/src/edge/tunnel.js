@@ -1,5 +1,8 @@
 // Tunnel: haydovchilar ilovasini internetga chiqaradi — routerda port ochish shart emas, dastur o'zi tashqariga ulanadi.
-// Ikki xil (tanlov — .env dagi TUNNEL, standart auto: Tailscale tayyor bo'lsa — u, bo'lmasa — Cloudflare):
+// Uch xil (tanlov — .env dagi TUNNEL, standart auto: Tailscale tayyor bo'lsa — u, bo'lmasa — Cloudflare):
+//   Cloudflare nomlangan — DOIMIY manzil o'z Domenida: internet → https://yuk.gtpro.uz → cloudflared → nginx (80).
+//                      Bir marta sozlanadi (~/.cloudflared/cert.pem + tunnel + DNS), keyin manzil HECH QACHON o'zgarmaydi.
+//                      .env: TUNNEL=cloudflare-named, CF_TUNNEL_HOSTNAME=<domen>, (istalgancha CF_TUNNEL_NAME=yuk).
 //   Tailscale Funnel — DOIMIY manzil: internet → https://<kompyuter>.<tarmoq>.ts.net → Tailscale → shu kompyuter → nginx (80).
 //                      Bepul (shaxsiy, notijorat), Tailscale akkaunti kerak. Manzil o'zgarmaydi — chatdagi eski tugmalar ishlayveradi.
 //   Cloudflare       — tekin «quick tunnel», akkauntsiz: internet → https://....trycloudflare.com → cloudflared → nginx (80).
@@ -11,7 +14,7 @@ import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { acquireRunLock, openStore, TUNNEL_URL_KEY } from "@yuk/store";
 import { findCloudflared, findNginx, findTailscale, ports } from "./tools.js";
-import { chooseTunnel, funnelLine, parseTunnelUrl, tailscaleStatus, tunnelLineKind } from "./tunnelLog.js";
+import { chooseTunnel, funnelLine, namedCloudflare, parseTunnelUrl, tailscaleStatus, tunnelLineKind } from "./tunnelLog.js";
 
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -63,7 +66,8 @@ async function main() {
   const tailscale = findTailscale();
   const cloudflared = findCloudflared();
   const status = tailscale ? await tailscaleState(tailscale) : null;
-  const choice = chooseTunnel({ mode, tailscale, cloudflared, status });
+  const named = namedCloudflare();
+  const choice = chooseTunnel({ mode, tailscale, cloudflared, status, named });
   if (!choice.use) fail(choice.error);
   // auto rejimda Funnel ishlamay qolsa (yoqilmagan, to'xtadi) — Cloudflare'ga o'tamiz; TUNNEL=tailscale bo'lsa — yo'q
   const canFallBack = choice.use === "tailscale" && Boolean(cloudflared) && String(mode ?? "").trim().toLowerCase() !== "tailscale";
@@ -126,6 +130,28 @@ async function main() {
     watch(child, "cloudflared");
   }
 
+  // Nomlangan Cloudflare tunneli — DOIMIY manzil (masalan https://yuk.gtpro.uz).
+  // Bir marta sozlanadi: `cloudflared tunnel login` (sertifikat) + `cloudflared tunnel create yuk` +
+  // `cloudflared tunnel route dns yuk <domen>`. Keyin xizmat shu tunneldan foydalanadi — manzil o'zgarmaydi.
+  function startNamed() {
+    current = "named";
+    const url = `https://${named.hostname}`;
+    log(`Tunnel ochilyapti (Cloudflare, doimiy manzil): internet → ${url} → ${to} ...`);
+    let ready = false;
+    child = launch(cloudflared, ["tunnel", "--no-autoupdate", "run", "--url", to, named.name], (line) => {
+      const kind = tunnelLineKind(line);
+      if (kind === "ready" && !ready) {
+        ready = true;
+        setUrl(url);
+        log(`🌐 Manzil (doimiy): ${url}`);
+        log(`✅ Tunnel ulandi. Haydovchilar ilovasi internetda: ${url} — bot Mini App tugmasini shu manzil bilan beradi`);
+      } else if (kind === "problem") {
+        console.error(line.trim());
+      }
+    });
+    watch(child, "cloudflared (doimiy tunnel)");
+  }
+
   // Funnel ishlamadi — Cloudflare'ga o'tamiz (faqat auto rejimda)
   function fallBack(reason) {
     if (stopping || current !== "tailscale" || !canFallBack) return false;
@@ -179,6 +205,7 @@ async function main() {
 
   if (choice.note) log(choice.note);
   if (choice.use === "tailscale") await startFunnel();
+  else if (choice.use === "named") startNamed();
   else startCloudflared();
 }
 

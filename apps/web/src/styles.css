@@ -30,6 +30,8 @@
   --header: var(--tg-theme-section-header-text-color, var(--accent));
   --error: var(--tg-theme-destructive-text-color, var(--f-error));
   --line: color-mix(in srgb, var(--hint) 28%, transparent);
+  /* Kontent ustunining kengligi: telefonda tor, katta ekratda keng (app.css media so'rovlari o'zgartiradi) */
+  --content-max: 640px;
   color-scheme: light dark;
 }
 
@@ -48,7 +50,7 @@ body {
 }
 
 main {
-  max-width: 640px;
+  max-width: var(--content-max);
   margin: 0 auto;
   padding: 4px 12px calc(84px + env(safe-area-inset-bottom));
 }
@@ -58,7 +60,7 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  max-width: 640px;
+  max-width: var(--content-max);
   margin: 0 auto;
   padding: 12px 16px 8px;
 }

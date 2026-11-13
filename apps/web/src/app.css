@@ -166,6 +166,92 @@ select:focus-visible {
   font-size: 14px;
 }
 
+/* --- Forma maydoni (select / input) — label tepada, izoh pastda (Azimjon, 2026-11-12: «placeholder yetarli emas») --- */
+.ctrl {
+  display: block;
+  margin-top: 12px;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.ctrl:focus-within {
+  border-color: var(--accent);
+}
+
+.ctrl-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Majburiy / ixtiyoriy belgisi — label yonida kichik, rangli */
+.ctrl-label em {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hint) 16%, transparent);
+  color: var(--hint);
+  font-size: 11.5px;
+  font-style: normal;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ctrl-label .ctrl-req {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.ctrl select,
+.ctrl input {
+  width: 100%;
+  min-height: 46px; /* telefonda bosish oson (44px+), katta ekranada ham shu barqaror */
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* <16px bo'lsa iPhone avtomatik kattalashtiradi */
+  outline: none;
+}
+
+/* Select o'ngida chek belgisi — oddiy «▼» ko'rinishi (brauzerga bog'liq) */
+.ctrl select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238a8a8e' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 34px;
+}
+
+.ctrl select:disabled {
+  opacity: 0.55;
+}
+
+.ctrl input::placeholder {
+  color: var(--hint);
+  opacity: 1;
+}
+
+.ctrl-desc {
+  display: block;
+  margin-top: 6px;
+  color: var(--hint);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.ctrl-back {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -316,6 +402,7 @@ select:focus-visible {
 .center {
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh; /* telefon brauzerining manzil paneli yashirilganda ham ekranga moslashadi */
   align-items: center;
   justify-content: center;
   padding: 16px;
@@ -345,18 +432,34 @@ select:focus-visible {
 .login {
   display: flex;
   min-height: 100vh;
+  min-height: 100dvh;
   align-items: center;
   justify-content: center;
   padding: 16px;
 }
 
 .login-card {
-  width: 100%;
-  max-width: 420px;
+  width: min(420px, 100%);
   padding: 24px 20px;
   border-radius: 18px;
   background: var(--card);
   text-align: center;
+}
+
+/* Kichik telefonlar (≤380px): karta chekkaga yaqqol siqilsin */
+@media (max-width: 380px) {
+  .login {
+    padding: 12px 10px;
+  }
+
+  .login-card {
+    padding: 18px 14px;
+  }
+
+  .login-card .lead,
+  .login-steps li {
+    font-size: 14px;
+  }
 }
 
 .login-card h1 {
@@ -964,6 +1067,24 @@ path.route-dot.start {
   margin: 0 0 10px;
 }
 
+/* «🚚 Mashinalar» — nuqta tanlash (TruckMapPage.jsx): tanlangan joy atrofidagi doira */
+.truck-map-page .hint {
+  margin: 0 0 10px;
+}
+
+circle.truck-near {
+  stroke: var(--accent);
+  stroke-dasharray: 5 5;
+  fill: var(--accent);
+  fill-opacity: 0.1;
+}
+
+/* Kartochkadagi masofa belgisi: «📍 12 km» (near=... bilan so'ralganda) */
+.distance {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .route-pick {
   padding: 10px 12px;
   border-radius: 12px;
@@ -1077,4 +1198,62 @@ path.route-dot.start {
 
 .footer.static {
   position: static;
+}
+
+/* --- Katta ekranlar: planshet (~760px+) va desktop (1200px+) ---
+   Kontent ustuni kengayadi; yuklar kartalari ustunlar tartibida joylashadi; xarita kattalashadi. */
+@media (min-width: 760px) {
+  :root {
+    --content-max: 1060px;
+  }
+
+  .loads {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+  }
+
+  .map {
+    height: min(70vh, 640px);
+  }
+
+  .map.route-map {
+    height: min(72vh, 700px);
+  }
+
+  .tiles {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+
+  /* Kirish kartasi katta ekratda bir oz kengroq, matn o'qilishi osonroq */
+  .login-card {
+    width: min(480px, 100%);
+    padding: 32px 28px;
+  }
+
+  .login-card h1 {
+    font-size: 28px;
+  }
+
+  .top h1 {
+    font-size: 22px;
+  }
+}
+
+@media (min-width: 1200px) {
+  :root {
+    --content-max: 1240px;
+  }
+
+  .map {
+    height: min(76vh, 760px);
+  }
+
+  .map.route-map {
+    height: min(78vh, 820px);
+  }
+
+  .load {
+    padding: 14px 16px;
+  }
 }

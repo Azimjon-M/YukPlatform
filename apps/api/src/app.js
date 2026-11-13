@@ -7,6 +7,7 @@ import express from "express";
 import { isAdmin, parseAdminIds } from "@yuk/shared";
 import { tunnelUrl } from "@yuk/store";
 import { createAiTools } from "./ai.js";
+import { COOKIE_NAME, createAdminAuth, requestToken } from "./adminAuth.js";
 import { createErrorLog } from "./errorLog.js";
 import { createLive, processMarks } from "./live.js";
 
@@ -51,6 +52,13 @@ export function configInfo(env, { publicUrl = null, tunnel = null } = {}) {
 }
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
+
+// Tunnel / nginx orqali kelgan so'rovda haqiqiy manzil sarlavhada boladi (Cloudflare — cf-connecting-ip, nginx — x-forwarded-for).
+// Login urinishlarini shu manzil bo'yicha sanaymiz.
+const clientIp = (req) => req.get("cf-connecting-ip") || req.get("x-forwarded-for")?.split(",")[0].trim() || req.socket?.remoteAddress || "?";
+
+// HTTPS orqali keldimi (nginx/tunnel sarlavhasi yoki shu serverning o'zi) — cookie'ga Secure shunday qo'shiladi
+const isHttps = (req) => req.secure || (req.get("x-forwarded-proto") ?? "").split(",")[0].trim() === "https";
 const pick = (query, keys) => Object.fromEntries(keys.filter((k) => query[k] !== undefined && query[k] !== "").map((k) => [k, String(query[k])]));
 const bool = (value, field) => {
   if (typeof value !== "boolean") throw httpError(400, `${field}: true yoki false bo'lishi kerak`);
@@ -87,11 +95,22 @@ export function createApp({
   sessions = null,
   publicUrl = null,
   live = null,
+  auth = null,
   errors = createErrorLog(),
   slowMs = SLOW_MS,
 }) {
   const app = express();
-  const changes = live ?? createLive({ marks: () => ({ ...store.changeMarks(), ...processMarks(processes), errors: String(errors.seq()) }) });
+  // Kirish: secret (data/secret.key) bo'lsa — parol bilan himoyalangan (.env ADMIN_PASS yoki panel orqali qo'yiladi).
+  // Sinov/serverda maxsus berilmasa shu yerda ochiladi; secret bo'lmasa (eski qo'shimcha serverlar) — parolsiz, eski holicha.
+  const guard = auth ?? (auth === null && secret ? createAdminAuth({ store, secret, env }) : null);
+  if (guard?.enabled) guard.syncFromEnv();
+  // SSE kadr izohi (live.js): Cloudflare quick-tunnel kichik kadrlarni saqlab qoladi. .env ADMIN_SSE_PAD=0 — o'chirish.
+  const changes =
+    live ??
+    createLive({
+      marks: () => ({ ...store.changeMarks(), ...processMarks(processes), errors: String(errors.seq()) }),
+      tunnelPadBytes: env.ADMIN_SSE_PAD === undefined || env.ADMIN_SSE_PAD === "" ? 70_000 : Number(env.ADMIN_SSE_PAD) || 0,
+    });
   app.locals.live = changes; // server.js to'xtaganda ochiq ulanishlarni yopadi
   app.locals.errors = errors;
   app.disable("x-powered-by");
@@ -125,6 +144,76 @@ export function createApp({
     if (req.method !== "GET" && req.get("x-yuk-admin") !== "1") return next(httpError(403, "So'rov boshqaruv markazidan kelmadi"));
     next();
   });
+
+  // --- Kirish (login) — adminAuth.js. Panel internetga chiqqani uchun /api endi parolsiz ochilmaydi:
+  // brauzerda httpOnly cookie (yuk_admin), curl/sinovda «Authorization: Bearer <token>».
+  // LOCAL_HOSTS va x-yuk-admin tekshiruvlari SHU YO'RIQDA oldin turadi (login so'rovi ham ularni o'tadi).
+  // Cookie — httpOnly (JS o'qib bo'lmaydi), SameSite=Lax (boshqa sayt yubora olmaydi), HTTPS'da Secure
+  const adminCookie = (res, req, value, maxAgeSec) =>
+    res.setHeader("Set-Cookie", `${COOKIE_NAME}=${value ?? ""}; Path=/; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Lax${isHttps(req) ? "; Secure" : ""}`);
+  // /api/login, /api/setup, /api/session — kirishgacha ham ishlaydi
+  if (guard?.enabled) {
+    api.post("/login", (req, res) => {
+      const answer = guard.login({ username: req.body?.username ?? req.body?.login, password: req.body?.password, remember: Boolean(req.body?.remember), ip: clientIp(req) });
+      if (answer.error) return res.status(answer.status).json({ error: answer.error });
+      adminCookie(res, req, answer.token, Math.round((answer.expiresAt - Date.now()) / 1000));
+      res.json({ ok: true, login: guard.currentLogin(), expiresAt: answer.expiresAt, remember: answer.remember });
+    });
+
+    // Parol hali qo'yilmagan birinchi ishga tushirishda: sahifa birinchi parolni o'zi qo'yadi (shundan keyin yopiladi)
+    api.post("/setup", (req, res) => {
+      const answer = guard.setup({ username: req.body?.username ?? req.body?.login, password: req.body?.password, repeat: req.body?.repeat, ip: clientIp(req) });
+      if (answer.error) return res.status(answer.status).json({ error: answer.error });
+      adminCookie(res, req, answer.token, Math.round((answer.expiresAt - Date.now()) / 1000));
+      res.json({ ok: true, login: guard.currentLogin(), expiresAt: answer.expiresAt, remember: true });
+    });
+
+    // Kirgan holat: parol qo'yilganmi, sessiya qachongacha, parolni almashtirish mumkinmi
+    api.get("/session", (req, res) => {
+      const token = requestToken(req, guard.cookieName);
+      const active = token ? guard.verify(token) : null;
+      // login — faqat kirgan holatda (tashqaridagi odam uni bilib qo'ymasligi uchun)
+      res.json({ signedIn: Boolean(active), user: active?.user ?? null, login: active ? guard.currentLogin() : null, ...guard.status(), expiresAt: active?.expiresAt ?? null });
+    });
+
+    // «Chiqish» — cookie o'chiriladi (token bekor qilinmaydi, 12 soatda o'zi tugaydi; parol almashtirilsa ham eski token ishlayveradi)
+    api.post("/logout", (req, res) => {
+      adminCookie(res, req, "", 0);
+      res.json({ ok: true });
+    });
+
+    // Parolni almashtirish — faqat kirgan odam (eski parolni bilgan holda)
+    api.post("/password", (req, res) => {
+      const answer = guard.change({ oldPassword: req.body?.oldPassword, password: req.body?.password, repeat: req.body?.repeat, ip: clientIp(req) });
+      if (answer.error) return res.status(answer.status).json({ error: answer.error });
+      res.json({ ok: true });
+    });
+
+    // Login va/yoki parolni almashtirish (Azimjon: «username va parolli bo'lishligi kerak»).
+    // Eski parol tasdiqlanadi — sessiya bo'lsa ham shart: eshik oldida ketma-ket o'tirgan odam parolni
+    // o'zgartirib yubormasin. Sessiyani uzmaymiz (kirgan holat saqlanadi).
+    api.post("/account", (req, res) => {
+      const answer = guard.account({
+        login: req.body?.username ?? req.body?.login,
+        oldPassword: req.body?.oldPassword,
+        password: req.body?.password,
+        repeat: req.body?.repeat,
+        ip: clientIp(req),
+      });
+      if (answer.error) return res.status(answer.status).json({ error: answer.error });
+      res.json({ ok: true, login: answer.login });
+    });
+
+    // Qolgan barcha /api so'rovi — sessiya bilan. /live (SSE) ham: EventSource cookie yuboradi, sarlavha qo'sha olmaydi.
+    // Parol HALI qo'yilmagan bo'lsa (yangi o'rnatish, sinov) — eshik ochiq qoladi: birinchi parolni qo'yish
+    // uchun sahifa ochilishi kerak. Parol qo'yilishi bilan hamma so'rov sessiyaga bog'lanadi.
+    api.use((req, res, next) => {
+      if (!guard.status().configured) return next();
+      const token = requestToken(req, guard.cookieName);
+      if (token && guard.verify(token)) return next();
+      return next(httpError(401, "Kirish muddati tugagan — qaytadan kiring"));
+    });
+  }
 
   // Jonli yangilanish: ochiq sahifaga «drivers o'zgardi» kabi xabarlar (SSE, live.js). Ma'lumotning o'zi — oddiy GET'larda
   api.get("/live", (req, res) => changes.handler(req, res));
@@ -219,12 +308,13 @@ export function createApp({
   });
 
   // Haydovchilar web'ini shu haydovchi nomidan ochish (sinash uchun, Telegram'ga kirmasdan).
-  // Token manzilning # qismida — serverga va boshqa saytlarga bormaydi; 12 soat amal qiladi.
+  // Token manzilning ?t= qismida (avval #token= edi): nginx «bo'shqina» kelsa /admin'ga yo'naltiradi,
+  // manzilda biror parametr bo'lsa — yo'naltirmaydi (# qismi nginx'ga ko'rinmaydi). 12 soat amal qiladi.
   api.post("/drivers/:chatId/web-link", (req, res) => {
     if (!sessions || !publicUrl) throw httpError(503, "Haydovchilar web'i ishga tushmagan");
     const chatId = Number(req.params.chatId);
     if (!store.getDriver(chatId)) throw httpError(404, "Haydovchi topilmadi");
-    res.json({ url: `${publicUrl}/#token=${sessions.issue(chatId, { ttl: 12 * 60 * 60 })}` });
+    res.json({ url: `${publicUrl}/?t=${sessions.issue(chatId, { ttl: 12 * 60 * 60 })}` });
   });
 
   // --- Manbalar (collector kuzatadigan guruhlar; o'zgarish keyingi aylanishda kuchga kiradi) ---

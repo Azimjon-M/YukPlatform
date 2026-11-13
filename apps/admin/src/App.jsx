@@ -1,5 +1,6 @@
 // Boshqaruv markazi: chapda menyu (tor ekranda — yuqorida), o'ngda tanlangan sahifa.
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { AccountSettings } from "./AccountSettings.jsx";
 import { get } from "./api.js";
 import { errorText, unseenCount } from "./errorInfo.js";
 import { onUncaughtError, useErrorsSeenAt, useLocalErrors } from "./errors.js";
@@ -8,6 +9,8 @@ import { formatNumber, formatTime } from "./format.js";
 import { useApi, useLiveStatus } from "./hooks.js";
 import { Icon } from "./icons.jsx";
 import { Link, usePathname } from "./navigation.jsx";
+import { LoginPage } from "./LoginPage.jsx";
+import { signOut, subscribeSession, sessionState } from "./session.js";
 import { OVERVIEW_INTERVAL_MS, OverviewContext } from "./overview.js";
 import { AiPage } from "./pages/AiPage.jsx";
 import { DriversPage } from "./pages/DriversPage.jsx";
@@ -34,6 +37,21 @@ const PAGES = {
 function NotFound() {
   useTitle("Sahifa topilmadi");
   return <ErrorScreen kind="notfound" path={usePathname()} />;
+}
+
+// Kirish holati: serverga «men kirmishmanmi?» deb so'raladi (session.js). 401 chiqsa — qaytadan kirish sahifasi.
+function useSession() {
+  return useSyncExternalStore(subscribeSession, sessionState, sessionState);
+}
+
+// Yon paneldagi «Chiqish» — sessiya cookie'sini o'chiradi (parol o'zgarmaydi)
+function SignOut() {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button type="button" className="link-button sidebar-exit" disabled={busy} onClick={async () => { setBusy(true); try { await signOut(); } finally { setBusy(false); } }}>
+      Chiqish
+    </button>
+  );
 }
 
 // Tugma bosilganda / fonda chiqqan (ushlanmagan) xato — qizil xabarcha; batafsili «Xatolar» bo'limida
@@ -115,11 +133,26 @@ function Sidebar({ current, overview }) {
                 : "Server bilan aloqa yo'q"
             : "Ulanmoqda…"}
       </div>
+      {/* Kirayotgan odamning logini ko'rinib turmaydi (xavfsizlik), shuning uchun Hisob oynasida ochiladi */}
+      <div className="sidebar-exit-row">
+        <AccountSettings />
+        <SignOut />
+      </div>
     </aside>
   );
 }
 
+// Kirish holati shu yerda tekshiriladi. MUHIM: panelning o'zini alohida komponentga (Shell) ajratdik —
+// sababi hook'lar soni har renderda bir xil bo'lishi shart. Agar «if (!signedIn) return <LoginPage/>» dan
+// keyin usePathname/useApi ishlatilsa, kirishdan keyingi renderda hook'lar ko'payib React #310 bilan yiqiladi
+// (2026-11-11: dashboard paroldan keyin oq ekran bo'lgani aynan shu edi).
 export function App() {
+  const session = useSession();
+  if (!session.signedIn) return <LoginPage />;
+  return <Shell />;
+}
+
+function Shell() {
   const pathname = usePathname();
   const route = routeFor(pathname);
   const overview = useApi(() => get("/api/overview"), [], {

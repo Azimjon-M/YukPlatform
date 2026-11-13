@@ -1,6 +1,8 @@
 // Tunnel dasturlari chiqargan qatorlarni tushunish va qaysi tunnelni ishlatishni tanlash (tunnel.js uchun; .exe
 // ishga tushirilmaydi — testlanadi).
 // cloudflared ko'p gapiradi (INF). Bizga kerakli: berilgan manzil, ulanish tayyorligi, ogohlantirish va xatolar.
+import { existsSync, readdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 // Tekin (quick) tunnel manzili: https://so'z-so'z-so'z-so'z.trycloudflare.com (kamida bitta chiziqcha —
 // xato xabarlaridagi https://api.trycloudflare.com tunnel manzili emas)
@@ -54,12 +56,36 @@ const TAILSCALE_STATES = {
 };
 const stateText = (state) => TAILSCALE_STATES[state] ?? (state ? `Tailscale holati: ${state}` : "Tailscale xizmati javob bermadi");
 
-// Qaysi tunnel: .env dagi TUNNEL = auto (standart) | tailscale | cloudflare.
+// Cloudflare'da bir martalik qo'llaniladigan sozlamalar (`cloudflared tunnel login` → cert.pem),
+// keyin xizmat ularni takrorlamaydi. nom — tunnel nomi, hostname — domen (yuk.gtpro.uz kabi).
+// cert.pem (yoki CF_TUNNEL_CRED) va CF_TUNNEL_HOSTNAME bo'lsa — doimiy manzilli tunnel ishlatiladi.
+export function namedCloudflare(env = process.env) {
+  const cert = env.CF_TUNNEL_CERT || `${env.HOME ?? ""}/.cloudflared/cert.pem`;
+  const certReady = cert && existsSync(cert);
+  const credFile = env.CF_TUNNEL_CRED || (certReady && existsSync(cert) ? findCredential(cert) : null);
+  const hostname = String(env.CF_TUNNEL_HOSTNAME ?? "").trim().toLowerCase();
+  const name = String(env.CF_TUNNEL_NAME ?? "yuk").trim().toLowerCase();
+  return { certReady, credFile, hostname, name, usable: Boolean(certReady && credFile && hostname) };
+}
+
+// cert.pem yonidagi tunnel kaliti: ~/.cloudflared/<tunnel-id>.json
+function findCredential(certPath) {
+  const dir = dirname(certPath);
+  if (!dir || !existsSync(dir)) return null;
+  const files = readdirSync(dir);
+  const id = String(process.env.CF_TUNNEL_ID ?? "").trim();
+  const pick = (id && files.includes(`${id}.json`) ? `${id}.json` : null) ?? files.find((f) => /^[0-9a-f-]{36}\.json$/.test(f)) ?? null;
+  return pick ? `${dir}/${pick}` : null;
+}
+
+// Qaysi tunnel: .env dagi TUNNEL = auto (standart) | tailscale | cloudflare | cloudflare-named (doimiy domen).
 //   auto — Tailscale o'rnatilgan va ulangan bo'lsa Funnel (doimiy manzil), bo'lmasa Cloudflare (manzil har safar yangi)
-// → { use: "tailscale" | "cloudflare", note? } yoki { use: null, error }
-export function chooseTunnel({ mode, tailscale = null, cloudflared = null, status = null } = {}) {
+//   cloudflare-named — sertifikat bilan nomlangan tunnel: manzil DOIMIY (masalan https://yuk.gtpro.uz)
+// → { use: "tailscale" | "cloudflare" | "named", note? } yoki { use: null, error }
+export function chooseTunnel({ mode, tailscale = null, cloudflared = null, status = null, named = null } = {}) {
   const wanted = String(mode ?? "").trim().toLowerCase();
-  const kind = wanted === "tailscale" ? "tailscale" : wanted === "cloudflare" || wanted === "cloudflared" ? "cloudflare" : "auto";
+  const kind =
+    wanted === "tailscale" ? "tailscale" : wanted === "cloudflare" || wanted === "cloudflared" ? "cloudflare" : wanted === "cloudflare-named" || wanted === "named" ? "named" : "auto";
   const ready = status?.state === "Running" && Boolean(status.url);
   const why = !tailscale
     ? "Tailscale o'rnatilmagan"
@@ -70,7 +96,24 @@ export function chooseTunnel({ mode, tailscale = null, cloudflared = null, statu
 
   if (kind === "tailscale") return ready ? { use: "tailscale" } : { use: null, error: `TUNNEL=tailscale, lekin ${why}` };
   if (kind === "cloudflare") return cloudflared ? { use: "cloudflare" } : { use: null, error: noCloudflared };
+  if (kind === "named")
+    return !cloudflared
+      ? { use: null, error: noCloudflared }
+      : named?.usable
+        ? { use: "named", note: `Doimiy manzil: https://${named.hostname}` }
+        : {
+            use: null,
+            error:
+              "TUNNEL=cloudflare-named, lekin tayyor emas: " +
+              (!named?.certReady
+                ? "`cloudflared tunnel login` bilan sertifikat oling (~/.cloudflared/cert.pem)"
+                : !named?.credFile
+                  ? "tunnel kaliti (~/.cloudflared/<id>.json) topilmadi — `cloudflared tunnel create` qiling"
+                  : ".env ga CF_TUNNEL_HOSTNAME domenini yozing"),
+          };
   if (ready) return { use: "tailscale" };
+  // auto rejimda ham doimiy domenni afzal ko'ramiz
+  if (named?.usable) return { use: "named", note: `Doimiy manzil: https://${named.hostname}` };
   if (cloudflared) return { use: "cloudflare", note: tailscale ? `Doimiy manzil yo'q: ${why}` : null };
   return { use: null, error: tailscale ? `${why}; ${noCloudflared}` : noCloudflared };
 }

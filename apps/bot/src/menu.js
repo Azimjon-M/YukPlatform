@@ -62,7 +62,10 @@ export function phoneKeyboard(hasPhone = false) {
   return keyboard.resized().oneTime();
 }
 
-export const settingsLabel = (driver) => (driver?.profile ? MENU.settings : MENU.register);
+// Azimjon, 2026-11-12: yuk beruvchiga ro'yxatdan o'tish umuman kerak emas — uning sozlamalari IXTIYORIY, shuning
+// uchun profili bo'lmasa ham tugma «⚙️ Sozlamalar». «🚚 Ro'yxatdan o'tish» endi faqat profil so'raladigan haydovchida.
+export const settingsLabel = (driver) =>
+  driver?.profile || roleOf(driver) === "yuk_beruvchi" ? MENU.settings : MENU.register;
 
 // Rolga qarab birinchi tugma: haydovchi — mos yuklar, yuk beruvchi — bo'sh mashinalar
 export const matchesLabel = (driver) => (roleOf(driver) === "yuk_beruvchi" ? MENU.trucks : MENU.loads);
@@ -93,19 +96,39 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   };
 
   // Rol tanlangan, lekin ro'yxatdan o'tmagan (forma hali to'ldirilmagan) — FAQAT 3 tugma (Azimjon, 2026-11-10):
-  //   [📦 Yuk berish]   ← faqat yuk beruvchida: yuk berish uchun ro'yxat shart emas (Azimjon, 2026-11-10: «Shart emas»)
   //   [🚚 Ro'yxatdan o'tish]
   //   [🔄 Rolni almashtirish] [❓ Yordam]
-  // Mos yuklar, pauza, raqam, Boshqaruv — formadan keyin (bu bosqichda ular ishlamaydi yoki chalg'itadi; raqam formadan
-  // keyin baribir so'raladi). Yashirin tugmalarning matni yozib yuborilsa ham bot tushunadi (hears) — buzilmaydi.
-  if (!driver?.profile) {
+  // Bu endi FAQAT haydovchiga qo'llanadi (Azimjon, 2026-11-12: «Bizga yuk beruvchi uchun Ro'yxatdan o'tish kerak emas!») —
+  // yuk beruvchi profili bo'lmasa ham pastdagi TO'LIQ menyuni oladi («📦 Yuk berish» uning asosiy ishi,
+  // «🚚 Bo'sh mashinalar» ixtiyoriy sozlamalarsiz ham filtrsiz ro'yxat bo'lib ochiladi).
+  // Mos yuklar, pauza, raqam, Boshqaruv — formadan keyin (haydovchida bu bosqichda ular ishlamaydi yoki chalg'itadi;
+  // raqam formadan keyin baribir so'raladi).
+  if (!driver?.profile && role !== "yuk_beruvchi") {
     const keyboard = settingsButton(loadRow(new Keyboard())).row();
     if (role) keyboard.text(MENU.role);
     keyboard.text(MENU.help);
     return keyboard.resized().placeholder("Menyudan tanlang");
   }
 
-  const paused = Boolean(driver?.profile) && driver.active === false;
+  // Azimjon, 2026-11-12: «⏸ Pauza / ▶️ Davom ettirish» va «➕ Guruh qo'shish» FAQAT haydovchi roli uchun —
+  // yuk_beruvchida menyuda yo'q (handlerlar saqlangan: eski menyuda bosilsa yoki idle DM'dagi inline
+  // «▶️ Davom ettirish» bosilsa ishlayveradi). «📱 Raqam ulashish» ikkala rolda ham bor (raqam — umumiy
+  // identifikatsiya). Yuk beruvchi tartibi: [📦 Yuk berish] / [🚚 Bo'sh mashinalar, 🔄 Rolni almashtirish] /
+  // [📱 Raqam ulashish, ❓ Yordam] / [⚙️ Sozlamalar] / (adminga [🛠 Boshqaruv])
+  if (role === "yuk_beruvchi") {
+    // Rol tanlangan (shu tarmoq shartiga ko'ra) — «🔄 Rolni almashtirish» har doim qo'yiladi
+    const shipperKb = loadRow(new Keyboard()).text(MENU.trucks).text(MENU.role);
+    // «📱 Raqam ulashish» ikkala rolda ham bor; raqami bo'lsa ham bosilsa yangi raqam saqlanadi (esmada saqlash — /raqam)
+    shipperKb.row().requestContact(MENU.phone).text(MENU.help);
+    settingsButton(shipperKb.row());
+    const shipperAdminUrl = admin ? miniAppUrl(miniappUrl, null, scope, { view: "admin", role, token }) : null;
+    if (shipperAdminUrl) shipperKb.row().webApp(MENU.admin, shipperAdminUrl);
+    return shipperKb.resized().placeholder("Menyudan tanlang");
+  }
+
+  // Haydovchi (Azimjon, 2026-11-10 tartibi — O'ZGARMAYDI)
+  // Pauza holati: profil to'ldirilganda pauza tugmasi ishlaydi; u pauzaga tushsa tugma «▶️ Davom ettirish» bo'ladi
+  const paused = driver.active === false;
   const keyboard = loadRow(new Keyboard()).text(matchesLabel(driver)).text(paused ? MENU.resume : MENU.pause).row();
   // Rolni almashtirish (haydovchi ↔ yuk beruvchi) — /rol bilan bir xil. Odamda bugun yuk, ertaga bo'sh mashina bo'lishi
   // mumkin, /rol ni esa hamma ham topavermaydi. Rol tanlanmagan bo'lsa tugma yo'q

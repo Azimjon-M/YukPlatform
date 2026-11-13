@@ -25,16 +25,39 @@ export function emitTopics(topics) {
   }
 }
 
+// Kadr kutilayotgan eng ko'p vaqt. Cloudflare quick-tunnel SSE oqimini yo'lda saqlab qo'yadi
+// (server katta izohlar bilan buferni bo'shatadi — apps/api/src/live.js), lekin baribir bir necha
+// soniya kechikishi mumkin. SHu oyndan oshib kadr kelmasa — «slow»: sahifalar oddiy GET bilan
+// muntazam yangilanadi (pastdagi slowTimer), yon panelda «Jonli» o'rniga «Server ulangan» yoziladi.
+const FRAME_WAIT_MS = 8_000;
+const SLOW_POLL_MS = 10_000;   // «slow» rejimda sahifalar shu oralikda oddiy GET bilan yangilanadi
+
+let frameTimer = null;
+let slowTimer = null;
+
+function frameArrived() {
+  clearTimeout(frameTimer);
+  clearInterval(slowTimer);
+  slowTimer = null;
+  if (status !== "live") setStatus("live");
+  frameTimer = setTimeout(() => {
+    // kadr yo'q — poll rejimi
+    setStatus("slow");
+    slowTimer ??= setInterval(() => emitTopics(null), SLOW_POLL_MS);
+  }, FRAME_WAIT_MS);
+}
+
 function connect() {
   if (source || typeof EventSource === "undefined") return;
   clearTimeout(retryTimer);
   source = new EventSource("/api/live");
   source.addEventListener("ready", () => {
-    setStatus("live");
     if (lost) emitTopics(null);
     lost = false;
+    frameArrived();
   });
   source.addEventListener("change", (event) => {
+    frameArrived();
     try {
       const { topics } = JSON.parse(event.data);
       if (Array.isArray(topics) && topics.length) emitTopics(topics);
@@ -42,8 +65,13 @@ function connect() {
       // tushunarsiz xabar — e'tibor bermaymiz
     }
   });
+  // Serverning bo'sh «ping» izohi ham shu yerga keladi (nomlangan hodisa emas) — oqim tirikligini bildiradi
+  source.onmessage = () => frameArrived();
   source.addEventListener("error", () => {
     lost = true;
+    clearTimeout(frameTimer);
+    clearInterval(slowTimer);
+    slowTimer = null;
     if (source.readyState === EventSource.CLOSED) {
       // Server 404/500 qaytardi (masalan, eski versiya) — brauzer o'zi qayta urinmaydi, biz 10 s dan keyin
       source = null;

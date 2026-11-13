@@ -61,13 +61,15 @@ export function LoadCard({ item, now }) {
   );
 }
 
-// Bo'sh mashina: "qayerga" yozilmagan bo'lsa — istalgan joyga; narx ko'pincha yo'q (bo'lsa ko'rsatiladi)
+// Bo'sh mashina: "qayerga" yozilmagan bo'lsa — istalgan joyga; narx ko'pincha yo'q (bo'lsa ko'rsatiladi).
+// item.distanceKm — «🚚 Mashinalar» da xaritadan tanlangan nuqtadan masofa (near=... bilan so'ralganda)
 export function TruckCard({ item, now }) {
   const { load: truck, post } = item;
   const vehicle = truckVehicleText(truck);
   return (
     <article className="load">
       <Route from={truckPlaceText(truck, "from")} to={truckPlaceText(truck, "to")} />
+      {item.distanceKm != null && <p className="distance">📍 tanlangan joydan ~{item.distanceKm} km</p>}
       {vehicle && <p>🚛 {vehicle}</p>}
       {(truck.price != null || truck.negotiable) && <p className="price">💰 {priceText(truck)}</p>}
       {truck.when && <p>📅 {truck.when}</p>}
