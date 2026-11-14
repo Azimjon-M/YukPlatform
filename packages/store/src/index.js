@@ -11,6 +11,7 @@ import { createUserSourceQueries } from "./userSources.js";
 import { userEvents } from "./history.js";
 import { createAiQueries } from "./ai.js";
 import { createTgAccountQueries } from "./tgAccounts.js";
+import { createFeedQueries, migrateFeed } from "./feed.js";
 
 export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR } from "./lock.js";
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
@@ -457,6 +458,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
   migrate(db);
+  migrateFeed(db);
 
   const q = {
     insertPost: db.prepare(
@@ -518,6 +520,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     ...createAiQueries(db, now),
     // Collector'ning Telegram akkauntlari va ularning guruhlari ro'yxati (tgAccounts.js)
     ...createTgAccountQueries(db, now),
+    // Haydovchining tezkor rejimi: asl matn bilan kimga ketgani, «Mening guruhlarim» ro'yxati (feed.js)
+    ...createFeedQueries(db, now),
 
     // --- E'lonlar navbati ---
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.
@@ -793,6 +797,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     // foydalanuvchi, unga yuborilganlar ro'yxati, tarixi va (yuk beruvchi bo'lsa) o'zi yuborgan yuklar. Qaytarib bo'lmaydi. → true (bor edi) yoki false
     purgeDriver(chatId) {
       db.prepare("DELETE FROM deliveries WHERE chat_id = ?").run(chatId);
+      db.prepare("DELETE FROM post_deliveries WHERE chat_id = ?").run(chatId);
       // Yuk beruvchi bo'lsa — o'zi yuborgan yuklar ham (ularda uning raqamlari bor): yetkazilganlar ro'yxati, yuklar, e'lonlar
       const own = "SELECT id FROM posts WHERE shipper = ?";
       db.prepare(`DELETE FROM deliveries WHERE load_id IN (SELECT id FROM loads WHERE post_id IN (${own}))`).run(chatId);

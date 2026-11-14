@@ -5,6 +5,7 @@ export * from "./places.js";
 export * from "./match.js";
 export * from "./dedupe.js";
 export * from "./profile.js";
+export * from "./feed.js";
 export * from "./roles.js";
 export * from "./contact.js";
 export * from "./scope.js";

@@ -759,3 +759,106 @@ test("yuk beruvchi yuki AI navbatiga tushmaydi: take() uni o'tkazib yuboradi", a
   assert.equal(seen, 1, "AI faqat guruh e'lonini ko'rdi");
   assert.equal(store.takeNewPosts().length, 0);
 });
+
+// --- Rejimlar: «⚡ Tezkor» / «📌 Mening guruhlarim» (asl matn, AI'siz — deps.deliverRaw) ---
+const RAW_BASE = { vehicle: null, domestic: true, international: false, fromAreas: [], toAreas: [], routeAt: null, mode: "own" };
+const TEZKOR = { ...RAW_BASE, feed: { mode: "tezkor", sources: [] } };
+const GURUHLARIM = { ...RAW_BASE, feed: { mode: "guruhlarim", sources: ["@YUK_GURUH2"] } }; // harfi boshqacha — baribir topiladi
+const PLUS = { ...FURA, routeAt: 1, feed: { mode: "guruhlarim_plus", sources: ["@yuk_guruh2"] } };
+const LOAD_TEXT = "Toshkentdan Samarqandga 20 tonna un bor, tent fura kerak +998900000001";
+const FAR_TEXT = "Toshkentdan Moskvaga 20 tonna yuk bor, tent fura kerak +998900000002";
+const CHAT_TEXT = "Assalomu alaykum, hammaga xayrli kun, ishlaringiz omadli bo'lsin +998900000003";
+
+// 1 — saralangan (FURA), 7 — tezkor, 8 — guruhlarim (@yuk_guruh2), 9 — guruhlarim + saralangan (@yuk_guruh2, FURA)
+function rawSetup(answers = {}) {
+  const t = setup([]);
+  const { store, deps } = t;
+  store.saveDriver(7, { role: "haydovchi", profile: TEZKOR, active: true });
+  store.saveDriver(8, { role: "haydovchi", profile: GURUHLARIM, active: true });
+  store.saveDriver(9, { role: "haydovchi", profile: PLUS, active: true });
+  // AI javobi e'lon matniga qarab (navbatdan qaysi tartibda olinishi muhim emas)
+  deps.parser.parse = async (text) => answers[text] ?? { ok: true, postType: "boshqa", loads: [] };
+  const raw = [];
+  deps.deliverRaw = async (chatId, post, { phones }) => (raw.push([chatId, post.messageId, phones]), { ok: true });
+  const post = (source, messageId, text, postedAt = Date.now() - 1000) => store.addPost({ source, messageId, text, postedAt });
+  return { ...t, raw, post };
+}
+const noAi = { size: () => 0, acquire: () => null, nextReadyIn: () => null, batchSize: 10 };
+
+test("tezkor: yuk e'loni AI'siz, asl matn bilan — tezkorga hamma guruhdan, guruhlarimga faqat tanlaganidan", async () => {
+  const { store, deps, raw, delivered, post } = rawSetup();
+  deps.pool = noAi; // AI umuman yo'q — tezkor yo'l baribir ishlaydi
+  post("@g", 1, LOAD_TEXT);
+  post("@g", 2, FAR_TEXT);
+  post("@yuk_guruh2", 3, LOAD_TEXT.replace("0001", "0004"));
+  post("@g", 4, CHAT_TEXT);
+  const logs = [];
+  await createWorker(deps, { log: (m) => logs.push(m) }).runOnce();
+  const got = raw.map(([chatId, id]) => `${id}→${chatId}`).sort();
+  assert.deepEqual(got, ["1→7", "3→7", "3→8", "3→9"], "Moskva — tezkorga yo'q (chet el); salomlashish — hech kimga");
+  assert.deepEqual(raw.find(([c, id]) => id === 1)[2], ["+998900000001"], "telefonlar matndan");
+  assert.deepEqual(delivered, [], "saralangan yo'l AI'ni kutyapti");
+  assert.equal(store.takeNewPosts().length, 4, "e'lonlar navbatda qoladi — keyin AI tahlil qiladi");
+  assert.deepEqual(store.postDeliveredTo(3).sort(), [7, 8, 9]);
+  assert.ok(logs.some((m) => /#\d+ @yuk_guruh2: ⚡ 3 ta haydovchiga asl matn bilan/.test(m)));
+});
+
+test("tezkor: o'zi tanlagan guruhdan chet el yuki ham keladi", async () => {
+  const { deps, raw, post } = rawSetup();
+  deps.pool = noAi;
+  post("@yuk_guruh2", 1, FAR_TEXT);
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(raw.map(([c]) => c).sort(), [8, 9], "tezkor (7) — chet el tashlandi; guruhlarim — hammasi");
+});
+
+test("tezkor: AI keyin topgan yuk asl matnni olganlarga qayta bormaydi; saralanganlarga — mos bo'lsa", async () => {
+  const yukOf = (load) => ({ ok: true, postType: "yuk_bor", loads: [load] });
+  const { deps, raw, delivered, post } = rawSetup({
+    [LOAD_TEXT]: yukOf(LOAD),
+    [CHAT_TEXT]: yukOf({ ...LOAD, toCity: "Buxoro", toRegion: "buxoro", phones: ["+998900000003"] }),
+  });
+  post("@g", 1, LOAD_TEXT);
+  post("@yuk_guruh2", 2, CHAT_TEXT); // AI'siz tekshiruv «yuk emas» dedi, AI esa yuk topdi
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(raw.map(([c, id]) => `${id}→${c}`), ["1→7"]);
+  // 1-e'lon (@g): 7 — asl matnni olgan; 1 (saralangan) va 9 (+saralangan, @g tanlanmagan) — mos, oladi; 8 — @g kerak emas.
+  // 2-e'lon (@yuk_guruh2): 7, 8, 9 — guruhdagi hamma yuk kerak, asl matn bormagan → saralangani filtrsiz; 1 — mos
+  assert.deepEqual(delivered.sort(), [1, 1, 7, 8, 9, 9]);
+});
+
+test("tezkor: qoidaviy parser darhol tushungan e'lon — asl matn navbatda turganlarga saralangani ketmaydi", async () => {
+  const { deps, raw, delivered, post } = rawSetup();
+  deps.pool = noAi;
+  deps.rules = (text) => (text === LOAD_TEXT ? { ok: true, postType: "yuk_bor", loads: [LOAD] } : null);
+  post("@yuk_guruh2", 1, LOAD_TEXT);
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(raw.map(([c]) => c).sort(), [7, 8, 9]);
+  assert.deepEqual(delivered, [1], "faqat saralangan rejimdagi (1)");
+});
+
+test("tezkor: bot qayta yoqilsa — asl matn ikkinchi marta yuborilmaydi; eski e'lon va a'zo emas — yo'q", async () => {
+  const { store, deps, raw, post } = rawSetup();
+  deps.pool = noAi;
+  post("@g", 1, LOAD_TEXT);
+  post("@g", 2, LOAD_TEXT.replace("0001", "0005"), Date.now() - 40 * 60_000); // 40 daqiqa oldin — tezkor uchun eski
+  await createWorker(deps, { log: () => {} }).runOnce();
+  await createWorker(deps, { log: () => {} }).runOnce(); // yangi ishchi: navbatdagi e'lonlarni boshidan ko'radi
+  assert.deepEqual(raw.map(([c, id]) => `${id}→${c}`), ["1→7"]);
+
+  const other = rawSetup();
+  other.deps.pool = noAi;
+  other.deps.canReceive = async (user) => user.chatId !== 7;
+  other.post("@g", 1, LOAD_TEXT);
+  await createWorker(other.deps, { log: () => {} }).runOnce();
+  assert.deepEqual(other.raw, [], "kanal va guruhga a'zo emas");
+  assert.deepEqual(other.store.postDeliveredTo(1), []);
+  assert.ok(store.postDeliveredTo(2).length === 0);
+});
+
+test("tezkor: deliverRaw berilmasa (eski main.js) — tezkor yo'l o'chiq, tezkor haydovchi AI yukini oladi", async () => {
+  const { deps, delivered, post } = rawSetup({ [LOAD_TEXT]: { ok: true, postType: "yuk_bor", loads: [LOAD] } });
+  delete deps.deliverRaw;
+  post("@g", 1, LOAD_TEXT);
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(delivered.sort(), [1, 7, 9]);
+});

@@ -1,6 +1,8 @@
-// Haydovchi: transporti va qayerda ishlashi.
-//   Birinchi marta (profil yo'q) — ro'yxatdan o'tish: Transport → O'lcham → Tasdiqlash (Steps.jsx). Tyagach, sisterna va
-//   yengil mashinada «O'lcham» qadami yo'q (o'lcham va yuklash tomoni kerak emas).
+// Haydovchi: yuklarni qanday olishi (rejim), transporti va qayerda ishlashi.
+//   Birinchi marta (profil yo'q) — ro'yxatdan o'tish: Rejim → (Guruhlar) → Transport → O'lcham → Tasdiqlash (Steps.jsx).
+//   Rejim (@yuk/shared feed.js, 2026-11-14): «🎯 Saralangan» — hozirgidek; «⚡ Tezkor» va «📌 Mening guruhlarim» da mashina
+//   so'ralmaydi (Rejim → (Guruhlar) → Tasdiqlash); «Guruhlarim + saralangan» — guruhlar ham, mashina ham.
+//   Tyagach, sisterna va yengil mashinada «O'lcham» qadami yo'q (o'lcham va yuklash tomoni kerak emas).
 //   Keyin — hamma bo'lim bitta sahifada (bitta joyni tez o'zgartirish uchun).
 // Yo'nalish (qayerdan → qayerga) bu yerda so'ralmaydi (Azimjon, 2026-11-07: haydovchi har kuni boshqa joyda bo'ladi) —
 // botda «📋 Mos yuklar» bosilganda tanlanadi; viloyatlar va davlatlar shu yerdagi «Qayerda ishlaysiz?» ga qarab chiqadi.
@@ -10,6 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BODY_TYPES,
   CAPACITY_OPTIONS,
+  FEED_MODES,
+  FEED_MODE_IDS,
   FORM_SIDES,
   SIDE_LABELS,
   TRUCK_CLASSES,
@@ -26,14 +30,19 @@ import {
   capacityUnit,
   classBody,
   formFromProfile,
+  formNeedsVehicle,
+  formUsesGroups,
   manyClassesPicked,
   profileFromForm,
+  selectFeed,
+  toggleFeedSource,
   toggleClass,
   showSides,
   showSize,
   sizeSummary,
   toggle,
 } from "./form.js";
+import { FeedGroups, sourceNamer } from "./FeedGroups.jsx";
 import { OPEN_FROM_MENU, submitProfile, useScopeChoices } from "./settingsParts.jsx";
 import { ProfileSummary, StepHeader, StepNav, useFormButtons, useSteps } from "./Steps.jsx";
 import { canSendData, haptic, inTelegram, setUnsaved, showAlert } from "./telegram.js";
@@ -44,21 +53,34 @@ const fmt = (n) => String(n).replace(".", ",");
 const CLASS_OPTIONS = TRUCK_CLASSES.map((t) => ({ id: t.id, label: t.name, sub: capacityRangeText(t.capacityT), note: t.note }));
 const BODY_OPTIONS = BODY_TYPES.filter((b) => b.form !== false).map((b) => ({ id: b.id, label: b.name, note: b.sub }));
 const SIDE_OPTIONS = FORM_SIDES.map((id) => ({ id, label: SIDE_LABELS[id] }));
+const FEED_OPTIONS = FEED_MODE_IDS.map((id) => ({ id, label: `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`, note: FEED_MODES[id].about }));
 const className = (id) => TRUCK_CLASSES.find((t) => t.id === id)?.name ?? "";
 const dims = (b) => `${fmt(b.lengthM)} × ${fmt(b.widthM)} × ${fmt(b.heightM)} m`;
 
 // Ro'yxatdan o'tish qadamlari: sections — shu qadamda ko'rinadigan bo'limlar (Section id)
 const ALL_STEPS = [
+  { id: "rejim", title: "Rejim", sections: ["feed"] },
+  { id: "guruhlar", title: "Guruhlar", sections: ["groups"] },
   { id: "transport", title: "Transport", sections: ["class", "body", "capacity"] },
   { id: "olcham", title: "O'lcham", sections: ["size", "sides"] },
   { id: "tasdiq", title: "Tasdiqlash", sections: ["intl", "summary"] },
 ];
-// O'lcham ham, yuklash tomoni ham kerak bo'lmasa (tyagach, sisterna, yengil mashina) — «O'lcham» qadami yo'q
-export const driverSteps = (form) => (showSize(form) || showSides(form) ? ALL_STEPS : ALL_STEPS.filter((s) => s.id !== "olcham"));
+// Qadamlar rejimga va transportga qarab: guruhsiz rejimda «Guruhlar» yo'q, mashinasiz rejimda «Transport» va «O'lcham» yo'q;
+// o'lcham ham, yuklash tomoni ham kerak bo'lmasa (tyagach, sisterna, yengil mashina) — «O'lcham» qadami yo'q
+export function driverSteps(form) {
+  const vehicle = formNeedsVehicle(form);
+  return ALL_STEPS.filter((s) => {
+    if (s.id === "guruhlar") return formUsesGroups(form);
+    if (s.id === "transport") return vehicle;
+    if (s.id === "olcham") return vehicle && (showSize(form) || showSides(form));
+    return true;
+  });
+}
 // «Tekshiring» ro'yxatidagi qator → qaysi qadamga qaytadi
-const ROW_STEP = { vehicle: "transport", size: "olcham", sides: "olcham" };
+const ROW_STEP = { feed: "rejim", groups: "guruhlar", vehicle: "transport", size: "olcham", sides: "olcham" };
 
 const STEP_LEAD = {
+  guruhlar: "Qaysi guruh va kanallardagi yuk e'lonlari sizga darhol kelsin — belgilang.",
   olcham: "Kuzov o'lchami va yuklash tomoni: kub va palet bilan berilgan yuklarni aniqroq tanlash uchun.",
   tasdiq: "Oxirgi qadam: qayerda ishlashingizni belgilang, tekshiring va «Saqlash» ni bosing.",
 };
@@ -83,13 +105,20 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
   const [problem, setProblem] = useState(null); // { field, error }
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [groupList, setGroupList] = useState([]); // «Tekshiring» da guruh nomlari (sarlavha) uchun
   const initial = useRef(JSON.stringify(form));
 
   const { intl, intlOptions } = useScopeChoices(scope);
   const hasSize = showSize(form);
   const hasSides = showSides(form);
   const many = manyClassesPicked(form);
-  const steps = useMemo(() => driverSteps({ truckClass: form.truckClass, bodyType: form.bodyType }), [form.truckClass, form.bodyType]);
+  const needVehicle = formNeedsVehicle(form);
+  const usesGroups = formUsesGroups(form);
+  const sorted = FEED_MODES[form.feed]?.sorted ?? true;
+  const steps = useMemo(
+    () => driverSteps({ truckClass: form.truckClass, bodyType: form.bodyType, feed: form.feed }),
+    [form.truckClass, form.bodyType, form.feed],
+  );
   const stepOfField = useCallback((field) => Math.max(0, steps.findIndex((s) => s.sections.includes(field))), [steps]);
 
   useEffect(() => setUnsaved(JSON.stringify(form) !== initial.current), [form]);
@@ -153,7 +182,24 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
   const wizard = useSteps(steps, { validate, onFinish: save });
   useFormButtons({ registering, wizard, save, busy });
 
-  const show = (id) => !registering || wizard.step.sections.includes(id);
+  // Mashinasiz rejimda transport va «Qayerda ishlaysiz?» bo'limlari yashiriladi (ular saralashda ishlatiladi) — eski mashina
+  // formada qoladi va saqlanadi (saralanganga qaytsa qayta so'ralmaydi)
+  const VEHICLE_SECTIONS = ["class", "body", "capacity", "size", "sides", "intl"];
+  const show = (id) => {
+    if (id === "groups" && !usesGroups) return false;
+    if (VEHICLE_SECTIONS.includes(id) && !needVehicle) return false;
+    return !registering || wizard.step.sections.includes(id);
+  };
+  const pickGroup = (name) => {
+    const result = toggleFeedSource(form, name);
+    if (result.error) {
+      haptic.error();
+      showAlert(result.error);
+      return;
+    }
+    setProblem(null);
+    setForm(result.form);
+  };
   const standard = classBody(form.truckClass);
   const summary = sizeSummary(form);
   const unit = capacityUnit(form.truckClass);
@@ -163,9 +209,13 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
 
   let lead = "Sozlamalarni o'zgartiring va «Saqlash» ni bosing.";
   if (registering) {
+    const hello = firstName ? `Xush kelibsiz, ${firstName}!` : "Xush kelibsiz!";
     lead =
+      (wizard.step.id === "tasdiq" && !needVehicle ? "Oxirgi qadam: tekshiring va «Saqlash» ni bosing." : null) ??
       STEP_LEAD[wizard.step.id] ??
-      `${firstName ? `Xush kelibsiz, ${firstName}!` : "Xush kelibsiz!"} Transportingizni belgilang — shunga mos yuklarni katta guruhlardan saralab, botga shaxsiy xabar qilib yuboramiz.`;
+      (wizard.step.id === "rejim"
+        ? `${hello} Avval yuklarni qanday olishni tanlang — keyin istalgan payt o'zgartirasiz.`
+        : "Transportingizni belgilang — shunga mos yuklarni katta guruhlardan saralab, botga shaxsiy xabar qilib yuboramiz.");
   }
 
   // «Bilmayman» va «Standart» — ikkalasida ham odatdagi o'lcham olinadi; farqi — haydovchi bilmasligini yozib qo'yamiz
@@ -179,6 +229,24 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
       <p className="lead">{lead}</p>
 
       {!online && inTelegram && !canSendData && <div className="notice">{OPEN_FROM_MENU}</div>}
+
+      {show("feed") && (
+        <Section id="feed" title="🎛 Yuklarni qanday olasiz?" hint="Saralanganda yuk 1–5 daqiqada keladi; tezkor va guruhlarimda — e'lon chiqishi bilan, lekin saralanmaydi." error={errorFor("feed")}>
+          <Chips
+            layout="list"
+            options={FEED_OPTIONS}
+            selected={(id) => form.feed === id}
+            onPick={(id) => {
+              setProblem(null);
+              setForm((f) => selectFeed(f, id));
+            }}
+          />
+        </Section>
+      )}
+
+      {show("groups") && (
+        <FeedGroups online={online} chosen={form.feedSources} onToggle={pickGroup} error={errorFor("groups")} onList={setGroupList} />
+      )}
 
       {show("class") && (
         <Section
@@ -271,7 +339,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
 
       {draft && (
         <ProfileSummary
-          rows={profileRows(draft, scope, "haydovchi", { web: true }).filter((r) => r.id !== "intl")}
+          rows={profileRows(draft, scope, "haydovchi", { web: true, sourceName: sourceNamer(groupList) }).filter((r) => r.id !== "intl")}
           stepOf={(id) => {
             const at = steps.findIndex((s) => s.id === ROW_STEP[id]);
             return at >= 0 ? at : null;
@@ -281,7 +349,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
       )}
 
       {/* Yo'nalish formada emas — botdagi «📋 Mos yuklar» da yoki web «📋 Yuklar» da (RoutePicker.jsx) */}
-      {(registering ? wizard.last : true) && (
+      {sorted && (registering ? wizard.last : true) && (
         <p className="hint route-note">
           📍 {!registering && routeChosen(profile) ? `Yo'nalish: ${routeLabel(profile)}. ` : ""}
           Qayerdan qayerga yuk kerakligini botdagi «📋 Mos yuklar» da yoki shu yerdagi «📋 Yuklar» bo'limida tanlaysiz — har

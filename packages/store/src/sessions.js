@@ -79,10 +79,26 @@ export function createCallLinks(secret) {
       const body = [loadId, phone, chatId].map((n) => n.toString(36)).join(".");
       return `${body}.${sign(body)}`;
     },
-    // → { loadId, phone, chatId } yoki null (buzilgan yoki boshqa kalit bilan imzolangan)
+    // Tezkor rejimdagi e'lon (2026-11-14): yuk hali yo'q, raqam e'lon matnidan olinadi. "p.<e'lon id>.<raqam>.<chat id>.<imzo>" —
+    // imzo "p" bilan birga olinadi, shuning uchun yuk tokeni e'lon tokeni o'rnida (yoki aksincha) ishlamaydi
+    makePost({ postId, phone = 0, chatId }) {
+      if (!whole(postId) || !whole(phone) || !Number.isSafeInteger(chatId)) throw new Error("createCallLinks: noto'g'ri son");
+      const body = ["p", ...[postId, phone, chatId].map((n) => n.toString(36))].join(".");
+      return `${body}.${sign(body)}`;
+    },
+    // → { loadId, phone, chatId } | { postId, phone, chatId } yoki null (buzilgan yoki boshqa kalit bilan imzolangan)
     read(token) {
       if (typeof token !== "string" || token.length > 100) return null;
       const parts = token.split(".");
+      if (parts.length === 5 && parts[0] === "p") {
+        const body = parts.slice(0, 4).join(".");
+        const expected = Buffer.from(sign(body));
+        const given = Buffer.from(parts[4]);
+        if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+        const [postId, phone, chatId] = parts.slice(1, 4).map((part) => (/^-?[0-9a-z]+$/.test(part) ? parseInt(part, 36) : NaN));
+        if (!whole(postId) || !whole(phone) || !Number.isSafeInteger(chatId)) return null;
+        return { postId, phone, chatId };
+      }
       if (parts.length !== 4) return null;
       const body = parts.slice(0, 3).join(".");
       const expected = Buffer.from(sign(body));

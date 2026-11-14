@@ -54,3 +54,15 @@ test("«📞 Telefon qilish» havolasi: imzolangan, raqamning o'zi yo'q; buzilga
   for (const bad of [undefined, "", "a.b.c", "1.0.1.x", "x".repeat(200)]) assert.equal(calls.read(bad), null);
   assert.throws(() => calls.make({ loadId: -1, chatId: 1 }));
 });
+
+test("qo'ng'iroq havolasi: tezkor e'lon tokeni (p.…) — yuk tokeni bilan almashtirib bo'lmaydi", () => {
+  const secret = randomBytes(32);
+  const calls = createCallLinks(secret);
+  const token = calls.makePost({ postId: 777, phone: 0, chatId: 42 });
+  assert.match(token, /^p\./);
+  assert.deepEqual(calls.read(token), { postId: 777, phone: 0, chatId: 42 });
+  // Imzo "p" bilan birga: "p." ni olib tashlab yuk tokeni qilib bo'lmaydi
+  assert.equal(calls.read(token.slice(2)), null);
+  assert.equal(calls.read(`${token.slice(0, -2)}xx`), null);
+  assert.throws(() => calls.makePost({ postId: -5, chatId: 1 }));
+});

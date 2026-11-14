@@ -29,6 +29,7 @@ const PROFILE = {
   international: true,
   routeAt: null,
   mode: "own",
+  feed: { mode: "saralangan", sources: [] },
 };
 
 test("to'g'ri profil o'zgarmasdan o'tadi va match.js bilan ishlaydi", () => {

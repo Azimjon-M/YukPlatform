@@ -8,7 +8,7 @@
 // bot manzilga qo'ygan token (?t=), chunki Telegram u yerda initData bermaydi; saytda — «Telegram bilan kirish».
 // Birinchi marta (profil yo'q) sozlamalar qadamma-qadam ochiladi — ro'yxatdan o'tish (Steps.jsx). Server: apps/api public.js.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BLOCKED_TEXT, ROLES, decodeProfile, routeLabel, validRole, validRouteScope } from "@yuk/shared";
+import { BLOCKED_TEXT, FEED_MODES, ROLES, decodeProfile, feedMode, routeLabel, sortedReady, validRole, validRouteScope } from "@yuk/shared";
 import { AccountCard } from "./AccountCard.jsx";
 import { TgAccounts } from "./TgAccounts.jsx";
 import { AdminPage } from "./AdminPage.jsx";
@@ -62,6 +62,14 @@ const routeMapRequest = params.get("v") === "yonalish" ? { from: params.get("f")
 // ?v=yuk&d=1 — botdagi «✏️ Formada tuzatish»: forma botga yozilgan (hali yuborilmagan) yuk bilan to'ldiriladi
 const loadDraftRequest = params.get("v") === LOAD_TAB.id && params.get("d") === "1";
 
+// Saralanmaydigan rejimdagi haydovchiga «📋 Yuklar» tepasidagi qator
+function rawFeedNote(profile) {
+  const mode = FEED_MODES[feedMode(profile)];
+  const how = mode.groups ? "tanlagan guruhlaringizdagi yuk e'lonlari" : "yuk e'lonlari";
+  const tail = mode.vehicle ? " Mos yuklar uchun Sozlamalarda transportingizni kiriting." : "";
+  return `${mode.icon} ${mode.name}: ${how} botga darhol keladi. Bu yerda — hammasi.${tail}`;
+}
+
 export function App() {
   const [session, setSession] = useState({ status: "loading", me: null, error: null }); // loading | in | out | offline | signedOut | deleted | blocked
   const [config, setConfig] = useState(null);
@@ -81,6 +89,13 @@ export function App() {
   const me = session.me;
   const online = session.status === "in";
   const role = online ? me.role : offlineRole;
+
+  // «⚡ Tezkor» / «📌 Mening guruhlarim» (yoki «+ saralangan», lekin mashina yo'q): «Menga mos» hisoblanmaydi (server 409
+  // "feed") — ro'yxat va xarita «Hammasi» ni ko'rsatadi, tepada rejim haqida bir qator
+  const rawFeed = online && role === "haydovchi" && Boolean(me.profile) && !sortedReady(me.profile);
+  const shownView = rawFeed ? "all" : view;
+  const viewChange = rawFeed ? null : setView;
+  const feedNote = rawFeed ? rawFeedNote(me.profile) : null;
 
   const connect = useCallback(async () => {
     setSession({ status: "loading", me: null, error: null });
@@ -196,7 +211,9 @@ export function App() {
     setView("mine");
     // Yuk beruvchi sozlamalari — bo'sh mashinalar uchun: saqlangach o'shalar ro'yxatiga
     setTab(saved.role === "yuk_beruvchi" ? "mashinalar" : (ROLE_TABS[saved.role]?.[0].id ?? "sozlamalar"));
-    setToast(ROLE_TEXT[saved.role]?.saved ?? "✅ Saqlandi");
+    // Saralanmaydigan rejim — yuklar botga darhol keladi (bu yerda «Menga mos» yo'q)
+    const raw = saved.role === "haydovchi" && saved.profile && !sortedReady(saved.profile);
+    setToast(raw ? "✅ Saqlandi. Yuk e'lonlari botga darhol keladi." : (ROLE_TEXT[saved.role]?.saved ?? "✅ Saqlandi"));
     window.scrollTo(0, 0);
   }, []);
 
@@ -462,15 +479,16 @@ export function App() {
   } else if (current === "admin") {
     page = <AdminPage onAuthLost={onAuthLost} />;
   } else if (current === "xarita") {
-    page = <MapPage view={view} onView={setView} onNeedProfile={onNeedProfile} onAuthLost={onAuthLost} />;
+    page = <MapPage view={shownView} onView={viewChange} feedNote={feedNote} onNeedProfile={onNeedProfile} onAuthLost={onAuthLost} />;
   } else {
     page = (
       <LoadsPage
         key={current}
         kind={current === "mashinalar" ? "mashina" : "yuk"}
         scope={scope}
-        view={view}
-        onView={setView}
+        view={current === "mashinalar" ? view : shownView}
+        onView={current === "mashinalar" ? setView : viewChange}
+        feedNote={current === "mashinalar" ? null : feedNote}
         profile={me?.profile ?? null}
         onRouteSaved={onRouteSaved}
         onRouteMap={openRouteMap}

@@ -125,9 +125,14 @@ async function dryRun() {
     console.log(`   → ${kind === "mashina" ? "yuk beruvchi" : "haydovchi"} ${chatId}`);
     return true;
   };
+  // Tezkor rejimdagilarga asl matn (pipeline.js deliverRaw) — faqat kimga ketishi
+  const deliverRaw = async (chatId, post) => {
+    console.log(`   ⚡ asl matn: #${post.id} ${post.source} → haydovchi ${chatId}`);
+    return true;
+  };
   const rules = ruleParserOn() ? ruleParse : null;
   const requireContact = requireContactOn();
-  const worker = createWorker({ parser, store, publish, deliver, rules, requireContact, routeScope: routeScopeFrom() }, { log });
+  const worker = createWorker({ parser, store, publish, deliver, deliverRaw, rules, requireContact, routeScope: routeScopeFrom() }, { log });
   while ((await worker.runOnce()) > 0);
   const s = store.stats();
   console.log(`\nTayyor. E'lonlar: ${Object.entries(s.posts).map(([k, v]) => `${k} ${v}`).join(", ")}; yangi yuk: ${s.loads24h.total}, bo'sh mashina: ${s.trucks24h.total}`);
@@ -185,6 +190,7 @@ async function main() {
   // «📞 Telefon qilish» tugmasi: imzolangan havola (raqamning o'zi emas) — sahifani haydovchilar serveri ochadi (/pub/call)
   const calls = createCallLinks(secret);
   const callLink = (link) => calls.make(link);
+  const postCallLink = (link) => calls.makePost(link); // tezkor xabar: e'lon bo'yicha (yuk hali yo'q)
   // Oddiy e'lonlar AI'siz (qoidaviy parser), qolgani AI'ga — pipeline.js createWorker deps.rules
   const rules = config.ruleParser ? ruleParse : null;
   // Yuk beruvchi botga yozgan yuk («📦 Yuk berish», shipperLoads.js): u javobni KUTIB turibdi, shuning uchun navbatga emas —
@@ -212,7 +218,7 @@ async function main() {
   };
   // Ishchi pastda yaratiladi, bot esa undan oldin: «navbatga tushdi — darhol ko'r» keyin ulanadi
   let worker = null;
-  const { bot, init, publish, deliver, canReceive, directDone, commands, notices, sources, group } = createBot({
+  const { bot, init, publish, deliver, deliverRaw, canReceive, directDone, commands, notices, sources, group } = createBot({
     token: config.token,
     store,
     config,
@@ -220,15 +226,17 @@ async function main() {
     appUrl,
     linkToken,
     callLink,
+    postCallLink,
     parseLoad,
     onLoadQueued: () => worker?.poke(),
   });
   await init();
   const { routeScope, maxPostAgeMs } = config;
   // canReceive — kanal va guruhga a'zomi (bot.js; a'zo emas — yuk o'rniga «a'zo bo'ling» eslatmasi).
-  // onDirect — yuk beruvchining yuki yuborildi: natijani unga yozadi
+  // onDirect — yuk beruvchining yuki yuborildi: natijani unga yozadi.
+  // deliverRaw — «⚡ Tezkor» / «📌 Mening guruhlarim» rejimidagilarga asl matn, AI'siz (pipeline.js tezkor yo'l)
   worker = createWorker(
-    { pool, store, publish, deliver, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone },
+    { pool, store, publish, deliver, deliverRaw, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone },
     { log, maxAgeMs: maxPostAgeMs },
   );
   // Guruh bo'limlari: yo'q bo'limlarni ochadi va navbatni yuborishni boshlaydi (GROUP_LOADS bo'lsa)

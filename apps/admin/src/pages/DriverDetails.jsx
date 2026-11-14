@@ -57,6 +57,8 @@ function ProfileBlock({ role, note, profile, now }) {
           {p.vehicle}
           {p.size && <div className="muted small">{p.size}</div>}
         </Item>
+        {p.mode && <Item label="Rejim">{p.mode}</Item>}
+        {p.groups && <Item label="Guruhlari">{p.groups}</Item>}
         <Item label="Qayerdan">{p.from}</Item>
         <Item label="Qayerga">{p.to}</Item>
         {p.intl && <Item label="Ishlaydi">{p.intl}</Item>}
@@ -153,6 +155,27 @@ function Feeds({ data, driver }) {
           </ul>
         )}
       </div>
+      {data.rawDeliveries?.length > 0 && (
+        <div className="detail-block">
+          <h4>
+            ⚡ Asl matn bilan <span className="muted small">— AI'siz, darhol; oxirgi {data.rawDeliveries.length} ta</span>
+          </h4>
+          <ul className="detail-feed">
+            {data.rawDeliveries.map((d, i) => (
+              <li key={i}>
+                <span className="nowrap muted small">{formatDateTime(d.at)}</span>
+                <span>
+                  {d.text ?? "e'lon o'chirilgan"}
+                  {d.source && <div className="muted small">{d.source}</div>}
+                  {d.calledAt != null && <div className="small">📞 raqamni ochgan · {formatDateTime(d.calledAt)}</div>}
+                  {!d.ok && <div className="text-critical small">⚠ yetmadi{d.error ? `: ${d.error}` : ""}</div>}
+                </span>
+                {d.link && <ExternalLink href={d.link}>E'lon</ExternalLink>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="detail-block">
         <h4>🕓 Tarix</h4>
         <ul className="detail-feed">

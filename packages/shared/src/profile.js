@@ -1,12 +1,15 @@
 // Haydovchi profili — bot (chatdagi savol-javob), Mini App (forma) va match.js uchun bitta qoidalar.
 // Mini App'dan kelgan ma'lumotga ishonib bo'lmaydi: sanitizeProfile har bir maydonni ro'yxat va chegaradan o'tkazadi.
 // Profil ko'rinishi: { vehicle: { truckClass, truckClasses? (bir nechta bo'lsa), bodyType, capacityKg, body, bodyGuess, loadingSides }, fromAreas, toAreas,
-//                      domestic, international, routeAt, mode }
+//                      domestic, international, routeAt, mode, feed }
+// feed — yetkazish rejimi (feed.js, 2026-11-14): { mode: saralangan | tezkor | guruhlarim | guruhlarim_plus, sources }.
+// Tezkor va guruhlarim rejimida mashina so'ralmaydi — vehicle null bo'lishi mumkin (avval kiritgani bo'lsa — saqlanadi).
 // Yo'nalish (fromAreas / toAreas) ro'yxatdan o'tishda so'ralmaydi (Azimjon, 2026-11-07: haydovchi har kuni boshqa joyda) —
 // botda «📋 Mos yuklar» bosilganda tanlanadi (routeAt — qachon). Forma saqlaganda eski yo'nalish withRoute bilan qoladi.
 import { COUNTRIES, REGIONS, REGION_IDS } from "./regions.js";
 import { DEFAULT_ROUTE_SCOPE, scopeCountries, validRouteScope } from "./scope.js";
 import { BODY_TYPE_IDS, LOADING_SIDE_IDS, TRUCK_CLASS_IDS, bodyId, needsBodyType, vehicleClasses } from "./vehicles.js";
+import { FEED_MODES, sanitizeFeed } from "./feed.js";
 
 // Sig'im tugmalari, tonna (do'stimiz va Azimjon aytgan odatdagi qiymatlar; 1 t dan kami formada kg bo'lib yoziladi)
 export const CAPACITY_OPTIONS = {
@@ -92,6 +95,7 @@ export function emptyProfile() {
     international: false,
     routeAt: null,
     mode: "own",
+    feed: { mode: "saralangan", sources: [] },
   };
 }
 
@@ -126,8 +130,25 @@ export function sanitizeBody(body) {
 // Tashqaridan kelgan profilni tekshiradi. → { profile } yoki { error: "haydovchiga ko'rsatiladigan matn" }
 // scope berilsa — yo'nalishlar shu doiraga qisqartiriladi (doiradan tashqaridagi davlat tashlanadi;
 // "ichki" doirada xalqaro o'chadi). Berilmasa — ro'yxatdagi hamma davlat.
+// Rejim (input.feed) ham shu yerda: feed yo'q — saralangan. Mashina kerak bo'lmagan rejimda (tezkor, guruhlarim) mashina
+// xato bo'lsa yoki yo'q bo'lsa — vehicle: null (xato emas); to'g'ri bo'lsa — saqlanadi (saralanganga qaytsa, qayta so'ralmaydi).
+// Xatoda field: "feed" | "groups" (rejim / guruhlar), qolganlari — mashina va hudud
 export function sanitizeProfile(input, { scope } = {}) {
   if (!input || typeof input !== "object") return { error: "Ma'lumot kelmadi" };
+  const feedPart = sanitizeFeed(input.feed);
+  if (feedPart.error) return feedPart;
+  const { feed } = feedPart;
+  const result = sanitizeDriverVehicle(input, scope);
+  if (result.profile) return { profile: { ...result.profile, feed } };
+  if (FEED_MODES[feed.mode].vehicle) return result;
+  // Mashinasiz rejim: faqat hudud (xalqaro) to'g'ri bo'lishi kerak
+  const intlPart = sanitizeIntl(input, scope);
+  if (intlPart.error) return intlPart;
+  return { profile: { vehicle: null, ...intlPart.value, feed } };
+}
+
+// Mashina + hudud (rejimsiz) — sanitizeProfile ichida
+function sanitizeDriverVehicle(input, scope) {
   const v = input.vehicle && typeof input.vehicle === "object" ? input.vehicle : {};
   // Bir nechta transport (vehicles.js vehicleClasses): ro'yxat tartibida, takrorsiz; kuzov va sig'im so'ralmaydi
   const chosen = new Set(vehicleClasses(v));

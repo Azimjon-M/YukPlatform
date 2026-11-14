@@ -11,6 +11,7 @@ import { Bot, GrammyError, InlineKeyboard, InputFile } from "grammy";
 import {
   BLOCKED_TEXT,
   DEFAULT_DEDUPE_WINDOW_MS,
+  FEED_MODES,
   KIND_MATCHERS,
   ROLES,
   ROLE_IDS,
@@ -18,22 +19,29 @@ import {
   SHIPPER_LOAD_LIMIT,
   formatContactPhone,
   isAdmin,
+  feedMode,
+  feedOf,
   isOwnContact,
   normalizeContactPhone,
   phoneText,
+  rawProfile,
   roleOf,
   routeChosen,
   sanitizeProfileFor,
   sanitizeShipperLoad,
   shipperLoadText,
   shouldAskPhone,
+  sortedReady,
   telegramUsername,
+  validFeedMode,
   validRole,
+  withPrevFeed,
   withRoute,
 } from "@yuk/shared";
 import { createCommandSync } from "./commands.js";
 import { profileFromText } from "./driverText.js";
-import { escapeHtml, formatLoad, formatTruck } from "./format.js";
+import { FEED_CALLBACK, GROUP_CALLBACK, feedSavedText, groupStep, modeStep, toggleSource } from "./feed.js";
+import { escapeHtml, formatLoad, formatRaw, formatTruck } from "./format.js";
 import { IDLE_BUTTONS } from "./idle.js";
 import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
 import { MENU, PHONE, mainMenu, matchesLabel, miniAppUrl, phoneKeyboard, settingsLabel } from "./menu.js";
@@ -174,15 +182,24 @@ function helpText(driver) {
   // Azimjon, 2026-11-12 (ya'ni qoida): «⏸ Pauza / ▶️ Davom ettirish» va «➕ Guruh qo'shish» FAQAT haydovchi uchun —
   // yuk_beruvchi yordamida bu qatorlar yo'q (menyu bilan bir xil, menu.js)
   const isShipper = role === "yuk_beruvchi";
+  // Haydovchi rejimi (feed.js): «📋 Mos yuklar» faqat saralash bor rejimda; tezkor/guruhlarimda — o'z tugmalari
+  const mode = FEED_MODES[feedMode(driver?.profile)];
+  const feedLines = isShipper
+    ? []
+    : [
+        ...(mode.groups ? [`${MENU.groups} — qaysi guruh va kanallardan yuk e'lonlari darhol kelishi`] : []),
+        `${MENU.feed} — yuklarni olish usuli: 🎯 saralangan, ⚡ tezkor yoki 📌 o'zingiz tanlagan guruhlardan (hozir: ${mode.icon} ${mode.name})`,
+      ];
   const menuLines = driver?.profile || isShipper
     ? [
-        `${matchesLabel(driver)} — ${t.matches}`,
+        ...(isShipper || mode.sorted ? [`${matchesLabel(driver)} — ${t.matches}`] : []),
         ...(isShipper ? [] : [`${MENU.pause} / ${MENU.resume} — yuborishni to'xtatish va yoqish`]),
         roleLine,
         driver.phone && !isShipper
           ? ADD_GROUP_TEXT
           : `${MENU.phone} — raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi va joyidan davom etasiz`,
         settingsLine,
+        ...feedLines,
       ]
     : [settingsLine, roleLine];
   return [
@@ -259,6 +276,7 @@ export function postFromMessage(chat, message) {
 // manzil o'zgaradi — shuning uchun har safar shu funksiyadan so'raladi, ishga tushganda bir marta emas.
 // linkToken(chatId) — Mini App tugmasiga qo'shiladigan kirish tokeni (main.js: @yuk/store sessions.link; bir hafta bir xil)
 // callLink({ loadId, phone, chatId }) — «📞 Telefon qilish» sahifasi tokeni (main.js: @yuk/store createCallLinks); null — tugma yo'q
+// postCallLink({ postId, phone, chatId }) — o'sha, tezkor xabar uchun (yuk hali tushunilmagan — e'lonning o'zi bo'yicha)
 // parseLoad(text) — yuk beruvchi chatga yozgan yukni tushunish (main.js: qoidaviy parser, bo'lmasa AI; null — AI band);
 // onLoadQueued() — yuk beruvchining yuki navbatga tushdi (main.js: ishchi darhol uyg'onadi)
 export function createBot({
@@ -270,6 +288,7 @@ export function createBot({
   appUrl = () => config.miniappUrl,
   linkToken = () => null,
   callLink = () => null,
+  postCallLink = () => null,
   parseLoad = async () => null,
   onLoadQueued = () => {},
 }) {
@@ -385,6 +404,19 @@ export function createBot({
     const link = callLink({ loadId, phone, chatId });
     return link ? new URL(`/pub/call?c=${link}`, base).href : null;
   };
+  // Tezkor xabardagi «📞 Telefon qilish»: o'sha sahifa, token e'lon id'si bilan (server raqamni e'lon matnidan oladi)
+  const rawCallUrl = (chatId, postId) => (phone) => {
+    const base = appUrl();
+    if (postId == null || !base?.startsWith("https://")) return null;
+    const link = postCallLink({ postId, phone, chatId });
+    return link ? new URL(`/pub/call?c=${link}`, base).href : null;
+  };
+
+  // Profil matni: «📌 Guruhlar» qatorida @nomi o'rniga guruh sarlavhasi (bo'lsa)
+  const describe = (profile, role) => {
+    const titles = store.sourceTitles?.() ?? {};
+    return describeProfile(profile, scope, role, { sourceName: (name) => titles[name.toLowerCase()] ?? name });
+  };
 
   // «🗺 Xaritadan tanlash» (yo'nalish; Azimjon, 2026-11-10) — web ilovaning xarita sahifasi (?v=yonalish, f — tanlangan
   // «Qayerdan»). Faqat https (Telegram web_app tugmasi boshqasini qabul qilmaydi). Kirish tokeni (?t=) QO'SHILMAYDI:
@@ -428,6 +460,8 @@ export function createBot({
   // Profil bo'lmasa (yuk beruvchi — Azimjon, 2026-11-12: ro'yxatdan o'tish shart emas) — {} bilan tekshiramiz:
   // matchTruck uchun bo'sh cheklovlar = cheklov yo'q, ya'ni ro'yxatsiz yuk beruvchi FILTRSIZ ro'yxat oladi
   function matching(user) {
+    // Tezkor / guruhlarim yoki mashinasi kiritilmagan haydovchi — saralangan ro'yxat yo'q (matchLoad mashinasiz hammasini olardi)
+    if (roleOf(user) === "haydovchi" && !sortedReady(user.profile)) return [];
     const kind = ROLE_KIND[roleOf(user)];
     const matches = KIND_MATCHERS[kind];
     return store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind }).filter((row) => matches(row.load, user.profile ?? {}).ok);
@@ -544,14 +578,18 @@ export function createBot({
   async function saved(ctx, profile, role) {
     // Mini App boshqa rol bilan saqladi (masalan, formada rolni almashtirib) — avval eski rolning sozlamalarini saqlab qo'yamiz
     if (store.getDriver(ctx.chat.id)?.role !== role) store.switchRole(ctx.chat.id, role);
-    // Haydovchi formasida yo'nalish yo'q (u «📋 Mos yuklar» da tanlanadi) — eskisi qoladi
-    if (role === "haydovchi") profile = withRoute(profile, store.getDriver(ctx.chat.id)?.profile);
+    // Haydovchi formasida yo'nalish yo'q (u «📋 Mos yuklar» da tanlanadi) — eskisi qoladi. Rejimni yubormagan forma
+    // (chatdagi savol-javob, eski Mini App) — rejim ham eskisicha (withPrevFeed)
+    if (role === "haydovchi") {
+      const prev = store.getDriver(ctx.chat.id)?.profile;
+      profile = withRoute(withPrevFeed(profile, prev), prev);
+    }
     const driver = store.saveDriver(ctx.chat.id, { role, profile, draft: null, active: true });
     const t = ROLE_TEXT[role];
     // Yangi haydovchi: yo'nalish tanlanmaguncha yuk yuborilmaydi. Tartib (Azimjon, 2026-11-10): forma → raqam (bir marta,
     // ixtiyoriy) → yo'nalish. Raqamga javob bergach (ulashdi yoki «Keyinroq») — afterPhone() yo'nalishni so'raydi.
     // 2026-11-07…10 da raqam yo'nalishdan KEYIN so'ralardi.
-    if (role === "haydovchi" && !routeChosen(profile)) {
+    if (role === "haydovchi" && sortedReady(profile) && !routeChosen(profile)) {
       if (shouldAskPhone(driver)) {
         // Faqat «✅ Saqlandi.» — sozlamalar ro'yxatisiz (Azimjon, 2026-11-10): uzun ro'yxat keyingi raqam savolini
         // ekrandan chiqarib yuborardi; xato bo'lsa — «⚙️ Sozlamalar» da ko'radi va tuzatadi.
@@ -560,7 +598,7 @@ export function createBot({
         await askPhone(ctx, driver);
         return;
       }
-      await ctx.reply(`✅ Saqlandi.\n\n${describeProfile(profile, scope, role)}\n\n${ROUTE_NEXT}`, menu(driver));
+      await ctx.reply(`✅ Saqlandi.\n\n${describe(profile, role)}\n\n${ROUTE_NEXT}`, menu(driver));
       await askRoute(ctx, driver);
       return;
     }
@@ -574,7 +612,8 @@ export function createBot({
     // Qayta saqlash (raqam allaqachon so'ralgan) — sozlamalar ro'yxati va 24 soatdagi mos e'lonlar soni bilan
     const count = matching(driver).length;
     const extra = count ? `\n\nOxirgi 24 soatda sizga mos ${count} ta ${t.one} bor — «${matchesLabel(driver)}» ni bosing.` : "";
-    await ctx.reply(`✅ Saqlandi. Endi mos ${t.many} shu yerga keladi.\n\n${describeProfile(profile, scope, role)}${extra}`, menu(driver));
+    const head = role === "haydovchi" && !sortedReady(profile) ? "✅ Saqlandi." : `✅ Saqlandi. Endi mos ${t.many} shu yerga keladi.`;
+    await ctx.reply(`${head}\n\n${describe(profile, role)}${extra}`, menu(driver));
   }
 
   // Raqam so'rash: bir martalik klaviatura «📱 Raqam ulashish» / «⏭ Keyinroq» (yoki raqami bo'lsa — «O'zgartirmaslik»).
@@ -594,7 +633,7 @@ export function createBot({
   // darhol «Qayerdan?» (ro'yxatdan o'tish shu bilan tugaydi: forma → raqam → yo'nalish)
   // hint: false — «Endi qayerdan qayerga…» qo'shilmaydi (raqam saqlangach — faqat «Raqamingiz saqlandi! ✅»)
   async function afterPhone(ctx, driver, text, { hint = true } = {}) {
-    const needsRoute = roleOf(driver) === "haydovchi" && Boolean(driver.profile) && !routeChosen(driver.profile);
+    const needsRoute = roleOf(driver) === "haydovchi" && sortedReady(driver.profile) && !routeChosen(driver.profile);
     await ctx.reply(needsRoute && hint ? `${text}\n\n${ROUTE_NEXT}` : text, menu(driver));
     if (needsRoute) await askRoute(ctx, driver);
   }
@@ -613,7 +652,7 @@ export function createBot({
       const t = ROLE_TEXT[role];
       await ctx.reply(
         `${ROLES[role].icon} Siz: <b>${ROLES[role].name}</b>. Oldingi sozlamalaringiz tiklandi — mos ${t.many} yana shu yerga keladi.\n\n` +
-          `${escapeHtml(describeProfile(driver.profile, scope, role))}\n\nO'zgartirish — «${settingsLabel(driver)}».`,
+          `${escapeHtml(describe(driver.profile, role))}\n\nO'zgartirish — «${settingsLabel(driver)}».`,
         html(driver),
       );
       return;
@@ -624,10 +663,18 @@ export function createBot({
       await ctx.reply(`${t.chosen}\n\n${loadIntro({ form: Boolean(loadFormUrl()) })}\n\n«${settingsLabel(driver)}» — ${t.register}.`, html(driver));
       return;
     }
-    // Rol tanlandi, sozlamalar hali yo'q: ro'yxatdan o'tishning 2 yo'li — forma yoki shu chatga yozish (driverText.js)
+    // Haydovchi, sozlamalar hali yo'q (2026-11-14): avval rejim — «mana shunaqa rejimlar bor» (feed.js). Saralangan
+    // tanlansa — ro'yxatdan o'tishning 2 yo'li (registerPaths), tezkor/guruhlarim — mashinasiz, darhol
+    await ctx.reply(ROLE_TEXT[role].chosen, html(driver));
+    await showModes(ctx, driver);
+  }
+
+  // Saralangan rejim tanlandi, mashina hali yo'q: ro'yxatdan o'tishning 2 yo'li — forma yoki shu chatga yozish (driverText.js)
+  async function registerPaths(ctx, driver, head = null) {
+    const role = "haydovchi";
     if (appUrl()) {
       await ctx.reply(
-        `${ROLE_TEXT[role].chosen}\n\n` +
+        `${head ?? ROLE_TEXT[role].chosen}\n\n` +
           "Ro'yxatdan o'tishning 2 yo'li bor:\n" +
           `• «${settingsLabel(driver)}» — 1 daqiqalik forma;\n` +
           `• «${MENU.writeHere}» — mashinangizni shu chatga oddiy yozasiz, qolganini men qilaman.`,
@@ -635,8 +682,92 @@ export function createBot({
       );
       return;
     }
-    await ctx.reply(ROLE_TEXT[role].chosen, html(driver));
-    await startWizard(ctx, null, role);
+    await ctx.reply(head ?? ROLE_TEXT[role].chosen, html(driver));
+    await startWizard(ctx, driver.profile, role);
+  }
+
+  // --- Yetkazish rejimi (feed.js; Azimjon, 2026-11-14) ---
+  // «🎛 Yuklarni qanday olasiz?» — inline tugmalar (fm:<rejim>). Guruh rejimida tanlov shu yerda yig'iladi (feedDrafts),
+  // «✅ Tayyor» bosilganda profilga yoziladi. Faqat xotirada, 30 daqiqa: bot qayta yoqilsa — «eskirgan», qaytadan ochiladi
+  const FEED_DRAFT_MS = 30 * 60_000;
+  const feedDrafts = new Map(); // chatId → { mode, sources, page, at }
+  const feedDraft = (chatId) => {
+    const d = feedDrafts.get(chatId);
+    if (d && Date.now() - d.at < FEED_DRAFT_MS) return d;
+    feedDrafts.delete(chatId);
+    return null;
+  };
+
+  async function showModes(ctx, driver, { edit = false, intro = null } = {}) {
+    const { text, keyboard } = modeStep({ profile: driver.profile, intro });
+    await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
+  }
+
+  async function showGroups(ctx, draft, { edit = false } = {}) {
+    const { text, keyboard, page } = groupStep({ list: store.feedSources(ctx.chat.id), chosen: draft.sources, page: draft.page, mode: draft.mode });
+    draft.page = page;
+    await render(ctx, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: toKeyboard(keyboard) }, edit);
+  }
+
+  // «🎛 Rejim» / /rejim (faqat haydovchi)
+  async function openModes(ctx) {
+    const driver = rememberUser(ctx);
+    const role = roleOf(driver);
+    if (!role) return showStart(ctx);
+    if (role !== "haydovchi") return ctx.reply("🎛 Rejim — haydovchilar uchun (yuklarni qanday olish). Rolni almashtirish: /rol", menu(driver));
+    await showModes(ctx, driver);
+  }
+
+  // «📌 Guruhlarim»: guruh rejimida — tanlovni o'zgartirish, boshqa rejimda — avval rejim
+  async function openGroups(ctx) {
+    const driver = rememberUser(ctx);
+    if (roleOf(driver) !== "haydovchi") return openModes(ctx);
+    const feed = feedOf(driver.profile);
+    if (!FEED_MODES[feed.mode].groups) return showModes(ctx, driver, { intro: `${MENU.groups} — «📌 Mening guruhlarim» rejimida. Avval rejimni tanlang:` });
+    const draft = { mode: feed.mode, sources: [...feed.sources], page: 0, at: Date.now() };
+    feedDrafts.set(ctx.chat.id, draft);
+    await showGroups(ctx, draft);
+  }
+
+  // Rejim saqlandi → matn (+ kerak bo'lsa ro'yxatdan o'tish, yo'nalish yoki raqam savoli). driver — bazadagi yangi holat
+  async function feedSaved(ctx, driver) {
+    const { profile } = driver;
+    const feed = feedOf(profile);
+    const needsVehicle = FEED_MODES[feed.mode].vehicle && !profile.vehicle;
+    await ctx.reply(feedSavedText(feed, { needsVehicle }), html(driver));
+    if (needsVehicle && !FEED_MODES[feed.mode].groups) return registerPaths(ctx, driver, "👇 Mashinangizni kiriting.");
+    if (sortedReady(profile) && !routeChosen(profile)) {
+      await ctx.reply(ROUTE_NEXT, menu(driver));
+      return askRoute(ctx, driver);
+    }
+    if (shouldAskPhone(driver)) await askPhone(ctx, driver);
+  }
+
+  // Rejim tanlandi (fm:<rejim>)
+  async function pickMode(ctx, mode) {
+    const driver = rememberUser(ctx);
+    if (roleOf(driver) !== "haydovchi") {
+      await ctx.editMessageText("Bu tugma eskirgan.").catch(() => {});
+      return showStart(ctx);
+    }
+    await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[mode].icon} ${FEED_MODES[mode].name} ✅`).catch(() => {});
+    if (FEED_MODES[mode].groups) {
+      // Shu yoki boshqa guruh rejimida edi (guruhlarim ↔ + saralangan) — tanlovi qoladi; boshqa rejimdan — bo'sh
+      const feed = feedOf(driver.profile);
+      const draft = { mode, sources: FEED_MODES[feed.mode].groups ? [...feed.sources] : [], page: 0, at: Date.now() };
+      feedDrafts.set(ctx.chat.id, draft);
+      return showGroups(ctx, draft);
+    }
+    const feed = { mode, sources: [] };
+    if (mode === "saralangan") {
+      // Profili yo'q yangi haydovchi — rejim standart saralangan, profil forma bilan yaratiladi
+      if (!driver.profile) return registerPaths(ctx, driver, "🎯 Saralangan: mashinangiz va yo'nalishingizga mos yuklar keladi.");
+      const updated = store.saveDriver(ctx.chat.id, { profile: { ...driver.profile, feed }, active: true });
+      return feedSaved(ctx, updated);
+    }
+    // Tezkor — mashina kerak emas (bori saqlanadi: saralanganga qaytsa, qayta kiritmaydi)
+    const updated = store.saveDriver(ctx.chat.id, { role: "haydovchi", profile: rawProfile(feed, driver.profile), draft: null, active: true });
+    await feedSaved(ctx, updated);
   }
 
   async function setActive(ctx, active) {
@@ -659,6 +790,16 @@ export function createBot({
     if (!role) return showStart(ctx);
     const t = ROLE_TEXT[role];
     if (!driver.profile && role !== "yuk_beruvchi") {
+      await ctx.reply(`Avval ${t.setup} kiriting: «${settingsLabel(driver)}».`, menu(driver));
+      return;
+    }
+    if (role === "haydovchi" && !sortedReady(driver.profile)) {
+      const mode = FEED_MODES[feedMode(driver.profile)];
+      // Tezkor / guruhlarim: ro'yxat kerak emas — yuklar o'zi darhol keladi
+      if (!mode.sorted) {
+        await ctx.reply(`Siz «${mode.icon} ${mode.name}» rejimidasiz: yuk e'lonlari o'zi darhol shu yerga keladi. Almashtirish — «${MENU.feed}».`, menu(driver));
+        return;
+      }
       await ctx.reply(`Avval ${t.setup} kiriting: «${settingsLabel(driver)}».`, menu(driver));
       return;
     }
@@ -800,7 +941,7 @@ export function createBot({
       return;
     }
     if (driver.profile) {
-      await ctx.reply(`${hello}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describeProfile(driver.profile, scope, role))}`, html(driver));
+      await ctx.reply(`${hello}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describe(driver.profile, role))}`, html(driver));
       // Raqam so'rash paydo bo'lishidan oldin ro'yxatdan o'tganlar — bir marta shu yerda so'raladi
       if (shouldAskPhone(driver)) await askPhone(ctx, driver);
       return;
@@ -810,13 +951,9 @@ export function createBot({
       await ctx.reply(`${hello}\n\n${loadIntro({ form: Boolean(loadFormUrl()) })}`, html(driver));
       return;
     }
-    if (appUrl()) {
-      // «pastdagi» dan keyin yangi qator: tor ekranda «…pastdagi «🚚» bo'lib tugma nomi bo'linib qolardi (Azimjon, 2026-11-10)
-      await ctx.reply(`${hello}\n\n👇 Boshlash uchun pastdagi\n«${settingsLabel(driver)}» tugmasini bosing — 1 daqiqalik forma.`, html(driver));
-      return;
-    }
+    // Haydovchi, hali ro'yxatdan o'tmagan (2026-11-14): salom + rejim tanlash (feed.js). Saralangan → forma / yozish
     await ctx.reply(hello, html(driver));
-    await startWizard(ctx, null, role);
+    await showModes(ctx, driver);
   }
   privateChat.command("start", showStart);
 
@@ -972,11 +1109,29 @@ export function createBot({
     const text = link.error ? INTAKE[link.error] : await sourceIntake.submit(ctx.chat.id, link);
     await ctx.reply(text, html(driver));
   });
+  // O'zi qo'shgan guruh sinovga olindi yoki o'tdi va haydovchi «📌 Mening guruhlarim» rejimida — guruh uning tanloviga
+  // o'zi qo'shiladi (aks holda yana «📌 Guruhlarim» da belgilashi kerak edi). → xabarga qo'shimcha qator yoki ""
+  function addToFeed(chatId, source) {
+    if (!source || !["trial", "ok"].includes(source.checkState)) return "";
+    try {
+      const driver = store.getDriver(chatId);
+      const feed = feedOf(driver?.profile);
+      if (roleOf(driver) !== "haydovchi" || !FEED_MODES[feed.mode].groups) return "";
+      if (feed.sources.some((name) => name.toLowerCase() === source.name.toLowerCase())) return "";
+      const sources = store.allowedFeedSources(chatId, [...feed.sources, source.name]);
+      if (sources.length === feed.sources.length) return "";
+      store.saveDriver(chatId, { profile: { ...driver.profile, feed: { ...feed, sources } } });
+      return `\n\n📌 «${MENU.groups}» ga qo'shildi — undagi yuk e'lonlari darhol keladi.`;
+    } catch (error) {
+      log(`Guruh tanlovga qo'shilmadi (${chatId}): ${error.message}`);
+      return "";
+    }
+  }
   // Natijani (sinovga olindi / rad etildi / doimiy qo'shildi / o'chirildi) qo'shgan odamga yozadi — pastki menyu bilan
   const sources = createSourceWatcher({
     store,
     log,
-    send: (chatId, text) => bot.api.sendMessage(chatId, text, html(store.getDriver(chatId))),
+    send: (chatId, text, source = null) => bot.api.sendMessage(chatId, `${text}${addToFeed(chatId, source)}`, html(store.getDriver(chatId))),
     onInvite: (check) => sourceIntake.finishInvite(check),
   });
 
@@ -987,7 +1142,7 @@ export function createBot({
   privateChat.hears(MENU.writeHere, async (ctx) => {
     const driver = rememberUser(ctx);
     if (roleOf(driver) !== "haydovchi") return showStart(ctx);
-    if (driver.profile) {
+    if (driver.profile?.vehicle) {
       await ctx.reply(`Siz allaqachon ro'yxatdan o'tgansiz. O'zgartirish — «${settingsLabel(driver)}».`, menu(driver));
       return;
     }
@@ -1000,6 +1155,65 @@ export function createBot({
   privateChat.command("ilovalar", showApps);
   privateChat.hears(MENU.role, switchRolePrompt);
   privateChat.hears(MENU.help, showHelp);
+  privateChat.hears(MENU.feed, openModes);
+  privateChat.command("rejim", openModes);
+  privateChat.hears(MENU.groups, openGroups);
+
+  // «🎛 Yuklarni qanday olasiz?» tugmalari
+  bot.callbackQuery(FEED_CALLBACK, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const mode = validFeedMode(ctx.match[1]);
+    if (!mode || ctx.chat?.type !== "private") return;
+    await pickMode(ctx, mode);
+  });
+
+  // «📌 Qaysi guruhlardan?»: ✅ qo'yish/olish, sahifa, «✅ Tayyor», «⬅️ Rejimlarga qaytish»
+  bot.callbackQuery(GROUP_CALLBACK, async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    const driver = rememberUser(ctx);
+    const draft = feedDraft(ctx.chat.id);
+    if (roleOf(driver) !== "haydovchi" || !draft) {
+      await ctx.answerCallbackQuery({ text: "Bu ro'yxat eskirgan — qaytadan oching", show_alert: true });
+      await ctx.editMessageReplyMarkup().catch(() => {});
+      return roleOf(driver) === "haydovchi" ? showModes(ctx, driver) : showStart(ctx);
+    }
+    const [, name, page] = ctx.match;
+    const data = ctx.callbackQuery.data;
+    draft.at = Date.now();
+    if (data === "fg:back") {
+      await ctx.answerCallbackQuery();
+      feedDrafts.delete(ctx.chat.id);
+      return showModes(ctx, driver, { edit: true });
+    }
+    if (name != null) {
+      // Ro'yxatda (shu odamga ko'rinadigan) bo'lmagan nom — eski tugma
+      if (!store.allowedFeedSources(ctx.chat.id, [name]).length) {
+        await ctx.answerCallbackQuery({ text: "Bu guruh endi ro'yxatda yo'q" });
+        return showGroups(ctx, draft, { edit: true });
+      }
+      const toggled = toggleSource(draft.sources, name);
+      if (toggled.error) return ctx.answerCallbackQuery({ text: toggled.error, show_alert: true });
+      draft.sources = toggled.chosen;
+      await ctx.answerCallbackQuery();
+      return showGroups(ctx, draft, { edit: true });
+    }
+    if (page != null) {
+      await ctx.answerCallbackQuery();
+      draft.page = Number(page);
+      return showGroups(ctx, draft, { edit: true });
+    }
+    // fg:ok
+    const sources = store.allowedFeedSources(ctx.chat.id, draft.sources);
+    if (!sources.length) return ctx.answerCallbackQuery({ text: "Kamida bitta guruh yoki kanalni tanlang", show_alert: true });
+    await ctx.answerCallbackQuery({ text: "✅ Saqlandi" });
+    feedDrafts.delete(ctx.chat.id);
+    await ctx.editMessageReplyMarkup().catch(() => {});
+    const feed = { mode: draft.mode, sources };
+    // «+ saralangan» va mashinasi bor — butun profil qoladi; aks holda mashinasiz profil (mashinasi bo'lsa — saqlanadi)
+    const profile = driver.profile?.vehicle && draft.mode === "guruhlarim_plus" ? { ...driver.profile, feed } : rawProfile(feed, driver.profile);
+    const updated = store.saveDriver(ctx.chat.id, { role: "haydovchi", profile, draft: null, active: true });
+    await feedSaved(ctx, updated);
+  });
 
   // --- «📦 Yuk berish» (yuk beruvchi; shipperLoads.js, 2026-11-10) ---
   // Pastki menyudagi tugma odatda formani ochadi (Mini App) va chatga hech narsa yubormaydi. Forma manzili yo'q bo'lsa —
@@ -1034,7 +1248,10 @@ export function createBot({
       await ctx.reply("⏳ Tizim hozir band. Birozdan keyin qayta yozing yoki «🚚 Ro'yxatdan o'tish» formasidan to'ldiring.", menu(driver));
       return;
     }
-    const { profile, error } = profileFromText(parsed, ctx.message.text, { scope });
+    // Rejimi (saralangan / + saralangan) saqlanadi — matndan faqat mashina olinadi
+    const fromText = profileFromText(parsed, ctx.message.text, { scope });
+    const { error } = fromText;
+    const profile = fromText.profile && driver.profile?.feed ? { ...fromText.profile, feed: driver.profile.feed } : fromText.profile;
     if (error) {
       await ctx.reply(error, menu(driver));
       return;
@@ -1044,7 +1261,7 @@ export function createBot({
     const formUrl = regFormUrl();
     if (formUrl) keyboard.webApp("✏️ Formada tuzatish", formUrl);
     keyboard.row().text("❌ Bekor", "rt:no");
-    await ctx.reply(`Mana, tushunganim 👇\n\n${escapeHtml(describeProfile(profile, scope, "haydovchi"))}\n\nTo'g'rimi?`, {
+    await ctx.reply(`Mana, tushunganim 👇\n\n${escapeHtml(describe(profile, "haydovchi"))}\n\nTo'g'rimi?`, {
       parse_mode: "HTML",
       link_preview_options: { is_disabled: true },
       reply_markup: keyboard,
@@ -1096,7 +1313,7 @@ export function createBot({
     const driver = rememberUser(ctx);
     const preview = regPreview.get(ctx.chat.id);
     regPreview.delete(ctx.chat.id);
-    if (!preview || Date.now() - preview.at > REG_TEXT_MS || driver.profile) {
+    if (!preview || Date.now() - preview.at > REG_TEXT_MS || driver.profile?.vehicle) {
       await ctx.editMessageReplyMarkup().catch(() => {});
       await ctx.reply(`Bu taklif eskirdi. «${MENU.writeHere}» ni qayta bosing yoki «${settingsLabel(driver)}».`, menu(driver));
       return;
@@ -1143,7 +1360,14 @@ export function createBot({
     }
     if (data?.type === "load") return loadFromForm(ctx, driver, data); // «📦 Yuk berish» formasi (server bilan aloqa yo'q edi)
     const role = validRole(data?.role) ?? roleOf(driver);
-    const { profile, error } = data?.type === "profile" ? sanitizeProfileFor(role, data.profile, { scope }) : { error: "noma'lum ma'lumot keldi" };
+    // Rejimni yubormagan (eski) forma — rejim eskisicha (withPrevFeed). Guruhlar — faqat shu odamga ko'rinadiganlari
+    const input = role === "haydovchi" ? withPrevFeed(data?.profile, driver.profile) : data?.profile;
+    let { profile, error } = data?.type === "profile" ? sanitizeProfileFor(role, input, { scope }) : { error: "noma'lum ma'lumot keldi" };
+    if (profile?.feed && FEED_MODES[profile.feed.mode].groups) {
+      const sources = store.allowedFeedSources(ctx.chat.id, profile.feed.sources);
+      if (sources.length) profile = { ...profile, feed: { ...profile.feed, sources } };
+      else error = "tanlangan guruhlar ro'yxatda topilmadi";
+    }
     if (error) {
       await ctx.reply(`⚠️ Saqlanmadi: ${error}. Formani qaytadan oching.`, menu(driver));
       return;
@@ -1235,7 +1459,7 @@ export function createBot({
     await ctx.answerCallbackQuery();
     if (ctx.chat?.type !== "private") return;
     const driver = store.getDriver(ctx.chat.id);
-    if (roleOf(driver) !== "haydovchi" || !driver.profile) {
+    if (roleOf(driver) !== "haydovchi" || !sortedReady(driver.profile)) {
       await ctx.editMessageText("Bu tugma eskirgan.").catch(() => {});
       return showMatches(ctx);
     }
@@ -1288,7 +1512,7 @@ export function createBot({
     // (draft) ochiq bo'lsa — avval u
     if (!driver.draft && roleOf(driver) === "yuk_beruvchi") return readLoad(ctx, driver);
     // Haydovchi «✍️ Shu chatga yozish» ni bosgan (profilsiz) — bu matnni mashina tavsifi deb o'qiymiz
-    if (!driver.draft && roleOf(driver) === "haydovchi" && !driver.profile && regTextActive(ctx.chat.id)) return readRegText(ctx, driver);
+    if (!driver.draft && roleOf(driver) === "haydovchi" && !driver.profile?.vehicle && regTextActive(ctx.chat.id)) return readRegText(ctx, driver);
     if (!driver.draft) {
       await ctx.reply("Pastdagi menyudan tanlang 👇", menu(driver));
       return;
@@ -1362,10 +1586,22 @@ export function createBot({
   // keladi, qolgan payt — botning har javobida (/start, menyu tugmalari). 2026-11-07 dan 11-09 gacha har yuk menyu bilan borardi.
   // → { ok: true } yoki { ok: false, error } — pipeline buni deliveries ga yozadi (boshqaruv markazi «Olgan yuklari»)
   async function deliver(chatId, load, post, kind = "yuk", loadId = null) {
-    const driver = store.getDriver(chatId);
     const buttons = loadButtons(load, post, callUrl(chatId, loadId));
-    const send = (markup) =>
-      bot.api.sendMessage(chatId, directText(load, post, kind), { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup });
+    return sendDirect(chatId, directText(load, post, kind), buttons);
+  }
+
+  // «⚡ Tezkor» / «📌 Mening guruhlarim» (pipeline.js createWorker deps.deliverRaw): e'lonning ASL matni, AI'siz.
+  // Tugmalar yukdagidek: «📄 Asl e'lon» + «📞 Telefon qilish» (raqamlar — e'lon matnidan, @yuk/parser extractPhones)
+  async function deliverRaw(chatId, post, { phones = [] } = {}) {
+    const mode = FEED_MODES[feedMode(store.getDriver(chatId)?.profile)];
+    const { text } = formatRaw(post, { phones, label: mode.groups ? "📌 Guruhingizdan" : "⚡ Tezkor" });
+    return sendDirect(chatId, text, loadButtons({ phones }, post, rawCallUrl(chatId, post.id)));
+  }
+
+  // Shaxsiy xabar (yuk yoki tezkor e'lon) — tugmalar bilan, ular yo'q bo'lsa pastki menyu bilan
+  async function sendDirect(chatId, text, buttons) {
+    const driver = store.getDriver(chatId);
+    const send = (markup) => bot.api.sendMessage(chatId, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup });
     try {
       try {
         await send(buttons ? { reply_markup: buttons } : driver ? menu(driver) : {});
@@ -1416,5 +1652,5 @@ export function createBot({
   // notices — server (apps/api) qo'ygan topshiriqlar (xaritada yo'nalish tanlandi): main.js notices.start()
   // sources — foydalanuvchi qo'shgan guruhlar kuzatuvchisi: main.js sources.start()
   // directDone — yuk beruvchiga natija (main.js worker deps.onDirect)
-  return { bot, init, publish, deliver, canReceive, directDone, members, commands, notices, sources, group };
+  return { bot, init, publish, deliver, deliverRaw, canReceive, directDone, members, commands, notices, sources, group };
 }

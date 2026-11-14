@@ -1450,3 +1450,16 @@ circle.truck-near {
 .tg-or {
   margin-top: 12px;
 }
+
+/* «⚡ Tezkor» / «📌 Mening guruhlarim»: «Menga mos | Hammasi» o'rnida rejim haqida qator */
+.feed-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+}
+
+/* «📌 Qaysi guruh va kanallardan?» — qidiruv qatori ro'yxat ustida */
+.section .search {
+  margin-bottom: 10px;
+}

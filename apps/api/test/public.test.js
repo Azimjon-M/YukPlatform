@@ -737,3 +737,85 @@ test("yuk beruvchining yuki haydovchilar ro'yxatida: «yuk egasidan» belgisi bo
   assert.equal(item.post.link, null);
   assert.doesNotMatch(JSON.stringify(body), /601/);
 });
+
+// --- Yetkazish rejimi (2026-11-14): «⚡ Tezkor» / «📌 Mening guruhlarim» ---
+test("rejim: guruhlar ro'yxati; profilda rejim saqlanadi, begona guruh tushadi; saralanmaydigan rejimda «Menga mos» va yo'nalish — 409", async () => {
+  store.addSource("@TutGruz");
+  store.addSource("@Yuk_markazi");
+  store.addSource("@Ochiq_emas", { enabled: false });
+  store.saveDriver(590, { name: "Tezkor", role: "haydovchi", active: true });
+  const token = sessions.issue(590);
+  const list = await call("GET", "/pub/me/feed-sources", { token });
+  assert.equal(list.status, 200);
+  const names = list.body.sources.map((s) => s.name);
+  assert.ok(names.includes("@TutGruz") && names.includes("@Yuk_markazi"));
+  assert.ok(!names.includes("@Ochiq_emas"), "o'chirilgan guruh ro'yxatda yo'q");
+  assert.deepEqual(list.body.chosen, []);
+  assert.equal(list.body.max, 50);
+
+  // Tezkor — mashinasiz saqlanadi, yuborish yoqiladi
+  const fast = await call("PUT", "/pub/me/profile", { token, body: { profile: { domestic: true, international: false, feed: { mode: "tezkor" } } } });
+  assert.equal(fast.status, 200, JSON.stringify(fast.body));
+  assert.equal(fast.body.profile.vehicle, null);
+  assert.deepEqual(fast.body.profile.feed, { mode: "tezkor", sources: [] });
+  assert.equal(fast.body.active, true);
+  // Saralanmaydi: «Menga mos» va yo'nalish — 409 feed; «Hammasi» ishlaydi
+  const mine = await call("GET", "/pub/loads", { token });
+  assert.equal(mine.status, 409);
+  assert.equal(mine.body.code, "feed");
+  assert.equal((await call("GET", "/pub/loads?view=all", { token })).status, 200);
+  assert.equal((await call("GET", "/pub/me/route", { token })).body.code, "feed");
+  assert.equal((await call("PUT", "/pub/me/route", { token, body: { from: "*", to: "*" } })).body.code, "feed");
+
+  // Guruhlarim: o'chirilgan / bazada yo'q guruh tushadi, yozilishi — ro'yxatdagidek
+  const groups = await call("PUT", "/pub/me/profile", {
+    token,
+    body: { profile: { domestic: true, feed: { mode: "guruhlarim", sources: ["@tutgruz", "@Ochiq_emas", "@Begona_guruh"] } } },
+  });
+  assert.equal(groups.status, 200, JSON.stringify(groups.body));
+  assert.deepEqual(groups.body.profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"] });
+  const none = await call("PUT", "/pub/me/profile", { token, body: { profile: { domestic: true, feed: { mode: "guruhlarim", sources: ["@Begona_guruh"] } } } });
+  assert.equal(none.status, 400);
+  assert.equal(none.body.field, "groups");
+  const empty = await call("PUT", "/pub/me/profile", { token, body: { profile: { domestic: true, feed: { mode: "guruhlarim", sources: [] } } } });
+  assert.equal(empty.body.field, "groups");
+  assert.deepEqual(store.getDriver(590).profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"] }, "xato — hech narsa o'zgarmadi");
+
+  // Rejimni yubormagan (eski) forma — rejim qoladi, mashina qo'shiladi
+  const vehicleForm = { vehicle: { truckClass: "fura", bodyType: "tent", capacityKg: 22000, loadingSides: [] }, domestic: true, international: false };
+  const old = await call("PUT", "/pub/me/profile", { token, body: { profile: vehicleForm } });
+  assert.deepEqual(old.body.profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"] });
+  assert.equal(old.body.profile.vehicle.truckClass, "fura");
+  assert.equal((await call("GET", "/pub/loads", { token })).body.code, "feed", "faqat guruhlarim — mashina bo'lsa ham saralanmaydi");
+
+  // «Guruhlarim + saralangan» va mashina bor — «Menga mos» ishlaydi
+  const plus = await call("PUT", "/pub/me/profile", { token, body: { profile: { ...vehicleForm, feed: { mode: "guruhlarim_plus", sources: ["@TutGruz"] } } } });
+  assert.equal(plus.status, 200);
+  assert.equal((await call("GET", "/pub/loads", { token })).status, 200);
+  assert.equal((await call("GET", "/pub/me/route", { token })).status, 200);
+  assert.deepEqual((await call("GET", "/pub/me/feed-sources", { token })).body.chosen, ["@TutGruz"]);
+});
+
+test("tezkor e'londagi «📞 Telefon qilish»: e'lon tokeni → raqam e'lon matnidan, bosilgani yoziladi; yaroqsizi — 404", async () => {
+  const post = store.addPost({ source: "@yuk", messageId: 900, link: "https://t.me/yuk/900", text: "Toshkentdan Samarqandga 20 t un bor 90 111 22 44", postedAt: NOW });
+  store.saveDriver(591, { name: "Tez", role: "haydovchi", profile: { vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true });
+  store.addPostDelivery({ postId: post.id, chatId: 591, ok: true });
+  const token = calls.makePost({ postId: post.id, phone: 0, chatId: 591 });
+  const page = await call("GET", `/pub/call?c=${token}`);
+  assert.equal(page.status, 200);
+  assert.match(page.body, /href="tel:\+998901112244"/);
+  assert.doesNotMatch(page.body, /class="route"/, "yo'nalish yozilmaydi — AI hali aytmagan");
+  assert.equal(store.driverDetails(591).rawDeliveries[0].calledAt, NOW);
+  assert.equal(store.getDriver(591).seenVia, "call");
+
+  for (const bad of [
+    calls.makePost({ postId: post.id, phone: 1, chatId: 591 }), // e'londa ikkinchi raqam yo'q
+    calls.makePost({ postId: 99_999, phone: 0, chatId: 591 }), // e'lon yo'q
+    `${token.slice(0, -2)}xx`,
+    token.slice(2), // "p." siz — yuk tokeni sifatida ham o'tmaydi
+  ]) {
+    const r = await call("GET", `/pub/call?c=${encodeURIComponent(bad)}`);
+    assert.equal(r.status, 404, bad);
+    assert.ok(!r.body.includes("tel:"));
+  }
+});

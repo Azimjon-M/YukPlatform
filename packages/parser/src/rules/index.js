@@ -651,9 +651,27 @@ export function parseByRules(text, { maxUnknown = 2, allowAlternatives = true } 
 // va telefon raqami bor yoki yuk belgisi (kerak, yuk bor, gruz, narx…) bor. Xizmat xabarlari («obuna bo'ling») — yo'q.
 // 10.11 da AI tahlil qilgan 6 000 e'londa: «ha» deganlarining 99,9% i AI'da ham yuk e'loni, AI yuk deganlarining 96% i topiladi
 export function looksLikeLoad(text) {
-  const parsed = parseByRules(String(text ?? ""));
+  return loadLike(parseByRules(String(text ?? "")), text);
+}
+
+const hasPlace = (load) => Boolean(load.fromRegion || load.fromCountry || load.toRegion || load.toCountry);
+
+function loadLike(parsed, text) {
   if (parsed.service) return false;
-  const placed = parsed.loads.some((load) => load.fromRegion || load.fromCountry || load.toRegion || load.toCountry);
-  if (!placed) return false;
-  return extractPhones(text).length > 0 || !parsed.reasons.includes(NO_LOAD_SIGNAL);
+  if (!parsed.loads.some(hasPlace)) return false;
+  return extractPhones(String(text ?? "")).length > 0 || !parsed.reasons.includes(NO_LOAD_SIGNAL);
+}
+
+// Haydovchining «⚡ Tezkor» va «📌 Mening guruhlarim» rejimi (apps/bot pipeline.js, 2026-11-14): AI'ni kutmasdan,
+// bitta qoidaviy tahlil bilan ikki savol. → { load, outOfScope }
+//   load — yuk (yoki bo'sh mashina) e'loniga o'xshaydimi (looksLikeLoad bilan bir xil)
+//   outOfScope — topilgan HAMMA yo'nalish doiradan tashqarida (scope — @yuk/shared ROUTE_SCOPES: Rossiya, Yevropa…).
+//     Tezkor rejim shunday e'lonni tashlaydi. 2026-11-10/11 o'lchovi (AI natijasi bilan): uzoq yo'nalishlarning 96% i
+//     ushlanadi, O'zbekiston ichi / qo'shnilar yukining 1,6% i adashib «tashqarida» chiqadi
+export function quickLook(text, { scope } = {}) {
+  const parsed = parseByRules(String(text ?? ""));
+  const load = loadLike(parsed, text);
+  const placed = parsed.loads.filter(hasPlace);
+  const outOfScope = placed.length > 0 && placed.every((l) => !routeInScope(l, scope));
+  return { load, outOfScope };
 }

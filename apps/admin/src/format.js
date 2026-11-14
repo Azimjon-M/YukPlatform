@@ -4,6 +4,7 @@
 import {
   BODY_TYPES,
   CATEGORIES,
+  FEED_MODES,
   INTL_OPTIONS,
   LOADING_SIDES,
   PAYMENT_TYPES,
@@ -11,6 +12,7 @@ import {
   ROLES,
   TRUCK_CLASSES,
   bodyId,
+  feedOf,
   formatContactPhone,
   idleState,
   intlOption,
@@ -220,7 +222,15 @@ export function registrationText(driver) {
     return step ? `Ro'yxatdan o'tishni boshlagan — «${step}» qadamida to'xtagan` : "Rol tanlagan, lekin transport formasini to'ldirmagan";
   }
   if (!driver.active) return `Ro'yxatdan o'tgan, pauzada — ${PAUSED_BY[driver.pausedBy]?.note ?? "o'zi to'xtatgan"}`;
-  if (driver.role === "haydovchi" && !routeChosen(driver.profile)) return "Ro'yxatdan o'tgan, lekin yo'nalish tanlamagan — yuk bormaydi";
+  // «⚡ Tezkor» / «📌 Mening guruhlarim»: yo'nalish ham, mashina ham kerak emas — e'lonlar asl matn bilan darhol boradi
+  const fm = FEED_MODES[feedOf(driver.profile).mode];
+  if (driver.role === "haydovchi" && !fm.sorted) return `Ro'yxatdan o'tgan, ${fm.icon} ${fm.name} — e'lonlar asl matn bilan darhol boradi`;
+  if (driver.role === "haydovchi" && !driver.profile.vehicle) return "Ro'yxatdan o'tgan, mashina kiritmagan — faqat tanlagan guruhlaridan oladi";
+  if (driver.role === "haydovchi" && !routeChosen(driver.profile)) {
+    return fm.groups
+      ? "Ro'yxatdan o'tgan, yo'nalish tanlamagan — faqat tanlagan guruhlaridan oladi"
+      : "Ro'yxatdan o'tgan, lekin yo'nalish tanlamagan — yuk bormaydi";
+  }
   return "Ro'yxatdan o'tgan, yuk oladi";
 }
 
@@ -365,6 +375,8 @@ export function deliveriesView(driver) {
     lastRoute: load ? `${placeText(load, "from")} → ${to === "?" && noun === "mashina" ? "istalgan joy" : to}` : null,
     failed: d.failed ?? 0,
     called: d.called ?? 0, // nechta yukda «📞 Telefon qilish» ni bosgan
+    // «⚡ Tezkor» / «📌 Mening guruhlarim»: AI'siz, asl matn bilan yuborilgan e'lonlar (store post_deliveries, 2026-11-14)
+    raw: { today: 0, total: 0, lastAt: null, called: 0, ...(driver.rawDeliveries ?? {}) },
     error: deliveryErrorText(d.lastError),
     errorAt: d.lastErrorAt ?? null,
     failing,
@@ -385,21 +397,51 @@ export function profileSummary(profile) {
       mode: null,
     };
   }
+  // Yetkazish rejimi (@yuk/shared feed.js, 2026-11-14): saralangandan boshqasi belgi bilan, guruhlari ro'yxat bilan
+  const feed = feedOf(profile);
+  const fm = FEED_MODES[feed.mode];
+  const mode = feed.mode === "saralangan" ? null : `${fm.icon} ${fm.name}${fm.groups ? ` (${feed.sources.length} ta guruh)` : ""}`;
+  const groups = fm.groups ? feedGroupsText(feed.sources) : null;
   const v = profile.vehicle ?? {};
   const body = bodyTypeName(v.bodyType);
   const classes = (Array.isArray(v.truckClasses) && v.truckClasses.length ? v.truckClasses : [v.truckClass]).map((id) => truckClassName(id) ?? id);
   const vehicle = [classes.filter(Boolean).join(", "), body ? body.toLowerCase() : null, capacityText(v.capacityKg)].filter(Boolean).join(" · ");
   const size = v.body ? `${formatNumber(v.body.lengthM, 2)} × ${formatNumber(v.body.widthM, 2)} × ${formatNumber(v.body.heightM, 2)} m` : null;
+  const sizeShown = size && v.bodyGuess ? `${size} (odatdagi)` : size;
+  const intl = INTL_OPTIONS[intlOption(profile)]?.label ?? null;
+  // «⚡ Tezkor» / «📌 Mening guruhlarim»: mashina va yo'nalish ishlatilmaydi — e'lon asl matni bilan darhol
+  if (!fm.sorted) {
+    return {
+      vehicle: profile.vehicle ? `${vehicle || "—"} (ishlatilmaydi)` : "shart emas",
+      size: profile.vehicle ? sizeShown : null,
+      from: fm.groups ? "faqat tanlagan guruhlaridan" : "hamma guruhlardan",
+      to: "saralanmaydi — darhol, asl matn bilan",
+      intl: fm.groups ? null : "uzoq xorij yuklarisiz", // tezkor — doiradan tashqari (Rossiya va h.k.) e'lonlar AI'siz ham tashlanadi
+      mode,
+      groups,
+    };
+  }
   // Yo'nalishni haydovchi botdagi «📋 Mos yuklar» da tanlaydi; tanlamaguncha unga yuk yuborilmaydi
   const chosen = routeChosen(profile);
+  // «Guruhlarim + saralangan», lekin mashina kiritilmagan — faqat guruhlari keladi
+  if (!profile.vehicle) {
+    return { vehicle: "kiritilmagan — faqat guruhlaridan keladi", size: null, from: chosen ? areasText(profile.fromAreas) : "—", to: chosen ? areasText(profile.toAreas) : "—", intl, mode, groups };
+  }
   return {
     vehicle: vehicle || "—",
-    size: size && v.bodyGuess ? `${size} (odatdagi)` : size,
+    size: sizeShown,
     from: chosen ? areasText(profile.fromAreas) : "tanlanmagan — yuk bormaydi",
     to: chosen ? areasText(profile.toAreas) : "—",
-    intl: INTL_OPTIONS[intlOption(profile)]?.label ?? null,
-    mode: null,
+    intl,
+    mode,
+    groups,
   };
+}
+
+// «📌 Mening guruhlarim» ro'yxati: birinchi 3 tasi va «va yana N ta»
+export function feedGroupsText(sources = []) {
+  if (!sources.length) return "tanlanmagan";
+  return sources.length > 3 ? `${sources.slice(0, 3).join(", ")} va yana ${sources.length - 3} ta` : sources.join(", ");
 }
 
 // --- Foydalanuvchi qo'shgan manba (bot «➕ Guruh qo'shish», 2026-11-10) ---

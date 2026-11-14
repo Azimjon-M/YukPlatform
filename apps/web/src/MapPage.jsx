@@ -18,7 +18,7 @@ const SIDE_OPTIONS = [
 const CENTER = [41.0, 65.5]; // O'zbekiston
 const REFRESH_MS = 60_000;
 
-export function MapPage({ view, onView, onNeedProfile, onAuthLost }) {
+export function MapPage({ view, onView, feedNote = null, onNeedProfile, onAuthLost }) {
   const [side, setSide] = useState("from");
   const [state, setState] = useState({ items: [], total: 0, loading: true, error: null });
   const [selected, setSelected] = useState(null);
@@ -128,7 +128,7 @@ export function MapPage({ view, onView, onNeedProfile, onAuthLost }) {
   return (
     <>
       <div className="toolbar">
-        <Segmented label="Qaysi yuklar" options={VIEW_OPTIONS} value={view} onChange={onView} />
+        {onView ? <Segmented label="Qaysi yuklar" options={VIEW_OPTIONS} value={view} onChange={onView} /> : feedNote && <p className="hint feed-note">{feedNote}</p>}
         <Segmented
           label="Xaritada nima"
           options={SIDE_OPTIONS}

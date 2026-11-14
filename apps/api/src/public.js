@@ -5,10 +5,12 @@
 //
 //   GET  /pub/config           bot username (saytdagi «Telegram bilan kirish» uchun), yo'nalish doirasi
 //   POST /pub/auth             { initData } (Mini App) yoki { widget } (sayt) → { token, me }
-//   GET  /pub/call?c=<token>   «📞 Telefon qilish» tugmasi (bot yuk xabari ostida): HTML sahifa → tel:+998… (kirishsiz)
+//   GET  /pub/call?c=<token>   «📞 Telefon qilish» tugmasi (bot yuk xabari yoki tezkor e'lon ostida): HTML sahifa → tel:+998… (kirishsiz)
 //   GET  /pub/me               foydalanuvchi: ism, rol, obuna, admin, profil, faolmi, o'z raqami (ulashgan bo'lsa)
 //   PUT  /pub/me/role          { role } — haydovchi | yuk_beruvchi (har rolning sozlamalari saqlanadi, qaytganda tiklanadi)
-//   PUT  /pub/me/profile       { profile, role? } — sozlamalarni saqlash (bot ham shu qoidalar bilan tekshiradi)
+//   PUT  /pub/me/profile       { profile, role? } — sozlamalarni saqlash (bot ham shu qoidalar bilan tekshiradi);
+//                              profile.feed — yetkazish rejimi (kelmasa — eskisi qoladi), guruhlar faqat ro'yxatdagilar
+//   GET  /pub/me/feed-sources  «📌 Mening guruhlarim» uchun tanlasa bo'ladigan guruh/kanallar (eng faoli birinchi)
 //   PATCH /pub/me              { active } — pauza / davom
 //   POST /pub/me/logout        hisobdan chiqish: rol va sozlamalar yashiriladi, bot yubormaydi (qayta kirsa — tiklanadi)
 //   DELETE /pub/me             hisobni o'chirish (botdagi /ochirish → «Hammasini o'chirish» bilan bir xil)
@@ -40,9 +42,11 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
-import { pacificDay } from "@yuk/parser";
+import { extractPhones, pacificDay } from "@yuk/parser";
 import {
   BLOCKED_TEXT,
+  FEED_MODES,
+  FEED_SOURCES_MAX,
   KIND_MATCHERS,
   KIND_ROLE,
   SHIPPER_LOAD_LIMIT,
@@ -62,10 +66,12 @@ import {
   sanitizeShipperLoad,
   shipperLoadForm,
   shipperLoadText,
+  sortedReady,
   telegramUsername,
   truckPlaceText,
   validRole,
   validRouteArea,
+  withPrevFeed,
   withRoute,
 } from "@yuk/shared";
 import { MAIN_TG_ACCOUNT } from "@yuk/store";
@@ -105,6 +111,8 @@ const NEED_PROFILE = {
   yuk_beruvchi: "Avval sozlamalarda yo'nalishingizni kiriting",
 };
 const NEED_ROLE = "Avval kim ekaningizni tanlang: haydovchi yoki yuk beruvchi";
+// «⚡ Tezkor» / «📌 Mening guruhlarim» — yuklar saralanmaydi (mashina va yo'nalish ishlatilmaydi)
+const NO_SORTED = "Bu rejimda yuklar saralanmaydi — e'lonlar botga darhol keladi. «Hammasi» ni oching yoki rejimni «🎯 Saralangan» ga o'zgartiring";
 
 // Joy filtri: area — viloyat kodi (Toshkent shahri = viloyati) yoki davlat nomi
 function atArea(load, side, area) {
@@ -312,12 +320,22 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   // avto-pauza faqat qo'ng'iroq qiladigan haydovchini ham «faol» deb biladi (oldin raqam bosilgani botga ko'rinmasdi)
   pub.get("/call", (req, res) => {
     const link = calls?.read(typeof req.query.c === "string" ? req.query.c : "");
-    const row = link ? store.getLoad(link.loadId) : null;
-    const phone = row?.load.phones?.[link.phone];
     res.set({
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
       "referrer-policy": "no-referrer",
     });
+    // Tezkor e'lon (2026-11-14): yuk hali tushunilmagan — raqam e'lon matnidan, bot qanday olgan bo'lsa shunday
+    // (@yuk/parser extractPhones, tartib bir xil). Yo'nalish yozilmaydi: uni AI hali aytmagan
+    if (link?.postId != null) {
+      const post = store.getPost?.(link.postId);
+      const phone = post ? extractPhones(post.text)[link.phone] : null;
+      if (!phone) return res.status(404).type("html").send(callPage(null));
+      store.markPostCalled?.({ postId: link.postId, chatId: link.chatId });
+      store.touchDriver(link.chatId, "call");
+      return res.type("html").send(callPage({ phone: phoneText(phone), route: null }));
+    }
+    const row = link ? store.getLoad(link.loadId) : null;
+    const phone = row?.load.phones?.[link.phone];
     if (!phone) return res.status(404).type("html").send(callPage(null));
     store.markCalled({ loadId: link.loadId, chatId: link.chatId });
     store.touchDriver(link.chatId, "call");
@@ -355,13 +373,29 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   pub.put("/me/profile", (req, res) => {
     const role = validRole(req.body?.role) ?? roleOf(req.driver);
     if (!role) throw httpError(409, NEED_ROLE, "no_role");
-    const result = sanitizeProfileFor(role, req.body?.profile, { scope });
-    if (result.error) throw httpError(400, result.error);
+    // Rejimni yubormagan (eski) forma — rejim eskisicha qoladi (withPrevFeed). Rol almashsa — o'sha rolning eski profili
+    const prev = roleOf(req.driver) === role ? req.driver.profile : null;
+    const input = role === "haydovchi" ? withPrevFeed(req.body?.profile, prev) : req.body?.profile;
+    const result = sanitizeProfileFor(role, input, { scope });
+    if (result.error) return res.status(400).json({ error: result.error, field: result.field ?? null });
+    // «📌 Mening guruhlarim»: faqat shu odamga ko'rinadigan guruhlar (yozilishi — ro'yxatdagidek); hech biri qolmasa — xato
+    if (result.profile?.feed && FEED_MODES[result.profile.feed.mode].groups) {
+      const sources = store.allowedFeedSources(req.driver.chatId, result.profile.feed.sources);
+      if (!sources.length) return res.status(400).json({ error: "Tanlangan guruhlar ro'yxatda topilmadi — qaytadan tanlang", field: "groups" });
+      result.profile = { ...result.profile, feed: { ...result.profile.feed, sources } };
+    }
     if (roleOf(req.driver) !== role) store.switchRole(req.driver.chatId, role);
     // Haydovchi formasida yo'nalish yo'q (u botdagi «📋 Mos yuklar» da tanlanadi) — eskisi qoladi
     const before = store.getDriver(req.driver.chatId)?.profile;
     const profile = role === "haydovchi" ? withRoute(result.profile, before) : result.profile;
     res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile, draft: null, active: true })));
+  });
+
+  // «📌 Mening guruhlarim» ro'yxati (store feed.js feedSources): ochiq guruhlar + o'zi qo'shgan yopiqlari;
+  // perDay — oxirgi 24 soatdagi e'lonlar, mine — o'zi «➕ Guruh qo'shish» bilan qo'shgan. chosen — hozirgi tanlovi
+  pub.get("/me/feed-sources", (req, res) => {
+    const feed = req.driver.profile?.feed;
+    res.json({ sources: store.feedSources(req.driver.chatId), chosen: feed?.sources ?? [], max: FEED_SOURCES_MAX });
   });
 
   pub.patch("/me", (req, res) => {
@@ -413,6 +447,8 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (!role) throw httpError(409, NEED_ROLE, "no_role");
     if (role !== "haydovchi") throw httpError(409, "Yo'nalish tanlash — haydovchilar uchun", "role");
     if (!driver.profile) throw httpError(409, NEED_PROFILE.haydovchi, "no_profile");
+    // «⚡ Tezkor» / «📌 Mening guruhlarim» (yoki «+ saralangan», lekin mashinasi yo'q) — yo'nalish ishlatilmaydi
+    if (!sortedReady(driver.profile)) throw httpError(409, NO_SORTED, "feed");
     return driver.profile;
   };
 
@@ -457,6 +493,8 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     }
     // Haydovchiga mos yuklar profil (transport) bo'lmasa hisoblanmaydi; yuk beruvchiga esa sozlamalar shart emas
     if (view === "mine" && kind === "yuk" && role === "haydovchi" && !profile) throw httpError(409, NEED_PROFILE.haydovchi, "no_profile");
+    // Saralanmaydigan rejim (mashina yo'q) — «Menga mos» hisoblanmaydi, ilova «Hammasi» ni ko'rsatadi
+    if (view === "mine" && kind === "yuk" && role === "haydovchi" && !sortedReady(profile)) throw httpError(409, NO_SORTED, "feed");
     // near=lat,lng — shu nuqtaga yaqin e'lonlar (km, default 50, <5000 km). Yuk beruvchi «🚚 Mashinalar» da
     // xaritadan tanlagan nuqta; masofa @yuk/shared geo.js distanceKm bilan hisoblanadi
     const nearPoint = parseNear(req.query.near);
@@ -749,7 +787,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
       errors?.add({ source: "web", level: "error", kind: "server", text: `${req.method} ${req.originalUrl.split("?")[0]}: ${error.message}`, details: error.stack });
     }
     // code — web nima qilishini biladi: auth → qayta kirish, no_profile → sozlamalarga, no_role → rol tanlash
-    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit"].includes(error.code) ? { code: error.code } : {};
+    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit", "feed"].includes(error.code) ? { code: error.code } : {};
     res.status(status).json({ error: status >= 500 ? "Server xatosi" : error.message, ...code });
   });
 

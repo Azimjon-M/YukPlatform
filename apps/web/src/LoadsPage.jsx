@@ -52,7 +52,8 @@ export function areaOptions(scope) {
 
 // profile — foydalanuvchining sozlamalari (me.profile); onRouteSaved(me) — yo'nalish saqlangach (App yangilaydi);
 // onRouteMap(from) — yo'nalishni xaritadan tanlash (App RouteMapPage ni ochadi)
-export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteSaved, onRouteMap, onNeedProfile, onAuthLost }) {
+// onView null + feedNote — «⚡ Tezkor» / «📌 Mening guruhlarim»: «Menga mos» yo'q (view = "all"), tanlov o'rniga rejim qatori
+export function LoadsPage({ kind = "yuk", scope, view, onView, feedNote = null, profile, onRouteSaved, onRouteMap, onNeedProfile, onAuthLost }) {
   const k = KINDS[kind];
   const [from, setFrom] = useState("");
   const [hours, setHours] = useState(24);
@@ -111,7 +112,11 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, profile, onRouteS
   return (
     <>
       <div className="toolbar">
-        <Segmented label={kind === "mashina" ? "Qaysi mashinalar" : "Qaysi yuklar"} options={VIEW_OPTIONS} value={view} onChange={onView} />
+        {onView ? (
+          <Segmented label={kind === "mashina" ? "Qaysi mashinalar" : "Qaysi yuklar"} options={VIEW_OPTIONS} value={view} onChange={onView} />
+        ) : (
+          feedNote && <p className="hint feed-note">{feedNote}</p>
+        )}
         {routed && !choosing && (
           <div className="route-bar">
             <span>

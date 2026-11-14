@@ -139,6 +139,9 @@ export const logout = () => tokenStore.set(null);
 // Foydalanuvchining hozirgi holati (masalan, bot raqamni saqladimi)
 export const getMe = () => request("GET", "/pub/me");
 // role — "haydovchi" | "yuk_beruvchi": profil shu rol qoidalari bilan tekshiriladi
+// «📌 Mening guruhlarim» uchun tanlasa bo'ladigan guruhlar → { sources: [{ name, title, members, perDay, mine }], chosen, max }
+export const getFeedSources = () => request("GET", "/pub/me/feed-sources");
+
 export const saveProfile = (profile, role) => request("PUT", "/pub/me/profile", { body: role ? { role, profile } : { profile } });
 // Boshqa rolga o'tilsa, server eski rolning sozlamalarini saqlab qo'yadi; yangi rolda avval to'ldirilgani bo'lsa — me.profile da
 export const setRole = (role) => request("PUT", "/pub/me/role", { body: { role } });

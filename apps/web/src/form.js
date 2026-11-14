@@ -2,6 +2,8 @@
 // Profil qoidalari @yuk/shared/profile.js da (bot ham xuddi shu qoidalar bilan tekshiradi).
 import {
   CAPACITY_LIMITS_KG,
+  FEED_MODES,
+  FEED_SOURCES_MAX,
   FORM_SIDES,
   INTL_OPTIONS,
   REGION_IDS,
@@ -11,12 +13,14 @@ import {
   countsPallets,
   emptyProfile,
   emptyShipperProfile,
+  feedOf,
   intlChoices,
   intlOption,
   needsBodyType,
   needsSides,
   needsSize,
   sanitizeBody,
+  sanitizeFeed,
   sanitizeProfile,
   sanitizeShipperProfile,
   vehiclePallets,
@@ -54,7 +58,9 @@ export const capacityChoice = (tonnes, unit) => capacityInput(Math.round(tonnes 
 // Yo'nalish formada yo'q — u botdagi «📋 Mos yuklar» da tanlanadi (saqlaganda server eskisini qoldiradi)
 export function formFromProfile(profile) {
   const p = profile ?? emptyProfile();
-  const v = p.vehicle;
+  // «⚡ Tezkor» / «📌 Mening guruhlarim» da mashina kiritilmagan bo'lishi mumkin — forma bo'sh mashina bilan ochiladi
+  const v = p.vehicle ?? emptyProfile().vehicle;
+  const feed = feedOf(p);
   const standard = classBody(v.truckClass);
   // «Bilmayman» — odatdagi o'lcham olinadi; eski profilda o'lcham yo'q bo'lsa ham shu
   let sizeMode = standard ? "std" : "none";
@@ -73,8 +79,27 @@ export function formFromProfile(profile) {
     size: v.body && sizeMode === "custom" ? Object.fromEntries(SIZE_KEYS.map((k) => [k, decimal(v.body[k])])) : { ...EMPTY_SIZE },
     loadingSides: [...new Set(sides)],
     intl: intlOption(p),
+    // Yetkazish rejimi (@yuk/shared feed.js): saralangan | tezkor | guruhlarim | guruhlarim_plus va tanlangan guruhlar
+    feed: feed.mode,
+    feedSources: [...feed.sources],
   };
 }
+
+// Rejim tanlandi. Guruhlar tanlovi qoladi (rejim yana guruhlisiga qaytsa — qayta belgilash shart emas)
+export const selectFeed = (form, mode) => ({ ...form, feed: mode });
+
+// Guruhni belgilash / olib tashlash → { form } yoki { error } (ko'pi bilan FEED_SOURCES_MAX ta)
+export function toggleFeedSource(form, name) {
+  const key = name.toLowerCase();
+  const has = form.feedSources.some((n) => n.toLowerCase() === key);
+  if (has) return { form: { ...form, feedSources: form.feedSources.filter((n) => n.toLowerCase() !== key) } };
+  if (form.feedSources.length >= FEED_SOURCES_MAX) return { error: `Ko'pi bilan ${FEED_SOURCES_MAX} ta guruh tanlash mumkin` };
+  return { form: { ...form, feedSources: [...form.feedSources, name] } };
+}
+
+// Rejimga mashina kerakmi (saralangan va «+ saralangan» — ha; tezkor va guruhlarim — yo'q)
+export const formNeedsVehicle = (form) => FEED_MODES[form.feed]?.vehicle ?? true;
+export const formUsesGroups = (form) => Boolean(FEED_MODES[form.feed]?.groups);
 
 // Faqat shu transport turi. Turi o'zgarsa, sig'im va o'lcham qaytadan tanlanadi (Isuzu sig'imi furaga to'g'ri kelmaydi);
 // yengil mashinada kuzov yo'q
@@ -144,7 +169,18 @@ function intlFor(id, scope) {
 // Yo'nalish bo'sh ketadi: server (va bot) saqlaganda haydovchining «📋 Mos yuklar» dagi yo'nalishini qoldiradi
 export function profileFromForm(form, scope) {
   const { intl } = intlFor(form.intl, scope);
-  const common = { fromAreas: [], toAreas: [], domestic: intl.domestic, international: intl.international };
+  // Rejim birinchi tekshiriladi: ro'yxatdan o'tishda u birinchi qadam (guruhsiz «Mening guruhlarim» — o'sha qadamga qaytadi)
+  const feedPart = sanitizeFeed({ mode: form.feed ?? "saralangan", sources: form.feedSources ?? [] });
+  if (feedPart.error) return feedPart;
+  const common = { fromAreas: [], toAreas: [], domestic: intl.domestic, international: intl.international, feed: feedPart.feed };
+  const result = vehicleProfile(form, scope, common);
+  if (!result.error || formNeedsVehicle(form)) return result;
+  // Mashina shart bo'lmagan rejim: mashina to'liq kiritilgan bo'lsa — saqlanadi (saralanganga qaytsa so'ralmaydi), aks holda — mashinasiz
+  return sanitizeProfile({ vehicle: null, ...common }, { scope });
+}
+
+// Mashina bo'limlari → { profile } | { error, field }
+function vehicleProfile(form, scope, common) {
   if (manyClassesPicked(form)) {
     const result = sanitizeProfile({ vehicle: { truckClasses: form.truckClasses }, ...common }, { scope });
     return result.error ? { ...result, field: "class" } : result;

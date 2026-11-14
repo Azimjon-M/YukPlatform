@@ -144,6 +144,18 @@ export function createAdminQueries(db, now) {
           called: r.called ?? 0,
         };
       };
+      // Tezkor rejimda asl matn bilan yuborilgan e'lonlar (post_deliveries, 2026-11-14)
+      const rawSent = new Map(
+        db
+          .prepare(
+            `SELECT chat_id, SUM(ok) AS total, SUM(ok = 1 AND sent_at >= ?) AS today, MAX(CASE WHEN ok = 1 THEN sent_at END) AS last_at,
+                    SUM(called_at IS NOT NULL) AS called
+             FROM post_deliveries GROUP BY chat_id`,
+          )
+          .all(tashkentDayStart(time))
+          .map((r) => [r.chat_id, { today: r.today ?? 0, total: r.total ?? 0, lastAt: r.last_at ?? null, called: r.called ?? 0 }]),
+      );
+      const noRaw = { today: 0, total: 0, lastAt: null, called: 0 };
       return db
         .prepare("SELECT * FROM drivers ORDER BY updated_at DESC")
         .all()
@@ -168,6 +180,7 @@ export function createAdminQueries(db, now) {
           seenAt: row.seen_at ?? null,
           seenVia: row.seen_via ?? null,
           deliveries: deliveries(row.chat_id),
+          rawDeliveries: rawSent.get(row.chat_id) ?? noRaw,
           // Hisobini o'chirgan (store.deleteDriver): o'sha paytdagi rol, sozlamalar, raqam — deletedSnapshot da.
           // deletedCount — necha marta o'chirgan (qaytgan bo'lsa ham qoladi), returnedAt — oxirgi qaytgani
           deletedAt: row.deleted_at ?? null,
@@ -220,6 +233,22 @@ export function createAdminQueries(db, now) {
             kind: r.kind ?? "yuk",
             link: r.link ?? null,
           })),
+        // Tezkor rejimda asl matn bilan ketgan oxirgi e'lonlar (matnning boshi — qaysi e'lon ekani ko'rinsin)
+        rawDeliveries: db
+          .prepare(
+            `SELECT d.ok, d.error, d.sent_at, d.called_at, p.text, p.link, p.source FROM post_deliveries d
+             LEFT JOIN posts p ON p.id = d.post_id WHERE d.chat_id = ? ORDER BY d.id DESC LIMIT ?`,
+          )
+          .all(chatId, sent)
+          .map((r) => ({
+            ok: r.ok === 1,
+            error: r.error,
+            at: r.sent_at,
+            calledAt: r.called_at ?? null,
+            text: r.text == null ? null : r.text.slice(0, 160),
+            link: r.link ?? null,
+            source: r.source ?? null,
+          })),
       };
     },
 
@@ -228,7 +257,7 @@ export function createAdminQueries(db, now) {
     // MAX(id) — darhol, qolganlari indeks yoki kichik jadval
     changeMarks() {
       const one = (sql) => Object.values(db.prepare(sql).get()).join("|");
-      const deliveries = one("SELECT MAX(id) FROM deliveries");
+      const deliveries = `${one("SELECT MAX(id) FROM deliveries")}|${one("SELECT MAX(id) FROM post_deliveries")}`;
       return {
         drivers: `${one("SELECT COUNT(*), MAX(updated_at), MAX(seen_at), SUM(active), SUM(is_admin), SUM(sub_ok), COUNT(sub_ok) FROM drivers")}|${one("SELECT COUNT(*), MAX(created_at) FROM bans")}|${deliveries}|${one("SELECT MAX(id) FROM user_events")}`,
         posts: one("SELECT MAX(id), MAX(done_at) FROM posts"),

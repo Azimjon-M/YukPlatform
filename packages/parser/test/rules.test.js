@@ -2,7 +2,7 @@
 // Telefon raqamlari soxta (+998 90 000 00 0X).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { looksLikeLoad, parseByRules } from "../src/index.js";
+import { looksLikeLoad, parseByRules, quickLook } from "../src/index.js";
 import { readNumbers } from "../src/rules/numbers.js";
 import { findPlace } from "../src/rules/places.js";
 import { editDistance, toLatin, wordKey } from "../src/rules/text.js";
@@ -225,4 +225,14 @@ test("looksLikeLoad: joy + telefon yoki yuk belgisi — e'lon; salomlashish, ob-
   assert.equal(looksLikeLoad("Toshkentda bugun havo issiq"), false, "joy bor, lekin yuk belgisi ham, telefon ham yo'q");
   assert.equal(looksLikeLoad("Bu guruhda yozish uchun @kanal ga obuna bo`ling"), false);
   assert.equal(looksLikeLoad(""), false);
+});
+
+test("quickLook (tezkor rejim): yuk e'lonimi va faqat chet el yo'nalishimi — bitta tahlil bilan", () => {
+  assert.deepEqual(quickLook("Toshkentdan Samarqandga 20 tonna un bor, tent kerak +998 90 000 00 01", { scope: "qoshni" }), { load: true, outOfScope: false });
+  // Faqat uzoq yo'nalish — tezkor rejim tashlaydi
+  assert.deepEqual(quickLook("Москва Санкт-Петербург 20 тонна тент керак +998 90 000 00 01", { scope: "qoshni" }), { load: true, outOfScope: true });
+  // Qo'shni davlat bilan — doirada
+  assert.equal(quickLook("Toshkent Olmaota 20 tonna tent kerak +998 90 000 00 01", { scope: "qoshni" }).outOfScope, false);
+  // Joy topilmasa — «tashqarida» emas (bilmaymiz)
+  assert.deepEqual(quickLook("Assalomu alaykum hammaga", { scope: "qoshni" }), { load: false, outOfScope: false });
 });

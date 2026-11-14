@@ -13,6 +13,8 @@ export const COMMANDS = [
   { command: "start", description: "Boshlash va menyu" },
   { command: "sozlamalar", description: "Sozlamalarni o'zgartirish" },
   { command: "rol", description: "Rolni almashtirish: haydovchi ↔ yuk beruvchi" },
+  // Haydovchining yuk olish rejimi: saralangan / tezkor / guruhlarim (2026-11-14; bot.js feed.js)
+  { command: "rejim", description: "Yuklarni olish rejimi (haydovchi)" },
   { command: "pauza", description: "Yuk yuborishni to'xtatib turish" },
   { command: "davom", description: "Yana yuborish" },
   { command: "raqam", description: "Telefon raqamni ulashish (ixtiyoriy)" },

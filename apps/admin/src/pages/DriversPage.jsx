@@ -241,18 +241,26 @@ function Activity({ driver, now }) {
 // Olgan yuklari: bugun / jami, oxirgisi (yo'nalishi bilan), yetmagan bo'lsa — sababi
 function Deliveries({ driver, now }) {
   const d = deliveriesView(driver);
-  if (!d.total && !d.failed) return <span className="muted">Hali {d.noun} olmagan</span>;
+  if (!d.total && !d.failed && !d.raw.total) return <span className="muted">Hali {d.noun} olmagan</span>;
   return (
     <>
-      <div>
-        Bugun <strong>{formatNumber(d.today)}</strong> · jami {formatNumber(d.total)}
-        {d.called > 0 && (
-          <span className="muted" title="Shuncha yukda «📞 Telefon qilish» tugmasini bosgan (2026-11-09 dan)">
-            {" "}
-            · 📞 {formatNumber(d.called)}
-          </span>
-        )}
-      </div>
+      {(d.total > 0 || d.failed > 0) && (
+        <div>
+          Bugun <strong>{formatNumber(d.today)}</strong> · jami {formatNumber(d.total)}
+          {d.called > 0 && (
+            <span className="muted" title="Shuncha yukda «📞 Telefon qilish» tugmasini bosgan (2026-11-09 dan)">
+              {" "}
+              · 📞 {formatNumber(d.called)}
+            </span>
+          )}
+        </div>
+      )}
+      {d.raw.total > 0 && (
+        <div title="«⚡ Tezkor» / «📌 Mening guruhlarim»: AI'siz, e'lonning asl matni bilan darhol yuborilganlar">
+          ⚡ Asl matn: bugun <strong>{formatNumber(d.raw.today)}</strong> · jami {formatNumber(d.raw.total)}
+          {d.raw.called > 0 && <span className="muted"> · 📞 {formatNumber(d.raw.called)}</span>}
+        </div>
+      )}
       {d.lastAt != null && (
         <div className="muted small">
           Oxirgisi <TimeAgo ts={d.lastAt} now={now} />
@@ -358,9 +366,9 @@ function DriverRow({ driver, open, onToggle, now, reload, idleSince }) {
                 <span className="muted">Qayerga:</span> {p.to}
               </div>
               <div className="muted small">
-                {p.intl}
-                {p.mode && ` · ${p.mode}`}
+                {[p.intl, p.mode].filter(Boolean).join(" · ")}
               </div>
+              {p.groups && <div className="muted small">📌 {p.groups}</div>}
             </div>
           ) : (
             <span className="muted">—</span>

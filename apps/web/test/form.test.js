@@ -9,6 +9,10 @@ import {
   selectClass,
   toggleClass,
   manyClassesPicked,
+  formNeedsVehicle,
+  formUsesGroups,
+  selectFeed,
+  toggleFeedSource,
   shipperFormFromProfile,
   shipperProfileFromForm,
   showSides,
@@ -39,6 +43,7 @@ test("botdan kelgan sozlamalar formaga va qaytib profilga aylanadi (yo'nalish fo
     fromAreas: [],
     toAreas: [],
     routeAt: null,
+    feed: { mode: "saralangan", sources: [] }, // rejimsiz eski profil — «Saralangan»
   });
 });
 
@@ -138,4 +143,50 @@ test("yuk beruvchi formasi: bo'sh — hammasi; profilga va qaytib; faqat O'zbeki
   // "Boshqa" kuzov va noma'lum mashina turi tashlanadi
   const odd = shipperProfileFromForm({ ...form, truckClasses: ["raketa", "fura"], bodyTypes: ["boshqa", "ref"] }, "qoshni").profile;
   assert.deepEqual([odd.truckClasses, odd.bodyTypes], [["fura"], ["ref"]]);
+});
+
+// --- Yetkazish rejimi (2026-11-14) ---
+test("rejim: tezkor — mashinasiz saqlanadi; to'liq mashina bo'lsa qoladi; guruhlarim — kamida bitta guruh", () => {
+  let form = selectFeed(formFromProfile(null), "tezkor");
+  assert.equal(formNeedsVehicle(form), false);
+  assert.equal(formUsesGroups(form), false);
+  const fast = profileFromForm(form).profile;
+  assert.equal(fast.vehicle, null);
+  assert.deepEqual(fast.feed, { mode: "tezkor", sources: [] });
+  // Chala mashina (sig'imsiz) — xato emas, mashinasiz ketadi
+  assert.equal(profileFromForm(selectClass(form, "isuzu")).profile.vehicle, null);
+  // Eski to'liq mashina — saqlanadi
+  const kept = profileFromForm(selectFeed(formFromProfile(PROFILE), "tezkor")).profile;
+  assert.equal(kept.vehicle.truckClass, "fura");
+  assert.equal(kept.feed.mode, "tezkor");
+
+  form = selectFeed(form, "guruhlarim");
+  assert.equal(formUsesGroups(form), true);
+  assert.equal(profileFromForm(form).field, "groups");
+  form = toggleFeedSource(form, "@TutGruz").form;
+  form = toggleFeedSource(form, "@Yuk_markazi").form;
+  form = toggleFeedSource(form, "@tutgruz").form; // kichik harf bilan ham — o'sha guruh, olib tashlanadi
+  assert.deepEqual(form.feedSources, ["@Yuk_markazi"]);
+  assert.deepEqual(profileFromForm(form).profile.feed, { mode: "guruhlarim", sources: ["@Yuk_markazi"] });
+  // Rejim almashsa ham guruhlar tanlovi formada qoladi
+  assert.deepEqual(selectFeed(selectFeed(form, "tezkor"), "guruhlarim").feedSources, ["@Yuk_markazi"]);
+});
+
+test("rejim: «+ saralangan» — mashina shart (xato avval guruhlarda, keyin transportda); botdagi mashinasiz profil formaga ochiladi", () => {
+  let form = selectFeed(formFromProfile(null), "guruhlarim_plus");
+  assert.equal(formNeedsVehicle(form), true);
+  assert.equal(profileFromForm(form).field, "groups", "rejim qadami birinchi");
+  form = toggleFeedSource(form, "@TutGruz").form;
+  assert.equal(profileFromForm(form).field, "class");
+  // Botda tezkor tanlagan (mashina yo'q) — forma ochiladi, rejim va guruhlar to'g'ri
+  const fromBot = formFromProfile({ vehicle: null, domestic: true, international: false, feed: { mode: "guruhlarim", sources: ["@TutGruz"] } });
+  assert.equal(fromBot.truckClass, null);
+  assert.equal(fromBot.feed, "guruhlarim");
+  assert.deepEqual(fromBot.feedSources, ["@TutGruz"]);
+});
+
+test("rejim: 50 tadan ortiq guruh tanlab bo'lmaydi", () => {
+  let form = selectFeed(formFromProfile(null), "guruhlarim");
+  for (let i = 0; i < 50; i++) form = toggleFeedSource(form, `@guruh_${i}_yuk`).form;
+  assert.match(toggleFeedSource(form, "@yana_bir_guruh").error, /50 ta/);
 });

@@ -58,6 +58,22 @@ export function formatLoad(load, post = {}) {
   return { text: lines.join("\n"), url: post.link ?? null };
 }
 
+// «⚡ Tezkor» / «📌 Mening guruhlarim» xabari (2026-11-14): e'lonning ASL matni, AI'siz — tushunilmagan, shuning uchun
+// yo'nalish/mashina qatorlari yo'q. Ostida: telefonlar +998… ko'rinishida (matndagi «90 123 45 67» Telegram'da bosilmaydi),
+// «💬 Lichkasi», rejim va vaqt. Guruh nomi yozilmaydi (2026-11-09 qoidasi) — «📄 Asl e'lon» tugmasi o'sha guruhni ochadi.
+// Telegram xabari 4096 belgigacha — uzun e'lon qisqartiriladi (to'liqi — «📄 Asl e'lon» da)
+export const RAW_TEXT_MAX = 3500;
+export function formatRaw(post, { phones = [], label = "⚡ Tezkor" } = {}) {
+  const body = String(post.text ?? "").trim();
+  const text = body.length > RAW_TEXT_MAX ? `${body.slice(0, RAW_TEXT_MAX).trimEnd()}…` : body;
+  const lines = [escapeHtml(text), ""];
+  if (phones.length) lines.push(`📞 ${phones.map(phoneText).join(", ")}`);
+  const sender = senderLine(post.sender);
+  if (sender) lines.push(sender);
+  lines.push(`${label}${post.postedAt ? ` · 🕒 ${escapeHtml(postedText(post.postedAt))}` : ""}`);
+  return { text: lines.join("\n"), url: post.link ?? null };
+}
+
 // Bo'sh mashina (yuk beruvchiga). Matnlar @yuk/shared loadText.js da — web ham xuddi shunday yozadi.
 // → { text, url }
 export function formatTruck(truck, post = {}) {

@@ -6,4 +6,4 @@ export { PROVIDERS, DEFAULT_PROVIDER, getProvider, envSeedEntries } from "./prov
 export { POST_SCHEMA, BATCH_SCHEMA, conformLoad, conformPost } from "./schema.js";
 export { SYSTEM_PROMPT, BATCH_SYSTEM_PROMPT } from "./prompt.js";
 export { createParserPool, poolFromParser, pauseFor, nextPacificMidnight, pacificDay, PAUSES } from "./pool.js";
-export { looksLikeLoad, parseByRules } from "./rules/index.js";
+export { looksLikeLoad, parseByRules, quickLook } from "./rules/index.js";

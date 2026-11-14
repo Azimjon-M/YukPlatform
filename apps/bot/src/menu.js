@@ -6,7 +6,7 @@
 // (rol tanlangach); adminga — «🛠 Boshqaruv». «📱 Raqam ulashish» — bosilsa Telegram darhol raqamni so'raydi (request_contact;
 // raqami bor odam ham bossa — yangi raqami saqlanadi). Oldingi «📱 Ilovalar» tugmasi o'rnida (Azimjon, 2026-11-07) — endi /ilovalar.
 import { Keyboard } from "grammy";
-import { encodeProfile, roleOf } from "@yuk/shared";
+import { FEED_MODES, encodeProfile, feedMode, profileReady, roleOf, usesRawFeed } from "@yuk/shared";
 
 export const MENU = {
   giveLoad: "📦 Yuk berish", // yuk beruvchida birinchi qator: web forma (Mini App) yoki — forma yo'q bo'lsa — oddiy tugma (shipperLoads.js)
@@ -22,6 +22,8 @@ export const MENU = {
   myPhone: "📱 Raqamim", // menyuda yo'q: 2026-11-07 da bir necha daqiqa bor edi — eski menyuda bosilsa /raqam
   apps: "📱 Ilovalar", // menyuda yo'q (eski menyular uchun ushlanadi) — /ilovalar
   role: "🔄 Rolni almashtirish",
+  feed: "🎛 Rejim", // haydovchi: yuklarni olish rejimi (feed.js, 2026-11-14) — /rejim
+  groups: "📌 Guruhlarim", // «📌 Mening guruhlarim» rejimlarida — qaysi guruhlardan (feed.js groupStep)
   help: "❓ Yordam",
   admin: "🛠 Boshqaruv",
 };
@@ -65,8 +67,13 @@ export function phoneKeyboard(hasPhone = false) {
 
 // Azimjon, 2026-11-12: yuk beruvchiga ro'yxatdan o'tish umuman kerak emas — uning sozlamalari IXTIYORIY, shuning
 // uchun profili bo'lmasa ham tugma «⚙️ Sozlamalar». «🚚 Ro'yxatdan o'tish» endi faqat profil so'raladigan haydovchida.
+// Haydovchida — ro'yxatdan o'tish tugaganmi (profileReady: rejimga mashina kerak bo'lsa, u ham kiritilgan)
 export const settingsLabel = (driver) =>
-  driver?.profile || roleOf(driver) === "yuk_beruvchi" ? MENU.settings : MENU.register;
+  roleOf(driver) === "yuk_beruvchi" || profileReady(driver?.profile) ? MENU.settings : MENU.register;
+
+// Haydovchi menyusi «ro'yxatdan o'tgan» ko'rinishdami: profili bor va undan nimadir keladi — mashinasi bor yoki
+// tezkor/guruhlarim rejimida (mashinasiz ham yuk keladi). «Saralangan» ga o'tib mashinasini kiritmagan — hali yo'q
+const driverRegistered = (driver) => Boolean(driver?.profile) && (profileReady(driver.profile) || usesRawFeed(driver.profile));
 
 // Rolga qarab birinchi tugma: haydovchi — mos yuklar, yuk beruvchi — bo'sh mashinalar
 export const matchesLabel = (driver) => (roleOf(driver) === "yuk_beruvchi" ? MENU.trucks : MENU.loads);
@@ -104,7 +111,7 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   // «🚚 Bo'sh mashinalar» ixtiyoriy sozlamalarsiz ham filtrsiz ro'yxat bo'lib ochiladi).
   // Mos yuklar, pauza, raqam, Boshqaruv — formadan keyin (haydovchida bu bosqichda ular ishlamaydi yoki chalg'itadi;
   // raqam formadan keyin baribir so'raladi).
-  if (!driver?.profile && role !== "yuk_beruvchi") {
+  if (role !== "yuk_beruvchi" && !driverRegistered(driver)) {
     const keyboard = settingsButton(loadRow(new Keyboard())).row();
     // Ro'yxatdan o'tishning 2-yo'li: mashinani shu chatga oddiy matn bilan yozish (bot.js: AI → profil → tasdiqlash)
     keyboard.text(MENU.writeHere).row();
@@ -129,10 +136,14 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
     return shipperKb.resized().placeholder("Menyudan tanlang");
   }
 
-  // Haydovchi (Azimjon, 2026-11-10 tartibi — O'ZGARMAYDI)
+  // Haydovchi (Azimjon, 2026-11-10 tartibi — O'ZGARMAYDI; rejim tugmalari — oxirida, «keyin qolganlari»)
   // Pauza holati: profil to'ldirilganda pauza tugmasi ishlaydi; u pauzaga tushsa tugma «▶️ Davom ettirish» bo'ladi
+  // Birinchi tugma rejimga qarab (2026-11-14): saralangan bor — «📋 Mos yuklar»; faqat guruhlarim — «📌 Guruhlarim»;
+  // tezkor — «🎛 Rejim» (ro'yxat kerak emas: hamma yuk o'zi keladi)
   const paused = driver.active === false;
-  const keyboard = loadRow(new Keyboard()).text(matchesLabel(driver)).text(paused ? MENU.resume : MENU.pause).row();
+  const mode = FEED_MODES[feedMode(driver.profile)];
+  const first = mode.sorted ? matchesLabel(driver) : mode.groups ? MENU.groups : MENU.feed;
+  const keyboard = loadRow(new Keyboard()).text(first).text(paused ? MENU.resume : MENU.pause).row();
   // Rolni almashtirish (haydovchi ↔ yuk beruvchi) — /rol bilan bir xil. Odamda bugun yuk, ertaga bo'sh mashina bo'lishi
   // mumkin, /rol ni esa hamma ham topavermaydi. Rol tanlanmagan bo'lsa tugma yo'q
   if (role) keyboard.text(MENU.role);
@@ -142,6 +153,12 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   if (driver.phone) keyboard.text(MENU.addGroup).row();
   else keyboard.text(MENU.phone).row();
   settingsButton(keyboard.text(MENU.help));
+  // Rejim tugmalari: birinchi qatorda bo'lmaganlari — shu yerda, ikkitadan
+  const extra = [mode.groups && first !== MENU.groups ? MENU.groups : null, first !== MENU.feed ? MENU.feed : null].filter(Boolean);
+  if (extra.length) {
+    keyboard.row();
+    for (const text of extra) keyboard.text(text);
+  }
   // Boshqaruv — faqat Mini App ichida (Azimjon: "botda telegram webi orqali ochib ishlaydigan bo'lsin")
   const adminUrl = admin ? miniAppUrl(miniappUrl, null, scope, { view: "admin", role, token }) : null;
   if (adminUrl) keyboard.row().webApp(MENU.admin, adminUrl);

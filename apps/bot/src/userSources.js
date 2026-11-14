@@ -396,7 +396,7 @@ export function createSourceWatcher({ store, send, onInvite = null, log = consol
       const text = resultText(source);
       if (text) {
         try {
-          await send(source.addedBy, text);
+          await send(source.addedBy, text, source);
         } catch (error) {
           if (!(error instanceof GrammyError)) {
             log(`Guruh natijasi yuborilmadi (${source.addedBy}): ${error.message}`);

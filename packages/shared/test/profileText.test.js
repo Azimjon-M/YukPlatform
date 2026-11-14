@@ -14,11 +14,12 @@ const DRIVER = {
 
 test("haydovchi profili: qatorlar (web «Tekshiring») va bot matni bir xil manbadan", () => {
   const rows = profileRows(DRIVER, "qoshni");
-  assert.deepEqual(rows.map((r) => r.id), ["vehicle", "size", "sides", "intl", "route"]);
-  assert.equal(rows[0].value, "Isuzu, Tent / furgon, 5 tonna");
-  assert.equal(rows[1].value, "4,85 × 2,15 × 1,95 m (≈ 20,3 kub, 8 palet)");
+  assert.deepEqual(rows.map((r) => r.id), ["feed", "vehicle", "size", "sides", "intl", "route"]);
+  assert.equal(rows[0].value, "🎯 Saralangan"); // feed yo'q eski profil — saralangan
+  assert.equal(rows[1].value, "Isuzu, Tent / furgon, 5 tonna");
+  assert.equal(rows[2].value, "4,85 × 2,15 × 1,95 m (≈ 20,3 kub, 8 palet)");
   const text = describeProfile(DRIVER, "qoshni");
-  assert.match(text, /^🚚 Transport: Isuzu, Tent \/ furgon, 5 tonna\n📏 Kuzov: /);
+  assert.match(text, /^🎛 Rejim: 🎯 Saralangan\n🚚 Transport: Isuzu, Tent \/ furgon, 5 tonna\n📏 Kuzov: /);
   assert.match(text, /↕️ Yuklash: orqasidan, ustidan/);
   assert.match(text, /\n🌍 Faqat O'zbekiston\n📍 Yo'nalish: Toshkent shahri → istalgan joy$/);
   // Ro'yxatdan o'tish formasida yo'nalish yo'q (botdagi «📋 Mos yuklar» da tanlanadi)
@@ -26,12 +27,12 @@ test("haydovchi profili: qatorlar (web «Tekshiring») va bot matni bir xil manb
   assert.match(describeProfile({ ...DRIVER, fromAreas: [], routeAt: null }, "qoshni"), /📍 Yo'nalish: tanlanmagan/);
   // O'lchami yo'q mashina — «Kuzov» qatori yo'q; «Bilmayman» — odatdagi o'lcham deb yoziladi
   assert.ok(!profileRows({ ...DRIVER, vehicle: { ...DRIVER.vehicle, body: null } }).some((r) => r.id === "size"));
-  assert.match(profileRows({ ...DRIVER, vehicle: { ...DRIVER.vehicle, bodyGuess: true } })[1].value, /— odatdagi o'lcham$/);
+  assert.match(profileRows({ ...DRIVER, vehicle: { ...DRIVER.vehicle, bodyGuess: true } })[2].value, /— odatdagi o'lcham$/);
   // Tyagach va samosvalda yuklash tomoni so'ralmaydi; samosvalda palet yo'q; yengil mashina — kg bilan
   const tipper = { ...DRIVER, vehicle: { ...DRIVER.vehicle, truckClass: "kamaz", bodyType: "samosval", capacityKg: 30_000 } };
   assert.ok(!profileRows(tipper).some((r) => r.id === "sides"));
-  assert.equal(profileRows(tipper)[1].value, "4,85 × 2,15 × 1,95 m (≈ 20,3 kub)");
-  assert.equal(profileRows({ ...DRIVER, vehicle: { truckClass: "yengil_avto", bodyType: null, capacityKg: 400, body: null } })[0].value, "Yengil mashina, 400 kg");
+  assert.equal(profileRows(tipper)[2].value, "4,85 × 2,15 × 1,95 m (≈ 20,3 kub)");
+  assert.equal(profileRows({ ...DRIVER, vehicle: { truckClass: "yengil_avto", bodyType: null, capacityKg: 400, body: null } })[1].value, "Yengil mashina, 400 kg");
 });
 
 test("yuk beruvchi profili va «ichki» doira: web'da 🌍 qatori yo'q (u yerda xalqaro savoli ham yo'q)", () => {

@@ -6,6 +6,7 @@ import { vehiclePallets, vehicleVolumeM3 } from "./match.js";
 import { SIDE_LABELS, intlChoices, intlLabel, regionLabel, routeChosen } from "./profile.js";
 import { weightText } from "./loadText.js";
 import { DEFAULT_ROUTE_SCOPE } from "./scope.js";
+import { FEED_MODES, feedOf } from "./feed.js";
 
 const formatT = (t) => String(t).replace(".", ",");
 const className = (id) => TRUCK_CLASSES.find((t) => t.id === id)?.name ?? id;
@@ -33,13 +34,26 @@ export function bodySizeText(vehicle) {
 }
 
 // Haydovchi: transport, kuzov o'lchami (bo'lsa), yuklash tomoni, hudud, yo'nalish (route: false — yo'nalishsiz)
-export function driverProfileRows(profile, scope = DEFAULT_ROUTE_SCOPE, { route = true } = {}) {
-  const v = profile?.vehicle ?? {};
+// Birinchi qator — rejim (feed.js); tezkor va guruhlarimda mashina, hudud va yo'nalish yo'q (ular ishlatilmaydi).
+// sourceName(name) → guruh nomi (bot va web ro'yxatdagi sarlavhani beradi; bo'lmasa — @nomi)
+export function driverProfileRows(profile, scope = DEFAULT_ROUTE_SCOPE, { route = true, sourceName = (name) => name } = {}) {
+  const feed = feedOf(profile);
+  const mode = FEED_MODES[feed.mode];
+  const feedRows = [{ id: "feed", icon: "🎛", label: "Rejim", value: `${mode.icon} ${mode.name}` }];
+  if (mode.groups) {
+    const names = feed.sources.map(sourceName);
+    const shown = names.length > 5 ? `${names.slice(0, 5).join(", ")} va yana ${names.length - 5} ta` : names.join(", ");
+    feedRows.push({ id: "groups", icon: "📌", label: "Guruhlar", value: shown || "tanlanmagan" });
+  }
+  if (!mode.vehicle) return feedRows;
+  // Rejimga mashina kerak, lekin hali kiritilmagan (tezkordan o'tgan yoki «+ saralangan» ni yangi tanlagan)
+  if (!profile?.vehicle) return [...feedRows, { id: "vehicle", icon: "🚚", label: "Transport", value: "kiritilmagan" }];
+  const v = profile.vehicle;
   // Bir nechta transport — faqat nomlari (kuzov va sig'im so'ralmagan)
   const parts = [list(vehicleClasses(v), className, "—")];
   if (v.bodyType) parts.push(bodyName(v.bodyType));
   if (v.capacityKg) parts.push(weightText(v.capacityKg / 1000));
-  const rows = [{ id: "vehicle", icon: "🚚", label: "Transport", value: parts.join(", ") }];
+  const rows = [...feedRows, { id: "vehicle", icon: "🚚", label: "Transport", value: parts.join(", ") }];
   if (v.body) {
     rows.push({ id: "size", icon: "📏", label: "Kuzov", value: `${bodySizeText(v)}${v.bodyGuess ? " — odatdagi o'lcham" : ""}` });
   }
@@ -68,14 +82,14 @@ export function shipperProfileRows(profile, scope = DEFAULT_ROUTE_SCOPE) {
 
 // role — "yuk_beruvchi" bo'lsa yuk beruvchi profili, aks holda haydovchi.
 // web: true — ro'yxatdan o'tish formasi uchun: "ichki" doirada 🌍 qatori va haydovchining yo'nalishi (formada yo'q) tashlanadi
-export function profileRows(profile, scope = DEFAULT_ROUTE_SCOPE, role = "haydovchi", { web = false } = {}) {
-  const rows = role === "yuk_beruvchi" ? shipperProfileRows(profile, scope) : driverProfileRows(profile, scope, { route: !web });
+export function profileRows(profile, scope = DEFAULT_ROUTE_SCOPE, role = "haydovchi", { web = false, sourceName } = {}) {
+  const rows = role === "yuk_beruvchi" ? shipperProfileRows(profile, scope) : driverProfileRows(profile, scope, { route: !web, sourceName });
   return web && !intlChoices(scope) ? rows.filter((r) => r.id !== "intl") : rows;
 }
 
 // Bot xabari uchun matn: "🚚 Transport: Isuzu, Tent / furgon, 5 tonna\n🌍 ..."
-export function describeProfile(profile, scope = DEFAULT_ROUTE_SCOPE, role = "haydovchi") {
-  return profileRows(profile, scope, role)
+export function describeProfile(profile, scope = DEFAULT_ROUTE_SCOPE, role = "haydovchi", { sourceName } = {}) {
+  return profileRows(profile, scope, role, { sourceName })
     .map((r) => `${r.icon} ${r.label ? `${r.label}: ` : ""}${r.value}`)
     .join("\n");
 }

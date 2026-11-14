@@ -4,17 +4,21 @@
 // Bir nechta AI ulanishi (kalit + model) bo'lsa, guruhlar parallel tahlil qilinadi.
 // Telegram va AI tashqaridan beriladi (deps), shuning uchun testda soxtasi qo'yiladi.
 import { setTimeout as wait } from "node:timers/promises";
-import { hasContact, parseByRules, poolFromParser } from "@yuk/parser";
+import { extractPhones, hasContact, parseByRules, poolFromParser, quickLook } from "@yuk/parser";
 import {
   DEFAULT_DEDUPE_WINDOW_MS,
   DEFAULT_ROUTE_SCOPE,
   KIND_MATCHERS,
   KIND_ROLE,
+  feedMode,
   loadKeys,
   planAllows,
+  rawWanted,
   routeChosen,
   routeInScope,
   routeText,
+  sortedWanted,
+  usesRawFeed,
 } from "@yuk/shared";
 
 // E'lon turi → bazadagi kind va kimga boradi (rollar: @yuk/shared roles.js)
@@ -35,7 +39,12 @@ const NO_CONTACT_SKIPPED = `${NO_CONTACT} — AI'ga yuborilmadi`;
 // deps: { store, publish?(load, post) → kanal xabar id | null, deliver(chatId, load, post, kind, loadId) → { ok, error? } | true/false, windowMs,
 //         routeScope — @yuk/shared ROUTE_SCOPES kodi (.env dagi ROUTE_SCOPE; standart "qoshni"),
 //         canReceive?(user) → Promise<boolean> — kanal va guruhga a'zomi (bot.js; yo'q bo'lsa — hammaga),
-//         requireContact — aloqasiz e'lonning yuklari saqlanmaydi va yuborilmaydi (.env REQUIRE_CONTACT, standart yoqiq) }
+//         requireContact — aloqasiz e'lonning yuklari saqlanmaydi va yuborilmaydi (.env REQUIRE_CONTACT, standart yoqiq),
+//         rawSentTo?(postId) → Set<chatId> — kimga bu e'lon asl matn bilan (tezkor yo'l) ketgan yoki ketyapti (createWorker beradi) }
+// Haydovchining rejimi (@yuk/shared feed.js): «🎯 Saralangan» — yo'nalish + mashina bo'yicha (avvalgidek). «⚡ Tezkor» /
+// «📌 Mening guruhlarim» — o'sha guruhdagi e'lon unga AI'siz, asl matn bilan ketgan (createWorker fast), bu yerda qayta
+// yuborilmaydi. AI'siz tekshiruv «yuk emas» degan (looksLikeLoad ~4% ini o'tkazib yuboradi), lekin AI yuk topgan e'lon —
+// unga shu yerda, saralangan ko'rinishda, mashina va yo'nalishsiz yetkaziladi: rejimi «shu guruhdagi hamma yuk» degani
 // Yuk beruvchining o'z yuki (post.shipper, result.by === "shipper") ham shu yo'ldan o'tadi: takror bo'lsa — yuborilmaydi,
 // mos haydovchilarga — darhol. Natijani yuk beruvchiga createWorker yozdiradi (deps.onDirect)
 export async function handleParsed(post, result, deps) {
@@ -79,15 +88,27 @@ export async function handleParsed(post, result, deps) {
 
   const users = store.activeUsers(KIND_ROLE[kind]);
   const matches = KIND_MATCHERS[kind];
+  // Tezkor yo'lda bu e'lonni asl matn bilan olganlar (yoki navbatida turganlar) — ularga yuk qayta yuborilmaydi
+  const rawSent = kind === "yuk" && fresh.length ? (deps.rawSentTo?.(post.id) ?? new Set(store.postDeliveredTo?.(post.id) ?? [])) : new Set();
   let sent = 0;
   for (const { id, load } of fresh) {
     // Kanal faqat yuklar uchun (va faqat CHANNEL_LOADS=1 bo'lsa — bot.js publish)
     const channelMessageId = kind === "yuk" ? ((await deps.publish?.(load, post)) ?? null) : null;
     let count = 0;
     for (const user of users) {
-      // Haydovchi yo'nalishni («📋 Mos yuklar» da) tanlamaguncha yuk yuborilmaydi — aks holda butun O'zbekistondagi yuklar
-      if (kind === "yuk" && !routeChosen(user.profile)) continue;
-      if (!matches(load, user.profile).ok) continue;
+      if (kind === "yuk" && rawWanted(user.profile, post.source)) {
+        // Shu guruhdagi hamma yuk unga kerak (tezkor / guruhlarim): asl matn bilan olgan bo'lsa — bo'ldi,
+        // olmagan bo'lsa (AI'siz tekshiruv o'tkazib yuborgan, yuk beruvchining o'z yuki) — mashina va yo'nalishsiz, shu yerda
+        if (rawSent.has(user.chatId)) continue;
+      } else {
+        // «Mening guruhlarim» (faqat) — boshqa guruhlardan hech narsa; «+ saralangan» va «Saralangan» — mos bo'lsa
+        if (kind === "yuk" && !sortedWanted(user.profile, post.source)) continue;
+        // Mashinasi kiritilmagan (tezkordan «Saralangan» ga o'tgan, hali yozmagan) — saralab bo'lmaydi
+        if (kind === "yuk" && !user.profile?.vehicle) continue;
+        // Haydovchi yo'nalishni («📋 Mos yuklar» da) tanlamaguncha yuk yuborilmaydi — aks holda butun O'zbekistondagi yuklar
+        if (kind === "yuk" && !routeChosen(user.profile)) continue;
+        if (!matches(load, user.profile).ok) continue;
+      }
       // Obuna (hozircha hamma bepul va hammaga yuboriladi — roles.js planAllows)
       if (!planAllows(user, { kind })) continue;
       // Kanal va guruhimizga a'zo emas — yuborilmaydi (bot.js canReceive o'zi kuniga bir marta «a'zo bo'ling» deb eslatadi)
@@ -161,7 +182,19 @@ function formatHours(ms) {
 // maxAgeMs — joylanganiga shundan ko'p vaqt o'tgan e'lon AI'ga bormaydi, "Eskirgan" deb yopiladi (0 — cheklovsiz;
 // bot .env dagi POST_MAX_AGE_HOURS ni beradi, standart 3 soat). Yukni odatda bir soat ichida olib bo'lishadi:
 // kechagi e'lonni "yangi yuk" deb kanalga chiqarish haydovchini chalg'itadi va bepul AI limitini behuda yeydi.
-export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitMs, log = console.log, now = Date.now, maxParallel, maxAgeMs = 0 } = {}) {
+//
+// Tezkor yo'l (haydovchi rejimi «⚡ Tezkor» / «📌 Mening guruhlarim», @yuk/shared feed.js; Azimjon, 2026-11-14: «yukni kim
+// birinchi olsa, yuk o'shaniki»): navbatga tushgan har e'lon quick() da AI'siz tekshiriladi (@yuk/parser quickLook, ~2 ms)
+// va «yuk e'loni» bo'lsa — shu guruhni kutayotgan haydovchilarga asl matn bilan darhol ketadi (deps.deliverRaw).
+// Saralangan yo'l bunga tegmaydi: e'lon keyin odatdagidek (qoidalar yoki AI) tahlil qilinadi va saralangan rejimdagilarga boradi.
+// deps.deliverRaw(chatId, post, { phones }) → { ok, error? } | true/false — yo'q bo'lsa (testlar, eski main.js) tezkor yo'l o'chiq.
+// fastMs — quick() necha ms da bir ishlaydi (standart 1 s; avval asosiy aylanish bilan 5 s gacha kutardi).
+// rawMaxAgeMs — joylanganiga shundan ko'p vaqt o'tgan e'lon tezkor yo'lga kirmaydi (bot qayta yoqilganda navbatdagi
+// eski e'lonlar bir to'da bo'lib «yangi» deb kelmasin; standart 30 daqiqa).
+export function createWorker(
+  deps,
+  { idleMs = 5000, fastMs = 1000, rawMaxAgeMs = 30 * 60_000, batch, fillWaitMs, liveWaitMs, log = console.log, now = Date.now, maxParallel, maxAgeMs = 0 } = {},
+) {
   const { store } = deps;
   const pool = deps.pool ?? poolFromParser(deps.parser);
   const size = batch ?? pool.batchSize ?? 10;
@@ -215,6 +248,60 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
     return true;
   }
 
+  // --- Tezkor yo'l: asl matn, AI'siz ---
+  // rawPending — yuborish navbatidagi tezkor xabarlar (e'lon id → chat id'lar). handleParsed ularni «olgan» deb biladi:
+  // aks holda qoidaviy parser 3 ms da tushungan e'lon tezkor xabar yetib bormasdan saralangan ko'rinishda ham ketardi
+  const rawPending = new Map();
+  let rawChain = Promise.resolve(); // tezkor xabarlar zanjiri — saralangan yuborishdan alohida, uni kutmaydi
+  let rawCount = 0;
+  const rawSentTo = (postId) => new Set([...(store.postDeliveredTo?.(postId) ?? []), ...(rawPending.get(postId) ?? [])]);
+  const handleDeps = { ...deps, rawSentTo };
+  const scope = deps.routeScope ?? DEFAULT_ROUTE_SCOPE;
+
+  // Tezkor yo'ldan nimadir oladigan faol haydovchilar (quick() da yangi e'lon bo'lsagina so'raladi)
+  const rawUsers = () => (deps.deliverRaw ? store.activeUsers("haydovchi").filter((u) => usesRawFeed(u.profile)) : []);
+
+  // Bitta e'lon: kimga kerak (rejim + guruh) → yuk e'lonimi (AI'siz) → tezkor rejimda chet el emasmi → yuborish navbatiga
+  function fast(post, users) {
+    if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || !hasContact(post)) return;
+    const wanted = users.filter((u) => rawWanted(u.profile, post.source));
+    if (!wanted.length) return;
+    let look;
+    try {
+      look = quickLook(post.text, { scope });
+    } catch (error) {
+      log(`#${post.id}: tezkor tekshiruv xatosi — ${error.message}`);
+      return;
+    }
+    if (!look.load) return;
+    // «⚡ Tezkor» (hamma guruh) — chet el (Rossiya, Yevropa…) yo'nalishi tashlanadi; o'zi tanlagan guruhdan esa hammasi.
+    // Bot qayta yoqilgan bo'lsa — bazada «yuborilgan» deb turganlarga ikkinchi marta emas
+    const already = new Set(store.postDeliveredTo?.(post.id) ?? []);
+    const targets = wanted.filter((u) => !already.has(u.chatId) && !(look.outOfScope && feedMode(u.profile) === "tezkor"));
+    if (!targets.length) return;
+    rawPending.set(post.id, new Set(targets.map((u) => u.chatId)));
+    const phones = extractPhones(post.text);
+    rawChain = rawChain.then(async () => {
+      let count = 0;
+      for (const user of targets) {
+        if (controller.signal.aborted) break;
+        try {
+          if (!planAllows(user, { kind: "yuk" })) continue;
+          if (deps.canReceive && !(await deps.canReceive(user))) continue;
+          const outcome = await deps.deliverRaw(user.chatId, post, { phones });
+          const ok = outcome === true || outcome?.ok === true;
+          store.addPostDelivery?.({ postId: post.id, chatId: user.chatId, ok, error: ok ? null : (outcome?.error ?? null) });
+          if (ok) count++;
+        } catch (error) {
+          log(`#${post.id}: tezkor xabar yuborilmadi (${user.chatId}) — ${error.description ?? error.message}`);
+        }
+      }
+      rawPending.delete(post.id);
+      rawCount += count;
+      if (count) log(`#${post.id} ${post.source}: ⚡ ${count} ta haydovchiga asl matn bilan (AI'siz, ${Math.round((now() - (post.queuedAt ?? post.postedAt)) / 1000)} s)`);
+    });
+  }
+
   // Tez yo'l: navbatga yangi tushgan e'lonlar qoidaviy parserdan o'tadi (~2 ms). Ishonchlisi — darhol yuborishga,
   // qolgani navbatda AI'ni kutadi. ruleCursor — qaysi e'longacha ko'rib bo'lindi (har e'lon bir marta tekshiriladi).
   // AI hammasi dam olayotganda ham ishlaydi: kunlik limit tugasa ham oddiy yuklar haydovchilarga ketaveradi.
@@ -223,10 +310,12 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
   // Aloqasiz e'lonlar ham shu yerda (qoidaviy parserdan oldin) yopiladi.
   function quick() {
     let handled = 0;
+    let users = null; // tezkor yo'l oluvchilari — faqat yangi e'lon bo'lsa so'raladi
     for (;;) {
       const posts = store.takeNewPostsAfter(ruleCursor, 50);
       const ready = [];
       const results = [];
+      if (posts.length && users == null) users = rawUsers();
       for (const post of posts) {
         ruleCursor = Math.max(ruleCursor, post.id);
         if (claimed.has(post.id)) continue; // AI allaqachon olgan
@@ -239,6 +328,8 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
         }
         if (maxAgeMs > 0 && post.postedAt < now() - maxAgeMs) continue; // eskirgan — expire() yopadi
         if (contactless(post)) continue;
+        // Tezkor rejimdagilarga asl matn — AI'ni ham, qoidaviy parserni ham kutmasdan (e'lon o'zi navbatda qoladi)
+        fast(post, users);
         if (!deps.rules) continue; // aloqasi bor — AI kutadi
         let result = null;
         try {
@@ -337,7 +428,7 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
         try {
           // To'xtatilsa — qolganlari "new" bo'lib qoladi va keyingi safar qayta tahlil qilinadi
           if (controller.signal.aborted) continue;
-          outcome = await handleParsed(post, result, deps);
+          outcome = await handleParsed(post, result, handleDeps);
           if (outcome.status === "done") {
             const other = outcome.outOfScope ? ` (+${outcome.outOfScope} tasi boshqa yo'nalish)` : "";
             const [what, whom] = outcome.kind === "mashina" ? ["bo'sh mashina", "yuk beruvchiga"] : ["yuk", "haydovchiga"];
@@ -371,14 +462,15 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
   // → olingan e'lonlar soni (0 — ish yo'q yoki bo'sh ulanish yo'q).
   async function runOnce({ fillWaitMs: fill = 0, liveWaitMs: live = fill } = {}) {
     expire();
-    const fast = quick();
-    if (fast) await delivery;
+    const quickCount = quick();
+    await rawChain;
+    if (quickCount) await delivery;
     const lease = pool.acquire();
-    if (!lease) return fast;
+    if (!lease) return quickCount;
     const posts = take(fill, lease, live);
     if (posts.length === 0) {
       lease.release();
-      return fast;
+      return quickCount;
     }
     let outcome = { results: [] };
     try {
@@ -391,7 +483,7 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
       log(`AI vaqtincha ishlamayapti${tag(lease)}: ${lease.describe(outcome.error)} — ${Math.round(outcome.pause.ms / 1000)} s kutamiz`);
       await sleep(outcome.pause.ms);
     }
-    return fast + posts.length;
+    return quickCount + posts.length;
   }
 
   // Bitta AI ulanishining ishi (parallel): tahlil → natijani yuborish navbatiga.
@@ -429,16 +521,30 @@ export function createWorker(deps, { idleMs = 5000, batch, fillWaitMs, liveWaitM
       log(count ? `AI: ${count} ta ulanish, bir vaqtda ${Math.min(count, parallel)} tagacha so'rov` : "AI: ulanish yo'q");
       if (deps.rules) log("Qoidaviy parser yoqiq: oddiy e'lonlar AI'siz, darhol yuboriladi (.env: RULE_PARSER=0 — o'chirish)");
       if (deps.requireContact) log("Aloqasiz e'lonlar (telefon ham, lichka ham yo'q) AI'ga ham, foydalanuvchilarga ham yuborilmaydi (.env: REQUIRE_CONTACT=0 — o'chirish)");
-      // Har 10 daqiqada: nechta e'lon AI'siz tushunildi, nechtasi aloqasiz deb tashlandi
+      // quick() — o'z taymerida, har fastMs da (asosiy aylanish AI'ni kutib uxlab yotganda ham): tezkor yo'l va
+      // qoidaviy parser yangi e'lonni ~1 s ichida ko'radi
+      if (deps.deliverRaw) log(`Tezkor yo'l yoqiq: yangi e'lonlar har ${fastMs / 1000} s da ko'riladi, «⚡ Tezkor» / «📌 Guruhlarim» rejimidagilarga AI'siz ketadi`);
+      const fastTimer = setInterval(() => {
+        try {
+          quick();
+        } catch (error) {
+          log(`Tezkor tekshiruv xatosi: ${error.message}`);
+        }
+      }, fastMs);
+      controller.signal.addEventListener("abort", () => clearInterval(fastTimer));
+      // Har 10 daqiqada: nechta e'lon AI'siz tushunildi, nechtasi aloqasiz deb tashlandi, nechta tezkor xabar ketdi
       let reportedAt = now();
       let reported = 0;
       let reportedNoContact = 0;
+      let reportedRaw = 0;
       while (!controller.signal.aborted) {
         // Hamma AI dam olayotgan bo'lsa ham: kechasi to'plangan e'lonlar navbatda "kutib" turmasin
         expire();
         quick();
-        if ((deps.rules || deps.requireContact) && now() - reportedAt >= 10 * 60_000) {
+        if ((deps.rules || deps.requireContact || deps.deliverRaw) && now() - reportedAt >= 10 * 60_000) {
           if (ruleCount > reported) log(`Qoidaviy parser: oxirgi 10 daqiqada ${ruleCount - reported} ta e'lon AI'siz tushunildi`);
+          if (rawCount > reportedRaw) log(`Tezkor: oxirgi 10 daqiqada ${rawCount - reportedRaw} ta asl matnli xabar yuborildi`);
+          reportedRaw = rawCount;
           if (noContactCount > reportedNoContact) {
             log(`Aloqasiz: oxirgi 10 daqiqada ${noContactCount - reportedNoContact} ta e'lon (telefon ham, lichka ham yo'q) AI'ga yuborilmadi`);
           }
