@@ -117,7 +117,7 @@ export function createTgLogin({
       name: login.name,
       phone: login.phone,
       step: login.step, // sending | code | qr | checking | password | done | failed
-      qrUrl: login.step === "qr" ? login.qrUrl : null, // tg://login?token=… — QR'da ham, havolada ham shu (~30 s da yangilanadi)
+      qrUrl: login.step === "qr" ? login.qrUrl : null, // tg://login?token=… — QR shu matndan chiziladi (~30 s da yangilanadi; havola sifatida Telegram uni qabul qilmaydi)
       via: login.via, // kod qayerga ketdi: app | sms | call | email | …
       next: login.next, // «Kodni qayta yuborish» bosilsa qayerga ketadi (sms | call | …; null — boshqa yo'l yo'q)
       resendIn: login.resendAt ? Math.max(0, Math.ceil((login.resendAt - now()) / 1000)) : 0, // shuncha soniyadan keyin qayta yuborish mumkin

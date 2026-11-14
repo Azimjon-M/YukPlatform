@@ -30,23 +30,24 @@ function QrImage({ text }) {
   );
 }
 
+// Faqat QR — «Telegram'da tasdiqlash» havolasi (tg://login?token=…) olib tashlandi (2026-11-14): Telegram uni ataylab
+// qabul qilmaydi (fishingdan himoya) — Android (LaunchActivity, AuthAnotherClientUrl) ham, iOS (UrlLoginHint) ham havola
+// bosilsa faqat «Sozlamalar → Qurilmalar → QR'ni skanerlang» deydi. Shuning uchun QR'ni BOSHQA qurilma skanerlaydi.
+// Azimjon sinadi: kompyuterdagi Mini App'dagi QR'ni telefon skanerladi — ishladi.
 function QrStep({ login, onCancel }) {
   return (
     <div className="section tg-acc">
-      <h2>📷 Kodsiz kirish — Telegram'da tasdiqlang</h2>
+      <h2>📷 Kodsiz kirish — QR'ni skanerlang</h2>
       <p className="hint">
-        <b>Shu telefonda:</b> qo'shilayotgan akkaunt shu Telegram'da ochiq bo'lsa, pastdagi tugmani bosing va Telegram so'raganda
-        «Tasdiqlash» ni bosing.
-      </p>
-      <a className="primary tg-link" href={login.qrUrl}>
-        📲 Telegram'da tasdiqlash
-      </a>
-      <p className="hint">
-        <b>Boshqa qurilmada:</b> akkaunt ochiq turgan telefonda Telegram → Sozlamalar → Qurilmalar → «Qurilma ulash» (Link Desktop
-        Device) ni bosib, shu QR kodni skanerlang.
+        Qo'shilayotgan akkaunt ochiq turgan telefonda: Telegram → Sozlamalar → Qurilmalar → «Qurilma ulash» (Link Desktop Device) ni
+        bosib, shu QR kodni skanerlang.
       </p>
       {login.qrUrl && <QrImage text={login.qrUrl} />}
       <p className="hint">QR har ~30 soniyada o'zi yangilanadi. Tasdiqlangach shu yerda «✅ qo'shildi» chiqadi (2FA bo'lsa — parol so'raladi).</p>
+      <p className="hint">
+        QR'ni boshqa qurilma skanerlaydi: bu sahifani kompyuterda (Telegram Desktop) yoki boshqa telefonda oching. Telefon bitta bo'lsa —
+        «Bekor qilish» ni bosib, raqam va kod bilan kiring.
+      </p>
       <div className="account-actions tg-actions">
         <button type="button" className="secondary" onClick={onCancel}>
           Bekor qilish
@@ -111,9 +112,9 @@ function StartForm({ initial, mine, busy, error, onSubmit, onQr, onCancel }) {
         </>
       )}
       <button type="button" className="primary tg-qr-start" disabled={busy || (!mine && !name.trim())} onClick={() => onQr(name.trim().toLowerCase())}>
-        📷 QR yoki havola orqali (kodsiz)
+        📷 QR orqali (kodsiz)
       </button>
-      <p className="hint tg-under">Tavsiya: kod kutish shart emas — Telegram'da bir bosish bilan tasdiqlanadi.</p>
+      <p className="hint tg-under">Kod kutish shart emas: QR'ni akkaunt ochiq turgan telefon skanerlaydi — bu sahifa boshqa qurilmada (masalan, kompyuterda) ochiq bo'lishi kerak.</p>
       <p className="hint tg-or">yoki raqam va kod bilan:</p>
       <label className="field">
         <span>Raqami</span>

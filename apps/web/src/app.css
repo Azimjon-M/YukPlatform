@@ -1429,7 +1429,7 @@ circle.truck-near {
   margin: 4px 0 8px;
 }
 
-/* Kodsiz kirish: QR va «Telegram'da tasdiqlash» havolasi */
+/* Kodsiz kirish: QR (havola tugmasi yo'q — Telegram tg://login havolasini qabul qilmaydi) */
 .tg-qr {
   display: block;
   width: min(240px, 70vw);
@@ -1438,7 +1438,6 @@ circle.truck-near {
   border-radius: 12px;
 }
 
-.tg-link,
 .tg-qr-start {
   display: block;
   width: 100%;

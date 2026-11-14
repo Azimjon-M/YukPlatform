@@ -209,8 +209,9 @@ export async function resendLoginCode(client, { phoneNumber, phoneCodeHash }) {
 }
 
 // --- QR / havola orqali kirish (2026-11-13, Azimjon: kod «yuborildi» deyiladi-yu, kelmaydi → «QR va Link orqali kirish»).
-// Telegram Desktop'ni ulash bilan bir xil: auth.exportLoginToken → tg://login?token=… (QR yoki havola) → egasi Telegram'da
-// tasdiqlaydi (Sozlamalar → Qurilmalar → «Qurilma ulash», yoki shu telefonda havolani bosib) → UpdateLoginToken keladi →
+// Telegram Desktop'ni ulash bilan bir xil: auth.exportLoginToken → tg://login?token=… (QR) → egasi BOSHQA qurilmadagi
+// Telegram'da skanerlaydi (Sozlamalar → Qurilmalar → «Qurilma ulash»; havolani bosish ishlamaydi — Telegram Android/iOS
+// tg://login havolasida faqat «QR'ni skanerlang» deydi, fishingdan himoya) → UpdateLoginToken keladi →
 // yana exportLoginToken → LoginTokenSuccess (boshqa DC bo'lsa — MigrateTo → importLoginToken). Kod kerak emas.
 // → { url, expires } (hali tasdiqlanmagan; expires — unix soniya) | { user } | { password: true, hint } (2FA bor)
 export async function exportLoginToken(client) {
