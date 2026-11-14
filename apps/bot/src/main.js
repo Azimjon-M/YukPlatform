@@ -212,7 +212,7 @@ async function main() {
   };
   // Ishchi pastda yaratiladi, bot esa undan oldin: «navbatga tushdi — darhol ko'r» keyin ulanadi
   let worker = null;
-  const { bot, init, publish, deliver, canReceive, directDone, commands, notices, sources } = createBot({
+  const { bot, init, publish, deliver, canReceive, directDone, commands, notices, sources, group } = createBot({
     token: config.token,
     store,
     config,
@@ -231,6 +231,8 @@ async function main() {
     { pool, store, publish, deliver, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone },
     { log, maxAgeMs: maxPostAgeMs },
   );
+  // Guruh bo'limlari: yo'q bo'limlarni ochadi va navbatni yuborishni boshlaydi (GROUP_LOADS bo'lsa)
+  await group?.start();
   // 24 soat kirmaganga — ogohlantirish, 48 soatda — pauza (idle.js; Azimjon, 2026-11-09)
   const idle = createIdleWatcher({ store, api: bot.api, log });
 
@@ -241,6 +243,7 @@ async function main() {
     commands.stop();
     notices.stop();
     sources.stop();
+    group?.stop();
     await bot.stop();
     store.close();
     process.exit(0);
@@ -254,6 +257,9 @@ async function main() {
   log(config.channel && config.channelLoads
     ? `Kanal: yuklar ${config.channel} ga ham joylanadi (.env: CHANNEL_LOADS=1)`
     : "Kanal: yuklar joylanmaydi — faqat mos haydovchilarga shaxsiy xabar (yoqish: .env ga CHANNEL_LOADS=1)");
+  log(config.groupLoads
+    ? `Guruh: yuklar ${config.groupLoads} bo'limlariga mashina turi bo'yicha joylanadi (.env: GROUP_LOADS)`
+    : "Guruh: yuklar joylanmaydi (yoqish: .env ga GROUP_LOADS=@guruh)");
   log(`Yo'nalishlar: ${ROUTE_SCOPES[routeScope].title} (.env: ROUTE_SCOPE=${routeScope})`);
   log(maxPostAgeMs > 0
     ? `Eski e'lonlar: joylanganiga ${maxPostAgeMs / 3_600_000} soatdan oshgani AI'ga bormaydi (.env: POST_MAX_AGE_HOURS)`

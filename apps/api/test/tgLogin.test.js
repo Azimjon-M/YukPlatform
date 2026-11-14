@@ -33,7 +33,8 @@ function fakeWorkers(script = defaultScript) {
 }
 
 function defaultScript(message) {
-  if (message.type === "start") return { type: "code", via: "app", length: 5 };
+  if (message.type === "start") return { type: "code", via: "app", length: 5, next: "sms", timeout: 0 };
+  if (message.type === "resend") return { type: "code", via: "sms", length: 5, next: "call", timeout: 60 };
   if (message.type === "code") {
     if (message.code === "11111") return { type: "error", retry: true, message: "Kod noto'g'ri. Qayta kiriting." };
     if (message.code === "22222") return { type: "password", hint: "mushuk" };
@@ -452,4 +453,50 @@ test("haqiqiy worker bilan: xato parol, keyin to'g'ri parol — kirish tugaydi",
   assert.equal((await tgLogin.password(s.id, "yomon", 5)).step, "password");
   const done = await tgLogin.password(s.id, "good", 5);
   assert.deepEqual([done.step, done.user.userId], ["done", "77"]);
+});
+
+test("«Kod kelmadi»: SMS bilan qayta yuboriladi, keyingisi kutadi, chegara bor", async () => {
+  const { tgLogin, workers } = setup();
+  const started = await tgLogin.start({ name: "ikkinchi", phone: "+998901234567", by: 558 });
+  assert.deepEqual([started.via, started.next, started.resendIn], ["app", "sms", 0]);
+  const again = await tgLogin.resend(started.id);
+  assert.deepEqual([again.step, again.via, again.next, again.resends], ["code", "sms", "call", 1]);
+  assert.ok(again.resendIn > 0);
+  assert.deepEqual(workers.spawned[0].sent.at(-1), { type: "resend" });
+  await rejects(tgLogin.resend(started.id), 429, /soniyadan keyin/);
+  await rejects(tgLogin.resend("yoq"), 404);
+  const done = await tgLogin.code(started.id, "12345");
+  assert.equal(done.step, "done");
+  await rejects(tgLogin.resend(started.id), 409);
+});
+
+test("QR / havola: raqamsiz boshlanadi, worker o'zi yangi QR va «tasdiqlandi» ni yuboradi", async () => {
+  const { tgLogin, workers, store } = setup({
+    script: (m) => (m.type === "qr" ? { type: "qr", url: "tg://login?token=AAA", expires: 1 } : undefined),
+  });
+  const started = await tgLogin.start({ by: 558, mine: true, qr: true });
+  assert.deepEqual([started.step, started.qrUrl, started.phone], ["qr", "tg://login?token=AAA", null]);
+  assert.equal(workers.spawned[0].sent[0].type, "qr");
+  assert.equal(workers.spawned[0].sent[0].phone, undefined, "raqam yo'q");
+  workers.spawned[0].emit("message", { type: "qr", url: "tg://login?token=BBB" });
+  assert.equal(tgLogin.current(558).qrUrl, "tg://login?token=BBB", "QR yangilandi");
+  workers.spawned[0].emit("message", { type: "done", user: USER });
+  const done = tgLogin.current(558);
+  assert.deepEqual([done.step, done.qrUrl, done.user.username], ["done", null, "yuk_ikki"]);
+  assert.equal(store.listTgAccounts().find((a) => a.name === started.name)?.addedBy, 558);
+  // QR kod yubormaydi — soatlik kod chegarasiga tushmaydi
+  for (let i = 0; i < 5; i++) {
+    const again = await tgLogin.start({ by: 558, mine: true, qr: true });
+    tgLogin.cancel(again.id, 558);
+  }
+});
+
+test("QR: tasdiqlangach 2FA so'ralsa — parol bosqichi", async () => {
+  const { tgLogin, workers } = setup({
+    script: (m) => (m.type === "qr" ? { type: "qr", url: "tg://login?token=A" } : m.type === "password" ? { type: "done", user: USER } : undefined),
+  });
+  const started = await tgLogin.start({ name: "ikkinchi", by: 1, qr: true });
+  workers.spawned[0].emit("message", { type: "password", hint: "mushuk" });
+  assert.deepEqual([tgLogin.current(1).step, tgLogin.current(1).hint], ["password", "mushuk"]);
+  assert.equal((await tgLogin.password(started.id, "good", 1)).step, "done");
 });

@@ -186,7 +186,9 @@ export function tgAccountsApi(base) {
   return {
     get: () => request("GET", base),
     start: (name, phone) => request("POST", `${base}/login`, { body: { name, phone } }),
+    startQr: (name) => request("POST", `${base}/login`, { body: { name, qr: true } }),
     code: (id, code) => request("POST", `${login(id)}/code`, { body: { code } }),
+    resend: (id) => request("POST", `${login(id)}/resend`),
     password: (id, password) => request("POST", `${login(id)}/password`, { body: { password } }),
     cancel: (id) => request("DELETE", login(id)),
   };

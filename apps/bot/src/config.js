@@ -59,6 +59,13 @@ export function readConfig(env = process.env) {
   // bot o'z kanalining postlarini (va muhokama guruhidagi nusxalarini) yangi e'lon deb navbatga olmasin.
   const channelLoads = readFlag(env.CHANNEL_LOADS);
 
+  // Yuklarni guruh bo'limlariga (Topics) mashina turi bo'yicha joylash (groupTopics.js; Azimjon, 2026-11-13).
+  // GROUP_LOADS=@Yuk_Ekspert_chat yoki -100... Bo'sh — o'chiq
+  const groupLoads = env.GROUP_LOADS?.trim() || null;
+  if (groupLoads && !/^(@[A-Za-z]\w{3,}|-100\d+)$/.test(groupLoads)) {
+    throw new Error("GROUP_LOADS @guruh_nomi yoki -100... raqami bo'lishi kerak.");
+  }
+
   const ruleParser = ruleParserOn(env);
 
   // Aloqasiz e'lonlar (telefon ham, lichka ham yo'q) AI'ga ham, foydalanuvchilarga ham bormaydi (pipeline.js NO_CONTACT)
@@ -67,7 +74,7 @@ export function readConfig(env = process.env) {
   // Bot faqat shu kanal va guruh a'zolariga ishlaydi (members.js; Azimjon, 2026-11-09). Bo'sh — hammaga
   const requiredChats = readRequiredChats(env.REQUIRED_CHATS);
 
-  return { token, channel, channelLoads, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope, maxPostAgeMs, ruleParser, requireContact, requiredChats };
+  return { token, channel, channelLoads, groupLoads, admins, miniappUrl, androidUrl, iosUrl, apkFile, routeScope, maxPostAgeMs, ruleParser, requireContact, requiredChats };
 }
 
 // AI'siz qoidaviy parser (pipeline.js ruleParse). Standart — YOQIQ (Azimjon, 2026-11-09: «Ha, ulab qo'y»);

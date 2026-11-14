@@ -7,6 +7,8 @@ import {
   formFromProfile,
   profileFromForm,
   selectClass,
+  toggleClass,
+  manyClassesPicked,
   shipperFormFromProfile,
   shipperProfileFromForm,
   showSides,
@@ -67,6 +69,22 @@ test("transport turi o'zgarsa sig'im tozalanadi; yengil mashinada kuzov va o'lch
   assert.equal(sizeSummary({ ...formFromProfile(PROFILE), bodyType: "samosval" }).pallets, null, "samosvalga palet qo'yilmaydi");
   const tractor = { ...formFromProfile(PROFILE), bodyType: "tyagach" };
   assert.deepEqual([showSize(tractor), showSides(tractor)], [false, false]);
+});
+
+test("bir nechta transport belgilansa — kuzov, sig'im, o'lcham so'ralmaydi; bittasi qolsa — yana so'raladi", () => {
+  let form = formFromProfile(PROFILE); // fura, tent, 22 t
+  form = toggleClass(toggleClass(toggleClass(form, "labo"), "isuzu"), "fura");
+  assert.deepEqual(form.truckClasses, ["isuzu", "labo"], "ro'yxat tartibida");
+  assert.equal(manyClassesPicked(form), true);
+  assert.deepEqual([showSize(form), showSides(form)], [false, false]);
+  const { profile } = profileFromForm({ ...form, capacity: "" });
+  assert.deepEqual(profile.vehicle, { truckClass: "isuzu", truckClasses: ["isuzu", "labo"], bodyType: null, capacityKg: null, body: null, bodyGuess: false, loadingSides: [] });
+  const again = formFromProfile(profile);
+  assert.deepEqual([again.truckClasses, again.truckClass], [["isuzu", "labo"], null], "qayta ochilganda belgilar joyida");
+  const one = toggleClass(again, "labo");
+  assert.deepEqual([one.truckClass, one.capacity], ["isuzu", ""]);
+  assert.equal(profileFromForm(one).field, "body", "bitta qolsa — kuzov yana so'raladi");
+  assert.equal(profileFromForm(toggleClass(one, "isuzu")).field, "class", "hech biri belgilanmasa");
 });
 
 test("yuk ko'tarish: Labo va yengil mashinada kg, qolganida tonna; birlik adashsa ham to'g'ri", () => {

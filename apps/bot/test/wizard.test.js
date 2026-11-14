@@ -19,6 +19,8 @@ function press(draft, data) {
   const [, step, value] = data.split(":");
   return applyAction(draft, step, value).draft;
 }
+// Transport turini belgilab «Tayyor» ni bosish (bir nechta — bir nechta transport)
+const choose = (draft, ...ids) => press(ids.reduce((d, id) => press(d, `w:class:${id}`), draft), "w:class:ok");
 const buttons = (draft) => renderStep(draft).keyboard.flat();
 const find = (draft, text) => {
   const found = buttons(draft).find((b) => b.text.includes(text));
@@ -40,6 +42,9 @@ test("Isuzu haydovchisi to'liq ro'yxatdan o'tadi (yo'nalishsiz — u «📋 Mos 
   assert.deepEqual(classes.slice(0, 3), ["Katta fura (20–40 tonna)", "Kamaz (20–40 tonna)", "Fura (20–26 tonna)"]);
   assert.ok(classes.includes("Labo / Damas (300–700 kg)") && classes.includes("Yengil mashina (200–500 kg)"));
   d = press(d, find(d, "Isuzu (3"));
+  assert.equal(d.step, "class", "belgilash keyingi qadamga o'tkazmaydi");
+  assert.ok(buttons(d).some((b) => b.text === "✅ Isuzu (3–5 tonna)"));
+  d = press(d, find(d, "Tayyor"));
   assert.equal(d.step, "body");
   assert.ok(!buttons(d).some((b) => b.text === "Boshqa"));
   d = press(d, find(d, "Tent"));
@@ -77,7 +82,7 @@ test("Isuzu haydovchisi to'liq ro'yxatdan o'tadi (yo'nalishsiz — u «📋 Mos 
 });
 
 test("«Bilmayman» — odatdagi o'lcham olinadi; yengil mashinada kuzov, tyagachda o'lcham va tomon so'ralmaydi", () => {
-  let d = press(newDraft(), "w:class:katta_isuzu");
+  let d = choose(newDraft(), "katta_isuzu");
   d = press(press(d, "w:body:ref"), "w:capacity:10");
   assert.equal(d.step, "size");
   d = press(d, find(d, "Bilmayman"));
@@ -89,7 +94,7 @@ test("«Bilmayman» — odatdagi o'lcham olinadi; yengil mashinada kuzov, tyagac
   assert.equal(d.vehicle.bodyGuess, false);
 
   // Yengil mashina: kuzov qadami yo'q, sig'im — kg tugmalari, "300" yozilsa ham 300 kg
-  let car = press(newDraft(), "w:class:yengil_avto");
+  let car = choose(newDraft(), "yengil_avto");
   assert.equal(car.step, "capacity");
   assert.deepEqual(buttons(car).slice(0, 4).map((b) => b.text), ["200 kg", "300 kg", "400 kg", "500 kg"]);
   assert.match(renderStep(car).text, /Qancha yuk ko'taradi\?[\s\S]*400 kg/);
@@ -100,11 +105,11 @@ test("«Bilmayman» — odatdagi o'lcham olinadi; yengil mashinada kuzov, tyagac
   assert.deepEqual(profileFromDraft(car).vehicle, { truckClass: "yengil_avto", bodyType: null, capacityKg: 300, body: null, bodyGuess: false, loadingSides: [] });
 
   // Tyagach: kuzov tanlangach sig'im, keyin darrov xalqaro savoli
-  let tractor = press(press(newDraft(), "w:class:fura"), "w:body:tyagach");
+  let tractor = press(choose(newDraft(), "fura"), "w:body:tyagach");
   tractor = press(tractor, "w:capacity:25");
   assert.equal(tractor.step, "intl");
   // Katta fura va Kamaz — 40 tonnagacha
-  assert.ok(buttons(press(newDraft(), "w:class:katta_fura")).some((b) => b.text === "Plashatka / shalanda"));
+  assert.ok(buttons(choose(newDraft(), "katta_fura")).some((b) => b.text === "Plashatka / shalanda"));
   assert.ok(buttons({ ...newDraft(), step: "capacity", vehicle: { ...newDraft().vehicle, truckClass: "kamaz" } }).some((b) => b.text === "40 tonna"));
 });
 
@@ -131,12 +136,42 @@ test("sig'im va o'lchamni yozib yuborish", () => {
   assert.ok(applyText(d, "salom").error, "tugma kutilgan qadamda matn — xato");
 });
 
+test("bir nechta transport: kuzov, sig'im, o'lcham so'ralmaydi; har biriga mos yuk keladi", () => {
+  let d = newDraft();
+  const empty = applyAction(d, "class", "ok");
+  assert.equal(empty.draft.step, "class", "hech narsa belgilanmasa o'tmaydi");
+  assert.match(empty.notice, /Kamida bitta/);
+  d = choose(d, "labo", "isuzu", "kichik");
+  assert.equal(d.step, "intl", "kuzov, sig'im, o'lcham, yuklash tomoni — yo'q");
+  d = press(d, "w:intl:yoq");
+  assert.equal(d.step, "done");
+  assert.match(renderStep(d).text, /Transport: Isuzu, Kichik yuk mashinasi, Labo \/ Damas\n/);
+  d = press(d, "w:done:back");
+  assert.equal(d.step, "intl");
+  d = press(d, "w:intl:back");
+  assert.equal(d.step, "class");
+  d = choose(d, "kichik", "labo"); // ikkitasi olib tashlandi — bitta Isuzu qoldi, kuzov yana so'raladi
+  assert.deepEqual([d.vehicle.truckClasses, d.step], [["isuzu"], "body"]);
+
+  const many = profileFromDraft({ ...choose(newDraft(), "labo", "isuzu", "kichik"), step: "done" });
+  assert.deepEqual(many.vehicle, { truckClass: "isuzu", truckClasses: ["isuzu", "kichik", "labo"], bodyType: null, capacityKg: null, body: null, bodyGuess: false, loadingSides: [] });
+  const load = { fromRegion: "toshkent_sh", toRegion: "navoiy", loadingSides: [] };
+  assert.equal(matchLoad({ ...load, truckClass: "labo", weightT: 0.5 }, many).ok, true);
+  assert.equal(matchLoad({ ...load, truckClass: "labo", weightT: 2 }, many).ok, false, "Labo 2 tonna ko'tarmaydi");
+  assert.equal(matchLoad({ ...load, truckClass: "katta_isuzu", weightT: 4 }, many).ok, true, "isuzu oilasi");
+  assert.equal(matchLoad({ ...load, truckClass: "fura", weightT: 20 }, many).ok, false);
+  assert.equal(matchLoad({ ...load, weightT: 4.5 }, many).ok, true, "sinfi yozilmagan yuk — eng katta sinfga sig'sa");
+  assert.equal(matchLoad({ ...load, weightT: 6 }, many).ok, false);
+  // Qayta tahrirlash: belgilar saqlangan
+  assert.deepEqual(newDraft(many).vehicle.truckClasses, ["isuzu", "kichik", "labo"]);
+});
+
 test("orqaga, eski tugma, tozalash", () => {
   let d = newDraft();
-  d = press(d, "w:class:fura");
+  d = choose(d, "fura");
   d = press(d, "w:body:back");
   assert.equal(d.step, "class");
-  d = press(d, "w:class:fura");
+  assert.deepEqual(d.vehicle.truckClasses, ["fura"], "orqaga qaytganda belgi qoladi");
   const before = d;
   d = press(d, "w:intl:yoq"); // boshqa qadamdagi eski tugma
   assert.deepEqual(d, before);
@@ -150,14 +185,15 @@ test("orqaga, eski tugma, tozalash", () => {
 
 test("sinf o'zgarsa, eski sig'im va o'lcham tozalanadi; mavjud profil bilan tahrirlash", () => {
   let d = newDraft();
-  d = press(d, "w:class:fura");
+  d = choose(d, "fura");
   d = { ...d, step: "capacity" };
   d = press(d, "w:capacity:24");
   d = { ...d, step: "class" };
-  d = press(d, "w:class:isuzu");
+  d = choose(d, "fura", "isuzu"); // furani olib tashlab, isuzu belgilandi
+  assert.deepEqual(d.vehicle.truckClasses, ["isuzu"]);
   assert.equal(d.vehicle.capacityKg, null);
   d = { ...press({ ...d, step: "body" }, "w:body:tent"), step: "class" };
-  assert.equal(press(d, "w:class:yengil_avto").vehicle.bodyType, null, "yengil mashinada kuzov yo'q");
+  assert.equal(choose(d, "isuzu", "yengil_avto").vehicle.bodyType, null, "yengil mashinada kuzov yo'q");
 
   const profile = { vehicle: { truckClass: "fura", bodyType: "ref", capacityKg: 22000, loadingSides: ["orqa"] }, fromAreas: ["andijon"], toAreas: [], domestic: true, international: true, mode: "own" };
   const edit = newDraft(profile);

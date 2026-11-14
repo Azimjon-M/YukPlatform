@@ -387,7 +387,8 @@ export function profileSummary(profile) {
   }
   const v = profile.vehicle ?? {};
   const body = bodyTypeName(v.bodyType);
-  const vehicle = [truckClassName(v.truckClass), body ? body.toLowerCase() : null, capacityText(v.capacityKg)].filter(Boolean).join(" · ");
+  const classes = (Array.isArray(v.truckClasses) && v.truckClasses.length ? v.truckClasses : [v.truckClass]).map((id) => truckClassName(id) ?? id);
+  const vehicle = [classes.filter(Boolean).join(", "), body ? body.toLowerCase() : null, capacityText(v.capacityKg)].filter(Boolean).join(" · ");
   const size = v.body ? `${formatNumber(v.body.lengthM, 2)} × ${formatNumber(v.body.widthM, 2)} × ${formatNumber(v.body.heightM, 2)} m` : null;
   // Yo'nalishni haydovchi botdagi «📋 Mos yuklar» da tanlaydi; tanlamaguncha unga yuk yuborilmaydi
   const chosen = routeChosen(profile);

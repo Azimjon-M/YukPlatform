@@ -1,7 +1,7 @@
 // Profilni odamga ko'rsatish: qatorlar ro'yxati. Bot ularni matn qilib yozadi ("✅ Saqlandi" xabari),
 // web ilova esa ro'yxatdan o'tishning «Tasdiqlash» qadamida jadval qilib chizadi (har qatorda «O'zgartirish»).
 // Har qator: { id, icon, label, value } — id bo'yicha web qaysi qadamga qaytishni biladi; label null bo'lsa — faqat qiymat.
-import { BODY_TYPES, TRUCK_CLASSES, bodyId, countsPallets, needsSides } from "./vehicles.js";
+import { BODY_TYPES, TRUCK_CLASSES, bodyId, countsPallets, manyClasses, needsSides, vehicleClasses } from "./vehicles.js";
 import { vehiclePallets, vehicleVolumeM3 } from "./match.js";
 import { SIDE_LABELS, intlChoices, intlLabel, regionLabel, routeChosen } from "./profile.js";
 import { weightText } from "./loadText.js";
@@ -35,14 +35,15 @@ export function bodySizeText(vehicle) {
 // Haydovchi: transport, kuzov o'lchami (bo'lsa), yuklash tomoni, hudud, yo'nalish (route: false — yo'nalishsiz)
 export function driverProfileRows(profile, scope = DEFAULT_ROUTE_SCOPE, { route = true } = {}) {
   const v = profile?.vehicle ?? {};
-  const parts = [className(v.truckClass) ?? "—"];
+  // Bir nechta transport — faqat nomlari (kuzov va sig'im so'ralmagan)
+  const parts = [list(vehicleClasses(v), className, "—")];
   if (v.bodyType) parts.push(bodyName(v.bodyType));
   if (v.capacityKg) parts.push(weightText(v.capacityKg / 1000));
   const rows = [{ id: "vehicle", icon: "🚚", label: "Transport", value: parts.join(", ") }];
   if (v.body) {
     rows.push({ id: "size", icon: "📏", label: "Kuzov", value: `${bodySizeText(v)}${v.bodyGuess ? " — odatdagi o'lcham" : ""}` });
   }
-  if (needsSides(v.truckClass, v.bodyType)) {
+  if (!manyClasses(v) && needsSides(v.truckClass, v.bodyType)) {
     const sides = v.loadingSides?.length ? v.loadingSides.map((s) => SIDE_LABELS[s]?.toLowerCase() ?? s).join(", ") : "aytilmagan";
     rows.push({ id: "sides", icon: "↕️", label: "Yuklash", value: sides });
   }

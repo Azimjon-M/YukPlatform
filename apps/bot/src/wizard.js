@@ -24,6 +24,7 @@ import {
   regionLabel,
   scopeCountries,
   validRouteScope,
+  vehicleClasses,
   weightText,
 } from "@yuk/shared";
 
@@ -36,10 +37,13 @@ const stepsFor = (draft) => {
   const intl = Boolean(intlChoices(draft.scope));
   if (draft.role === "yuk_beruvchi") return intl ? SHIPPER_STEPS : SHIPPER_STEPS.filter((s) => s !== "intl");
   const { truckClass, bodyType } = draft.vehicle;
+  // Bir nechta transport tanlansa — kuzov, sig'im, o'lcham va yuklash tomoni so'ralmaydi (vehicles.js vehicleClasses)
+  const many = draft.vehicle.truckClasses?.length > 1;
   const skip = {
-    body: !needsBodyType(truckClass),
-    size: !needsSize(truckClass, bodyType),
-    sides: !needsSides(truckClass, bodyType),
+    body: many || !needsBodyType(truckClass),
+    capacity: many,
+    size: many || !needsSize(truckClass, bodyType),
+    sides: many || !needsSides(truckClass, bodyType),
     intl: !intl,
   };
   return STEPS.filter((s) => !skip[s]);
@@ -70,7 +74,7 @@ export function newDraft(profile = null, scope = DEFAULT_ROUTE_SCOPE, role = "ha
     return {
       scope: validRouteScope(scope),
       step: "class",
-      vehicle: { loadingSides: [], bodyGuess: false, ...structuredClone(profile.vehicle ?? {}) },
+      vehicle: { loadingSides: [], bodyGuess: false, ...structuredClone(profile.vehicle ?? {}), truckClasses: [...vehicleClasses(profile.vehicle)] },
       domestic: profile.domestic ?? true,
       international: profile.international ?? false,
     };
@@ -78,7 +82,7 @@ export function newDraft(profile = null, scope = DEFAULT_ROUTE_SCOPE, role = "ha
   return {
     scope: validRouteScope(scope),
     step: "class",
-    vehicle: { truckClass: null, bodyType: null, capacityKg: null, body: null, bodyGuess: false, loadingSides: [] },
+    vehicle: { truckClass: null, truckClasses: [], bodyType: null, capacityKg: null, body: null, bodyGuess: false, loadingSides: [] },
     domestic: true,
     international: false,
   };
@@ -137,11 +141,20 @@ const PICK_FIELDS = {
 export function renderStep(draft) {
   const { step, vehicle } = draft;
   switch (step) {
-    case "class":
+    case "class": {
+      // Belgilash (✅) — bir nechtasini tanlash mumkin; «Tayyor» — keyingi qadam
+      const chosen = new Set(vehicle.truckClasses);
       return {
-        text: "🚚 Transportingiz qaysi turdagi?",
-        keyboard: rows(TRUCK_CLASSES.map((t) => button(classLabel(t), step, t.id)), 1),
+        text:
+          "🚚 Transportingiz qaysi turdagi?\n\n" +
+          "Bir nechtasini belgilash mumkin (masalan: Isuzu, Kichik yuk mashinasi va Labo) — hammasiga mos yuklar keladi. " +
+          "Bir nechta tanlasangiz, kuzov va sig'im so'ralmaydi.\n\nBelgilab bo'lgach «Tayyor ➡️» ni bosing.",
+        keyboard: [
+          ...rows(TRUCK_CLASSES.map((t) => button(`${chosen.has(t.id) ? "✅ " : ""}${classLabel(t)}`, step, t.id)), 1),
+          [button("Tayyor ➡️", step, "ok")],
+        ],
       };
+    }
     case "body":
       return {
         text: "📦 Kuzov turi qanaqa?",
@@ -224,7 +237,8 @@ function toggle(list, value) {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
-// Tugma bosilganda. → { draft, saved?: true } — saved bo'lsa profil tayyor (profileFromDraft)
+// Tugma bosilganda. → { draft, saved?: true, notice? } — saved bo'lsa profil tayyor (profileFromDraft);
+// notice — nega o'tmadi (bot qisqa xabar qilib ko'rsatadi)
 export function applyAction(draft, step, value) {
   // Eski xabardagi tugma bosilsa — hech narsa o'zgarmaydi, joriy qadam qayta ko'rsatiladi
   if (step !== draft.step) return { draft };
@@ -232,12 +246,19 @@ export function applyAction(draft, step, value) {
   if (value === "back") return { draft: { ...d, step: prev(step, d) } };
 
   switch (step) {
-    case "class":
+    case "class": {
+      if (value === "ok") {
+        if (!vehicleClasses(d.vehicle).length) return { draft, notice: "Kamida bitta transport turini belgilang" };
+        break;
+      }
       if (!truckClass(value)) return { draft };
-      if (d.vehicle.truckClass !== value) Object.assign(d.vehicle, { capacityKg: null, body: null, bodyGuess: false });
-      d.vehicle.truckClass = value;
-      if (!needsBodyType(value)) Object.assign(d.vehicle, { bodyType: null, body: null, loadingSides: [] });
-      break;
+      // Belgilash/olib tashlash. Tanlov o'zgarsa sig'im va o'lcham qaytadan so'raladi (Isuzu sig'imi furaga to'g'ri kelmaydi)
+      const picked = toggle(vehicleClasses(d.vehicle), value);
+      const classes = TRUCK_CLASSES.map((t) => t.id).filter((id) => picked.includes(id));
+      Object.assign(d.vehicle, { truckClasses: classes, truckClass: classes[0] ?? null, capacityKg: null, body: null, bodyGuess: false });
+      if (classes.length === 1 && !needsBodyType(classes[0])) Object.assign(d.vehicle, { bodyType: null, loadingSides: [] });
+      return { draft: d };
+    }
     case "body":
       if (!FORM_BODIES.some((b) => b.id === value)) return { draft };
       d.vehicle.bodyType = value;
@@ -354,6 +375,14 @@ export function profileFromDraft(draft) {
     };
   }
   // Yo'nalish bo'sh: bot saqlaganda haydovchining «📋 Mos yuklar» dagi yo'nalishini qoldiradi (withRoute)
+  const common = { fromAreas: [], toAreas: [], domestic: international ? draft.domestic : true, international };
+  const classes = vehicleClasses(vehicle);
+  if (classes.length > 1) {
+    return {
+      vehicle: { truckClass: classes[0], truckClasses: [...classes], bodyType: null, capacityKg: null, body: null, bodyGuess: false, loadingSides: [] },
+      ...common,
+    };
+  }
   const hasBody = needsBodyType(vehicle.truckClass);
   return {
     vehicle: {
@@ -364,10 +393,7 @@ export function profileFromDraft(draft) {
       bodyGuess: Boolean(vehicle.bodyGuess && vehicle.body),
       loadingSides: needsSides(vehicle.truckClass, vehicle.bodyType) ? [...vehicle.loadingSides] : [],
     },
-    fromAreas: [],
-    toAreas: [],
-    domestic: international ? draft.domestic : true,
-    international,
+    ...common,
   };
 }
 

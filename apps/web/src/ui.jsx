@@ -14,7 +14,8 @@ export function Section({ id, title, hint, error, children }) {
 
 // Tanlov tugmalari: selected(id) — tanlanganmi, onPick(id) — bosilganda.
 // Har tanlov: { id, label, sub? (o'ngda, qisqa: "20–40 tonna"), note? (nom ostida, uzunroq izoh) }
-export function Chips({ options, selected, onPick, layout = "wrap" }) {
+// check — chapda chekbox katakchasi: bir nechtasini belgilash mumkinligi ko'rinib tursin
+export function Chips({ options, selected, onPick, layout = "wrap", check = false }) {
   return (
     <div className={`chips ${layout}`}>
       {options.map((o) => {
@@ -30,6 +31,7 @@ export function Chips({ options, selected, onPick, layout = "wrap" }) {
               onPick(o.id);
             }}
           >
+            {check && <span className="chip-box" aria-hidden="true">{on ? "✓" : ""}</span>}
             {o.note ? (
               <span className="chip-main">
                 <span>{o.label}</span>

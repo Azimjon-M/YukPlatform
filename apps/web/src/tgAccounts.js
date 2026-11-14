@@ -3,7 +3,7 @@
 
 export const MAIN_ACCOUNT = "asosiy"; // @yuk/store MAIN_TG_ACCOUNT bilan bir xil
 // Kirish davom etyapti (kod yoki parol kutilyapti / tekshirilyapti)
-export const ACTIVE_STEPS = new Set(["sending", "code", "checking", "password"]);
+export const ACTIVE_STEPS = new Set(["sending", "code", "qr", "checking", "password"]);
 
 const ORDINALS = ["ikkinchi", "uchinchi", "tortinchi", "beshinchi", "oltinchi", "yettinchi", "sakkizinchi", "toqqizinchi", "oninchi"];
 

@@ -6,7 +6,7 @@ import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promi
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Api, TelegramClient, utils } from "telegram";
-import { NewMessage } from "telegram/events/index.js";
+import { NewMessage, Raw } from "telegram/events/index.js";
 import { Logger, LogLevel } from "telegram/extensions/Logger.js";
 import { computeCheck } from "telegram/Password.js";
 import { StringSession } from "telegram/sessions/index.js";
@@ -190,7 +190,57 @@ export async function sendLoginCode(client, phoneNumber) {
     sent = await ask();
   }
   if (!(sent instanceof Api.auth.SentCode)) throw new Error("Telegram kod yubormadi (kutilmagan javob)");
-  return { phoneCodeHash: sent.phoneCodeHash, via: codeVia(sent.type), length: sent.type?.length ?? null };
+  return sentCodeInfo(sent);
+}
+
+// SentCode → { phoneCodeHash, via, length, next, timeout }. next — «qayta yuborish» bosilsa kod qayerga ketadi
+// (sms/call; null — boshqa yo'l yo'q), timeout — shuncha soniyadan keyin qayta yuborish mumkin
+const NEXT_VIA = { CodeTypeSms: "sms", CodeTypeCall: "call", CodeTypeFlashCall: "call", CodeTypeMissedCall: "call", CodeTypeFragmentSms: "fragment" };
+function sentCodeInfo(sent) {
+  const next = sent.nextType ? (NEXT_VIA[String(sent.nextType.className).replace(/^auth\./, "")] ?? "other") : null;
+  return { phoneCodeHash: sent.phoneCodeHash, via: codeVia(sent.type), length: sent.type?.length ?? null, next, timeout: sent.timeout ?? null };
+}
+
+// «Kod kelmadi» — Telegram kodni keyingi yo'l bilan (odatda SMS yoki qo'ng'iroq) qayta yuboradi; yangi phoneCodeHash
+export async function resendLoginCode(client, { phoneNumber, phoneCodeHash }) {
+  const sent = await client.invoke(new Api.auth.ResendCode({ phoneNumber, phoneCodeHash }));
+  if (!(sent instanceof Api.auth.SentCode)) throw new Error("Telegram kodni qayta yubormadi (kutilmagan javob)");
+  return sentCodeInfo(sent);
+}
+
+// --- QR / havola orqali kirish (2026-11-13, Azimjon: kod «yuborildi» deyiladi-yu, kelmaydi → «QR va Link orqali kirish»).
+// Telegram Desktop'ni ulash bilan bir xil: auth.exportLoginToken → tg://login?token=… (QR yoki havola) → egasi Telegram'da
+// tasdiqlaydi (Sozlamalar → Qurilmalar → «Qurilma ulash», yoki shu telefonda havolani bosib) → UpdateLoginToken keladi →
+// yana exportLoginToken → LoginTokenSuccess (boshqa DC bo'lsa — MigrateTo → importLoginToken). Kod kerak emas.
+// → { url, expires } (hali tasdiqlanmagan; expires — unix soniya) | { user } | { password: true, hint } (2FA bor)
+export async function exportLoginToken(client) {
+  const { apiId, apiHash } = readConfig();
+  try {
+    let result = await client.invoke(new Api.auth.ExportLoginToken({ apiId, apiHash, exceptIds: [] }));
+    if (result instanceof Api.auth.LoginTokenMigrateTo) {
+      await client._switchDC(result.dcId);
+      result = await client.invoke(new Api.auth.ImportLoginToken({ token: result.token }));
+    }
+    if (result instanceof Api.auth.LoginToken) {
+      const token = Buffer.from(result.token).toString("base64url");
+      return { url: `tg://login?token=${token}`, expires: result.expires };
+    }
+    if (result instanceof Api.auth.LoginTokenSuccess && result.authorization instanceof Api.auth.Authorization) {
+      return { user: result.authorization.user };
+    }
+    throw new Error(`Telegram kutilmagan javob berdi (${result?.className})`);
+  } catch (error) {
+    if (error?.errorMessage !== "SESSION_PASSWORD_NEEDED") throw error;
+    const info = await client.invoke(new Api.account.GetPassword());
+    return { password: true, hint: info.hint || null };
+  }
+}
+
+// Egasi QR/havolani tasdiqlaganda (UpdateLoginToken) callback chaqiriladi
+export function onLoginTokenAccepted(client, callback) {
+  client.addEventHandler((update) => {
+    if (update instanceof Api.UpdateLoginToken) callback();
+  }, new Raw({}));
 }
 
 // Kod bilan kirish → { user } yoki { password: true, hint } (akkauntda 2FA bor).

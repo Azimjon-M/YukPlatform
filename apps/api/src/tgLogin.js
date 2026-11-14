@@ -32,11 +32,12 @@ export const IDLE_MS = 15 * MINUTE; // kod/parol shu vaqtda kiritilmasa — beko
 export const STARTS_PER_HOUR = 5; // kod so'rash (adminlar): Telegram ko'p so'ralgan raqamni va API kalitini bloklaydi
 // Oddiy foydalanuvchilar (Sozlamalar → «Telegram akkauntlarim», 2026-11-13): har biriga alohida va hammasiga birga chegara —
 // bitta odam adminlarning limitini ham, boshqalarnikini ham yeb qo'ya olmaydi
-export const USER_STARTS_PER_HOUR = 3;
-export const USERS_STARTS_PER_HOUR = 10;
+export const USER_STARTS_PER_HOUR = 10; // 3 edi — Azimjon, 2026-11-13: «10 taga ko'tar»
+export const USERS_STARTS_PER_HOUR = 30;
 export const USER_MAX_ACCOUNTS = 3; // bir foydalanuvchi nechta akkaunt ulay oladi
 export const MAX_USER_LOGINS = 3; // bir vaqtda nechta foydalanuvchi kirishi davom etishi mumkin (har biri — alohida jarayon)
-const ACTIVE = new Set(["sending", "code", "checking", "password"]);
+export const MAX_RESENDS = 3; // bitta kirishda «Kodni qayta yuborish» necha marta
+const ACTIVE = new Set(["sending", "code", "qr", "checking", "password"]);
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 
@@ -115,8 +116,12 @@ export function createTgLogin({
       id: login.id,
       name: login.name,
       phone: login.phone,
-      step: login.step, // sending | code | checking | password | done | failed
+      step: login.step, // sending | code | qr | checking | password | done | failed
+      qrUrl: login.step === "qr" ? login.qrUrl : null, // tg://login?token=… — QR'da ham, havolada ham shu (~30 s da yangilanadi)
       via: login.via, // kod qayerga ketdi: app | sms | call | email | …
+      next: login.next, // «Kodni qayta yuborish» bosilsa qayerga ketadi (sms | call | …; null — boshqa yo'l yo'q)
+      resendIn: login.resendAt ? Math.max(0, Math.ceil((login.resendAt - now()) / 1000)) : 0, // shuncha soniyadan keyin qayta yuborish mumkin
+      resends: login.resends,
       codeLength: login.codeLength,
       hint: login.hint, // 2FA parol eslatmasi (egasi o'zi qo'ygan)
       error: login.error,
@@ -191,7 +196,18 @@ export function createTgLogin({
     target.error = null;
     switch (reply?.type) {
       case "code":
-        Object.assign(target, { step: "code", via: reply.via ?? null, codeLength: reply.length ?? null });
+        Object.assign(target, {
+          step: "code",
+          via: reply.via ?? null,
+          codeLength: reply.length ?? null,
+          next: reply.next ?? null,
+          resendAt: now() + (reply.timeout ?? 0) * 1000,
+        });
+        // Raqamsiz: faqat qayerga ketgani — «kod kelmadi» deyilganda tekshirish uchun
+        log(`Telegram kod yuborildi: «${target.name}» → ${reply.via ?? "?"}${reply.next ? ` (qayta yuborilsa — ${reply.next})` : ""}`);
+        break;
+      case "qr":
+        Object.assign(target, { step: "qr", qrUrl: reply.url ?? null });
         break;
       case "password":
         Object.assign(target, { step: "password", hint: reply.hint ?? null });
@@ -281,8 +297,9 @@ export function createTgLogin({
     },
 
     // { name, phone, by, mine } → kod yuborilgan holat (yoki xato bilan «failed»). Tekshiruv xatolari — 400/404/409/429.
-    // mine — oddiy foydalanuvchi: nomni server beradi (name — faqat o'z akkauntiga qayta kirish uchun)
-    async start({ name, phone, by = null, mine = false } = {}) {
+    // mine — oddiy foydalanuvchi: nomni server beradi (name — faqat o'z akkauntiga qayta kirish uchun).
+    // qr: true — raqamsiz, kodsiz: QR / havola (step «qr», qrUrl); tasdiqlangach worker o'zi done/password yuboradi
+    async start({ name, phone, by = null, mine = false, qr = false } = {}) {
       const problem = unavailable();
       if (problem) throw httpError(409, problem);
       if (mine && by == null) throw httpError(401, "Kirish kerak");
@@ -310,22 +327,25 @@ export function createTgLogin({
       if ([...logins.values()].some((t) => t.name === account && t.by !== by && ACTIVE.has(t.step))) {
         throw httpError(409, `«${account}» nomli akkauntga hozir boshqa kirish davom etyapti`);
       }
-      const number = normalizeLoginPhone(phone);
-      if (!number) throw httpError(400, "Telefon raqam tushunarsiz. Masalan: +998 90 123 45 67");
+      const number = qr ? null : normalizeLoginPhone(phone);
+      if (!qr && !number) throw httpError(400, "Telefon raqam tushunarsiz. Masalan: +998 90 123 45 67");
 
       // Shu telefon raqamli akkaunt allaqachon collectorga ulangan bo'lsa — kod/parol so'ramasdan, yangi (dublikat) sessiya
       // ochilmasdan rad etamiz. Raqamning o'zi emas, xeshi solishtiriladi (hashPhone). Faqat BOSHQA nom bilan ishlab
       // turgan (ok/error) akkaunt to'xtatadi; sessiyasi yo'qolgani (logged_out) yoki o'z nomiga qayta kirish — mumkin.
-      const phoneHash = hashPhone(number);
-      const already = store.listTgAccounts().find((a) => a.phoneHash && a.phoneHash === phoneHash && a.name !== account && ["ok", "error"].includes(a.status));
+      const phoneHash = qr ? null : hashPhone(number);
+      const already = !qr && store.listTgAccounts().find((a) => a.phoneHash && a.phoneHash === phoneHash && a.name !== account && ["ok", "error"].includes(a.status));
       if (already) throw httpError(409, `Bu raqam allaqachon «${already.name}» nomi bilan ulangan — ikkinchi marta ulanmaydi`);
       // Hozir boshqa nom bilan shu raqamga kirish ketayotgan bo'lsa (xotiradagi davom etayotgan kirishlar)
-      if ([...logins.values()].some((t) => t.phoneHash === phoneHash && ACTIVE.has(t.step))) {
+      if (!qr && [...logins.values()].some((t) => t.phoneHash === phoneHash && ACTIVE.has(t.step))) {
         throw httpError(409, "Bu raqamga hozir boshqa kirish davom etyapti");
       }
 
       const wait = "Telegram bloklamasligi uchun birozdan keyin urinib ko'ring";
-      if (mine) {
+      // QR kod yubormaydi — Telegram raqamni bloklamaydi, soatlik chegara kerak emas
+      if (qr) {
+        // chegarasiz
+      } else if (mine) {
         if (!perUser.has(by)) perUser.set(by, []);
         within(perUser.get(by), userStartsPerHour, `Bir soatda ${userStartsPerHour} marta kod so'radingiz — ${wait}`);
         within(starts.users, usersStartsPerHour, `Hozir juda ko'p kod so'ralgan — ${wait}`);
@@ -347,10 +367,14 @@ export function createTgLogin({
       const target = {
         id: randomUUID(),
         name: account,
-        phone: maskPhone(number),
+        phone: qr ? null : maskPhone(number),
+        qrUrl: null,
         phoneHash, // raqamning xeshi: kirish tugaganda saqlanadi, in-flight dublikat tekshiruvi uchun ham
         step: "sending",
         via: null,
+        next: null,
+        resendAt: null,
+        resends: 0,
         codeLength: null,
         hint: null,
         error: null,
@@ -371,7 +395,8 @@ export function createTgLogin({
         fail(target, `Kirish jarayonini ochib bo'lmadi: ${error.message}`);
         return view(target);
       }
-      target.child.on("message", (reply) => target.pending?.(reply));
+      // QR bosqichida worker o'zi ham yozadi (yangi QR, tasdiqlandi, 2FA kerak) — so'rov kutilmayotgan paytda
+      target.child.on("message", (reply) => (target.pending ? target.pending(reply) : apply(target, reply)));
       target.child.on("exit", (code) => {
         const was = target.child;
         target.child = null;
@@ -379,7 +404,7 @@ export function createTgLogin({
         else if (was && logins.get(target.id) === target && ACTIVE.has(target.step)) fail(target, "Kirish jarayoni kutilmaganda to'xtadi — qaytadan urinib ko'ring");
       });
       target.child.on("error", () => {}); // «exit» baribir keladi
-      apply(target, await ask(target, { type: "start", name: account, phone: number, taken }));
+      apply(target, await ask(target, qr ? { type: "qr", name: account, taken } : { type: "start", name: account, phone: number, taken }));
       return view(target);
     },
 
@@ -388,6 +413,18 @@ export function createTgLogin({
       const code = cleanCode(input);
       if (!code) throw httpError(400, "Kodni kiriting — Telegram yuborgan raqamlar");
       return step(id, by, "code", { type: "code", code });
+    },
+
+    // «Kod kelmadi» — Telegram keyingi yo'l bilan (SMS / qo'ng'iroq) qayta yuboradi. Ko'pi bilan MAX_RESENDS marta
+    async resend(id, by) {
+      const target = ongoing(id, by);
+      if (target.step !== "code") throw httpError(409, "Bu bosqich allaqachon o'tgan — sahifani yangilang");
+      if (target.resends >= MAX_RESENDS) throw httpError(429, "Kod bir necha marta qayta yuborildi — «Bekor qilish» ni bosib, birozdan keyin qaytadan boshlang");
+      if (target.resendAt && now() < target.resendAt) {
+        throw httpError(429, `Qayta yuborish ${Math.ceil((target.resendAt - now()) / 1000)} soniyadan keyin mumkin`);
+      }
+      target.resends++;
+      return step(id, by, "code", { type: "resend" });
     },
 
     async password(id, input, by) {

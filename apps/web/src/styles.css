@@ -202,6 +202,31 @@ main {
   opacity: 0.85;
 }
 
+/* Chekbox katakchasi (bir nechtasini belgilash mumkin bo'lgan ro'yxat) */
+.chip-box {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.chip.on .chip-box {
+  border-color: currentColor;
+  background: var(--accent-text);
+  color: var(--accent);
+}
+
+.chip:has(.chip-box) .chip-main,
+.chip:has(.chip-box) > span:not(.chip-box) {
+  flex: 1;
+}
+
 /* Nom va ostida izoh («Kamaz» / «samosval, shag'al-sheben...») */
 .chip-main {
   display: flex;

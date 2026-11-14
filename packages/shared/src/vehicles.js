@@ -239,3 +239,13 @@ export const needsBodyType = (classId) => !truckClassOf(classId)?.noBody;
 export const needsSize = (classId, bodyType) => needsBodyType(classId) && bodyTypeOf(bodyType)?.size !== false;
 export const needsSides = (classId, bodyType) => needsBodyType(classId) && bodyTypeOf(bodyType)?.sides !== false;
 export const countsPallets = (bodyType) => bodyTypeOf(bodyType)?.pallets !== false;
+
+// Haydovchi bir nechta transport tanlashi mumkin (Azimjon, 2026-11-13: masalan Isuzu, kichik yuk mashinasi va Labo).
+// Profilda: bitta bo'lsa — faqat vehicle.truckClass (eskidek); bir nechta — vehicle.truckClasses ham (truckClass = birinchisi).
+// Bir nechta tanlansa kuzov turi, sig'im, o'lcham va yuklash tomoni so'ralmaydi — har bir transport uchun alohida yozish
+// shart emas; moslashda har bir sinfning odatdagi sig'imi olinadi (match.js).
+export function vehicleClasses(vehicle) {
+  if (Array.isArray(vehicle?.truckClasses) && vehicle.truckClasses.length) return vehicle.truckClasses;
+  return vehicle?.truckClass ? [vehicle.truckClass] : [];
+}
+export const manyClasses = (vehicle) => vehicleClasses(vehicle).length > 1;

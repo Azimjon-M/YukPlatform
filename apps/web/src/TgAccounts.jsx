@@ -4,13 +4,57 @@
 // kod → (2FA bo'lsa) parol. Kirish holati serverda (apps/api tgLogin.js): bitta telefonda kodni ko'rish uchun Telegram'da
 // boshqa akkauntga o'tib, qaytib «🛠 Boshqaruv» ni qayta ochsa — shu bosqichdan davom etadi.
 // Kod va parol faqat shu yerga yoziladi: chatga yozilgan kodni Telegram bekor qiladi, parol chat tarixida qolardi.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import QRCode from "qrcode";
 import { ADMIN_TG, MY_TG } from "./api.js";
 import { confirmAction, haptic } from "./telegram.js";
 import { Notice, Spinner } from "./ui.jsx";
 import { ACTIVE_STEPS, accountError, accountLabel, accountStatus, accountWho, codeWhere, scanText, suggestAccountName } from "./tgAccounts.js";
 
 const POLL_MS = 10_000; // yangi akkaunt collector'ga ulanganini ko'rish uchun (≤ 30 s)
+const QR_POLL_MS = 3_000; // QR kutilayotganda: yangi QR (~30 s da) va tasdiqlanganini tezroq ko'rish uchun
+
+// tg://login?token=… → QR (SVG kvadratlar). Kutubxona faqat matritsani beradi — chizish o'zimizda (tashqi so'rovsiz)
+function QrImage({ text }) {
+  const { size, path } = useMemo(() => {
+    const { modules } = QRCode.create(text, { errorCorrectionLevel: "M" });
+    let d = "";
+    for (let y = 0; y < modules.size; y++) for (let x = 0; x < modules.size; x++) if (modules.get(y, x)) d += `M${x + 4} ${y + 4}h1v1h-1z`;
+    return { size: modules.size + 8, path: d };
+  }, [text]);
+  return (
+    <svg className="tg-qr" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Kirish uchun QR kod" shapeRendering="crispEdges">
+      <rect width={size} height={size} fill="#fff" />
+      <path d={path} fill="#000" />
+    </svg>
+  );
+}
+
+function QrStep({ login, onCancel }) {
+  return (
+    <div className="section tg-acc">
+      <h2>📷 Kodsiz kirish — Telegram'da tasdiqlang</h2>
+      <p className="hint">
+        <b>Shu telefonda:</b> qo'shilayotgan akkaunt shu Telegram'da ochiq bo'lsa, pastdagi tugmani bosing va Telegram so'raganda
+        «Tasdiqlash» ni bosing.
+      </p>
+      <a className="primary tg-link" href={login.qrUrl}>
+        📲 Telegram'da tasdiqlash
+      </a>
+      <p className="hint">
+        <b>Boshqa qurilmada:</b> akkaunt ochiq turgan telefonda Telegram → Sozlamalar → Qurilmalar → «Qurilma ulash» (Link Desktop
+        Device) ni bosib, shu QR kodni skanerlang.
+      </p>
+      {login.qrUrl && <QrImage text={login.qrUrl} />}
+      <p className="hint">QR har ~30 soniyada o'zi yangilanadi. Tasdiqlangach shu yerda «✅ qo'shildi» chiqadi (2FA bo'lsa — parol so'raladi).</p>
+      <div className="account-actions tg-actions">
+        <button type="button" className="secondary" onClick={onCancel}>
+          Bekor qilish
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function AccountRow({ account, mine, onRelogin }) {
   const status = accountStatus(account);
@@ -42,7 +86,7 @@ function AccountRow({ account, mine, onRelogin }) {
 }
 
 // Yangi kirish: nom + raqam
-function StartForm({ initial, mine, busy, error, onSubmit, onCancel }) {
+function StartForm({ initial, mine, busy, error, onSubmit, onQr, onCancel }) {
   const [name, setName] = useState(initial.name);
   const [phone, setPhone] = useState("");
   return (
@@ -66,13 +110,18 @@ function StartForm({ initial, mine, busy, error, onSubmit, onCancel }) {
           <p className="hint tg-under">Ro'yxatda shu nom bilan ko'rinadi: kichik lotin harflari, raqam, _ yoki -.</p>
         </>
       )}
+      <button type="button" className="primary tg-qr-start" disabled={busy || (!mine && !name.trim())} onClick={() => onQr(name.trim().toLowerCase())}>
+        📷 QR yoki havola orqali (kodsiz)
+      </button>
+      <p className="hint tg-under">Tavsiya: kod kutish shart emas — Telegram'da bir bosish bilan tasdiqlanadi.</p>
+      <p className="hint tg-or">yoki raqam va kod bilan:</p>
       <label className="field">
         <span>Raqami</span>
         <input type="tel" inputMode="tel" autoComplete="off" placeholder="+998 90 123 45 67" value={phone} onChange={(e) => setPhone(e.target.value)} />
       </label>
       {error && <p className="error">{error}</p>}
       <div className="account-actions tg-actions">
-        <button type="submit" className="primary" disabled={busy || (!mine && !name.trim()) || !phone.trim()}>
+        <button type="submit" className="secondary" disabled={busy || (!mine && !name.trim()) || !phone.trim()}>
           {busy ? "Yuborilyapti…" : "📨 Kod yuborish"}
         </button>
         <button type="button" className="secondary" disabled={busy} onClick={onCancel}>
@@ -112,7 +161,10 @@ function SecretStep({ title, children, label, input, busy, error, submitText, on
   );
 }
 
-function CodeStep({ login, busy, error, onSubmit, onCancel }) {
+const RESEND_TO = { sms: "SMS orqali", call: "qo'ng'iroq orqali", fragment: "Fragment orqali" };
+
+function CodeStep({ login, busy, error, onSubmit, onResend, onCancel }) {
+  const canResend = (login.resends ?? 0) < 3 && Boolean(login.next); // next yo'q — Telegram boshqa yo'l bermaydi (ResendCode xato beradi)
   return (
     <SecretStep
       title={`🔑 «${login.name}» — kodni kiriting`}
@@ -125,6 +177,18 @@ function CodeStep({ login, busy, error, onSubmit, onCancel }) {
       onCancel={onCancel}
     >
       <p className="hint">{codeWhere(login)}</p>
+      {login.via === "app" && (
+        <p className="hint">
+          Kod SMS bo'lib emas, Telegram'ning o'zida keladi: shu raqamli akkaunt ochiq turgan telefon yoki kompyuterda «Telegram» nomli
+          rasmiy chatni oching.
+        </p>
+      )}
+      {canResend && (
+        <button type="button" className="secondary tg-resend" disabled={busy} onClick={onResend}>
+          🔁 Kod kelmadimi? {login.next && RESEND_TO[login.next] ? `${RESEND_TO[login.next]} yuborish` : "Qayta yuborish"}
+          {login.resendIn > 0 ? ` (${login.resendIn} soniyadan keyin)` : ""}
+        </button>
+      )}
       <details className="tg-help">
         <summary>Shu telefonning o'zida qanday qilinadi?</summary>
         <ol>
@@ -189,6 +253,14 @@ export function TgAccounts({ onAuthLost, mine = false }) {
     };
   }, [load]);
 
+  // QR kutilayotganda tezroq: yangi QR va «tasdiqlandi» darhol ko'rinsin
+  const waitingQr = data?.login?.step === "qr";
+  useEffect(() => {
+    if (!waitingQr) return undefined;
+    const timer = setInterval(() => !document.hidden && load(), QR_POLL_MS);
+    return () => clearInterval(timer);
+  }, [waitingQr, load]);
+
   // Har amal: javobdagi kirish holati darhol ko'rsatiladi; xato — tugmalar ostida
   const act = useCallback(
     async (fn, { closeForm = false } = {}) => {
@@ -251,6 +323,7 @@ export function TgAccounts({ onAuthLost, mine = false }) {
         busy={busy}
         error={error}
         onSubmit={(name, phone) => act(() => api.start(name || null, phone), { closeForm: true })}
+        onQr={(name) => act(() => api.startQr(name || null), { closeForm: true })}
         onCancel={() => {
           setForm(null);
           setError(null);
@@ -258,7 +331,9 @@ export function TgAccounts({ onAuthLost, mine = false }) {
       />
     );
   } else if (login?.step === "code") {
-    panel = <CodeStep key={`code-${login.id}`} login={login} busy={busy} error={error ?? login.error} onSubmit={(code) => act(() => api.code(login.id, code))} onCancel={cancel} />;
+    panel = <CodeStep key={`code-${login.id}`} login={login} busy={busy} error={error ?? login.error} onSubmit={(code) => act(() => api.code(login.id, code))} onResend={() => act(() => api.resend(login.id))} onCancel={cancel} />;
+  } else if (login?.step === "qr") {
+    panel = <QrStep key={`qr-${login.id}`} login={login} onCancel={cancel} />;
   } else if (login?.step === "password") {
     panel = (
       <PasswordStep key={`pw-${login.id}`} login={login} busy={busy} error={error ?? login.error} onSubmit={(password) => act(() => api.password(login.id, password))} onCancel={cancel} />

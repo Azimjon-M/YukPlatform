@@ -3,7 +3,11 @@
 //
 // Server (apps/api/src/tgLogin.js) bu faylni ALOHIDA jarayon qilib ishga tushiradi (fork) va IPC orqali
 // bosqichma-bosqich gaplashadi (har so'rovga bitta javob):
-//   server → { type: "start", name, phone, taken }   javob: { type: "code", via, length }
+//   server → { type: "start", name, phone, taken }   javob: { type: "code", via, length, next, timeout }
+//   server → { type: "resend" }                      javob: { type: "code", … } — «Kod kelmadi»: keyingi yo'l bilan
+//   server → { type: "qr", name, taken }             javob: { type: "qr", url, expires } — QR / havola (kodsiz kirish);
+//     keyin worker O'ZI yuboradi: yangi QR (har ~30 s) { type: "qr", … }, tasdiqlansa { type: "done" } yoki
+//     { type: "password", hint } (2FA), xato — { type: "error", retry: false }
 //   server → { type: "code", code }                  javob: { type: "password", hint } | { type: "done", user }
 //   server → { type: "password", password }          javob: { type: "done", user }
 //   server → { type: "cancel" }                      jarayon tugaydi
@@ -16,6 +20,9 @@
 // o'zi ulaydi (accounts.js superviseAccounts) — qayta ishga tushirish shart emas.
 import { authErrorAction } from "./authErrors.js";
 import { accountTitle } from "./accounts.js";
+
+const QR_REFRESH_MS = 30_000;
+const QR_MIN_WAIT_MS = 5_000;
 
 // Xato matnida «qaytadan qanday boshlash» (terminaldagi «npm run tg:login» o'rniga)
 export const AGAIN = "«➕ Akkaunt qo'shish» ni qayta bosing";
@@ -30,6 +37,7 @@ export function createLoginSession({ telegram, send }) {
   let hash = null;
   let taken = {}; // { userId: nom } — ishlab turgan akkauntlar (bir akkaunt ikki nom bilan ulanmasin)
   let retries = 0;
+  let wake = null; // QR kutilayotganda: egasi tasdiqladi (yoki to'xtatildi) — darhol tekshirish
 
   async function fail(error) {
     const action = authErrorAction(error, retries, { again: AGAIN });
@@ -70,7 +78,20 @@ export function createLoginSession({ telegram, send }) {
         const sent = await telegram.sendLoginCode(client, phone);
         hash = sent.phoneCodeHash;
         step = "code";
-        return await send({ type: "code", via: sent.via ?? null, length: sent.length ?? null });
+        return await send({ type: "code", via: sent.via ?? null, length: sent.length ?? null, next: sent.next ?? null, timeout: sent.timeout ?? null });
+      }
+      if (message?.type === "qr" && step === "start") {
+        ({ name } = message);
+        taken = message.taken ?? {};
+        client = await telegram.createClient("");
+        telegram.onLoginTokenAccepted(client, () => wake?.());
+        step = "qr";
+        return await qrLoop();
+      }
+      if (message?.type === "resend" && step === "code") {
+        const sent = await telegram.resendLoginCode(client, { phoneNumber: phone, phoneCodeHash: hash });
+        hash = sent.phoneCodeHash;
+        return await send({ type: "code", via: sent.via ?? null, length: sent.length ?? null, next: sent.next ?? null, timeout: sent.timeout ?? null });
       }
       if (message?.type === "code" && step === "code") {
         const result = await telegram.signInWithCode(client, { phoneNumber: phone, phoneCodeHash: hash, code: String(message.code ?? "") });
@@ -88,6 +109,30 @@ export function createLoginSession({ telegram, send }) {
     }
   }
 
+  // QR tasdiqlanguncha: token eskirsa — yangisi (Telegram tokeni ~30 s yashaydi). Tasdiqlanganini UpdateLoginToken
+  // aytadi; u kelmasa ham keyingi eksportda LoginTokenSuccess qaytadi
+  async function qrLoop() {
+    while (step === "qr") {
+      const result = await telegram.exportLoginToken(client);
+      if (result.user) return finish(result.user);
+      if (result.password) {
+        step = "password";
+        retries = 0;
+        return send({ type: "password", hint: result.hint ?? null });
+      }
+      await send({ type: "qr", url: result.url, expires: result.expires ?? null });
+      const left = result.expires ? result.expires * 1000 - Date.now() - 2000 : QR_REFRESH_MS;
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, Math.min(QR_REFRESH_MS, Math.max(QR_MIN_WAIT_MS, left)));
+        wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      wake = null;
+    }
+  }
+
   return {
     handle,
     get step() {
@@ -97,6 +142,8 @@ export function createLoginSession({ telegram, send }) {
       return step === "done" || step === "failed";
     },
     async close() {
+      if (step === "qr") step = "failed";
+      wake?.();
       const open = client;
       client = null;
       if (open) await Promise.resolve(telegram.disconnect(open)).catch(() => {});

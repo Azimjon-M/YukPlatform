@@ -17,7 +17,7 @@ export const MENU = {
   writeHere: "✍️ Shu chatga yozish", // ro'yxatdan o'tishning 2-yo'li (haydovchi, profilsiz): mashinani oddiy matn bilan yozadi, AI profilga aylantiradi (bot.js, driverText.js)
   pause: "⏸ Pauza",
   resume: "▶️ Davom ettirish",
-  phone: "📱 Raqam ulashish", // request_contact tugmasi (PHONE.share bilan bir xil matn) — faqat raqami yo'qlarda (bor bo'lsa — /raqam: almashtirish / o'chirish)
+  phone: "📱 Raqam ulashish", // oddiy tugma → bot afzalliklarni yozib, PHONE.share (request_contact) ni beradi (2026-11-13) — faqat raqami yo'qlarda (bor bo'lsa — /raqam: almashtirish / o'chirish)
   addGroup: "➕ Guruh qo'shish", // raqami borlarda «Raqam ulashish» o'rnida (Azimjon, 2026-11-10; bot.js userSources.js)
   myPhone: "📱 Raqamim", // menyuda yo'q: 2026-11-07 da bir necha daqiqa bor edi — eski menyuda bosilsa /raqam
   apps: "📱 Ilovalar", // menyuda yo'q (eski menyular uchun ushlanadi) — /ilovalar
@@ -122,7 +122,7 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
     // Rol tanlangan (shu tarmoq shartiga ko'ra) — «🔄 Rolni almashtirish» har doim qo'yiladi
     const shipperKb = loadRow(new Keyboard()).text(MENU.trucks).text(MENU.role);
     // «📱 Raqam ulashish» ikkala rolda ham bor; raqami bo'lsa ham bosilsa yangi raqam saqlanadi (esmada saqlash — /raqam)
-    shipperKb.row().requestContact(MENU.phone).text(MENU.help);
+    shipperKb.row().text(MENU.phone).text(MENU.help);
     settingsButton(shipperKb.row());
     const shipperAdminUrl = admin ? miniAppUrl(miniappUrl, null, scope, { view: "admin", role, token }) : null;
     if (shipperAdminUrl) shipperKb.row().webApp(MENU.admin, shipperAdminUrl);
@@ -136,11 +136,11 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   // Rolni almashtirish (haydovchi ↔ yuk beruvchi) — /rol bilan bir xil. Odamda bugun yuk, ertaga bo'sh mashina bo'lishi
   // mumkin, /rol ni esa hamma ham topavermaydi. Rol tanlanmagan bo'lsa tugma yo'q
   if (role) keyboard.text(MENU.role);
-  // Raqam: bir bosishda ulashish (Telegram «Raqamingizni ulashasizmi?» deb so'raydi). Raqami borda shu joyda
+  // Raqam: avval bot afzalliklarni tushuntiradi, keyin Telegram «Raqamingizni ulashasizmi?» deb so'raydi (2026-11-13). Raqami borda shu joyda
   // «➕ Guruh qo'shish» (Azimjon, 2026-11-10: raqam ulashgandan keyin paydo bo'lsin — ishonchlilik uchun, yangi tugmaga
   // joy ochmasdan). Raqamni almashtirish — /raqam
   if (driver.phone) keyboard.text(MENU.addGroup).row();
-  else keyboard.requestContact(MENU.phone).row();
+  else keyboard.text(MENU.phone).row();
   settingsButton(keyboard.text(MENU.help));
   // Boshqaruv — faqat Mini App ichida (Azimjon: "botda telegram webi orqali ochib ishlaydigan bo'lsin")
   const adminUrl = admin ? miniAppUrl(miniappUrl, null, scope, { view: "admin", role, token }) : null;

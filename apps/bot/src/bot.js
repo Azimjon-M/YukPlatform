@@ -37,10 +37,11 @@ import { escapeHtml, formatLoad, formatTruck } from "./format.js";
 import { IDLE_BUTTONS } from "./idle.js";
 import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
 import { MENU, PHONE, mainMenu, matchesLabel, miniAppUrl, phoneKeyboard, settingsLabel } from "./menu.js";
+import { createGroupPoster } from "./groupTopics.js";
 import { createNoticeLoop } from "./notices.js";
 import { ANY, applyRoute, chosenText, fromStep, toStep, validArea } from "./route.js";
 import { LOAD_CALLBACKS, LOAD_TEXT, createLoadDesk, loadIntro, resultText } from "./shipperLoads.js";
-import { ADD_GROUP_TEXT, INTAKE, LINK_RE, createSourceIntake, createSourceWatcher, parseSourceLink } from "./userSources.js";
+import { ADD_GROUP_ABOUT, ADD_GROUP_TEXT, INTAKE, LINK_RE, createSourceIntake, createSourceWatcher, parseSourceLink } from "./userSources.js";
 import { applyAction, applyText, describeProfile, newDraft, profileFromDraft, renderStep } from "./wizard.js";
 
 const LOADS_WINDOW_MS = 24 * 60 * 60 * 1000; // "📋 Mos yuklar" / "🚚 Bo'sh mashinalar" — oxirgi 24 soat
@@ -55,8 +56,11 @@ const ABOUT =
   "belgilagan guruhlardan e'lonlarni yo'nalishingiz va transportingizga mos e'lonni shaxsiy xabaringizga yuboramiz.";
 
 // Bot profilidagi matnlar (botni birinchi ochganda "Bu bot nima qila oladi?" o'rnida chiqadi; Telegram cheki — 512 belgi)
-const DESCRIPTION = `🚛 ${NAME} — ${ABOUT}\n\nBoshlash uchun /start ni bosing!`;
-const SHORT_DESCRIPTION = "Yuk beruvchidan haydovchiga — to'g'ridan-to'g'ri. Katta yuk guruhlaridan mos yuklar va bo'sh mashinalar.";
+// Kanal va guruh havolalari (Azimjon, 2026-11-13: «Bot biosigaham kanalimiz va guruh linklarini qo'sh»)
+const LINKS = "📢 Kanal: @Yuk_Ekspert\n💬 Guruh: @Yuk_Ekspert_chat";
+export const DESCRIPTION = `🚛 ${NAME} — ${ABOUT}\n\n${LINKS}\n\nBoshlash uchun /start ni bosing!`;
+// Bot profilidagi qisqa bio («About»; Telegram cheki — 120 belgi)
+export const SHORT_DESCRIPTION = `Yuk beruvchidan haydovchiga — to'g'ridan-to'g'ri.\n${LINKS}`;
 
 // Rolni almashtirishdan oldin (/rol, «🔄 Rolni almashtirish»)
 // Ro'yxatdan o'tishdagi oxirgi qadamdan oldin (forma va raqamdan keyin) — «Qayerdan?» shu matndan keyin keladi
@@ -71,11 +75,18 @@ const ROLE_SWITCH_NOTE ="Har rolning sozlamalari alohida saqlanadi — qaytib ke
 // «forma to'ldirgandan so'ng raqam ulashishdan avval» aytilsin — shu rejim uchun ham raqam ulashsin).
 // Matni — hamma joydagidek bitta jumla (ADD_GROUP_TEXT, userSources.js)
 const GROUP_UNLOCK = ADD_GROUP_TEXT;
+// Raqam so'rovi (Azimjon, 2026-11-13: «modal ichidagi kontentni chiroyli qilsak … ijobiy tarafdagi kontent kerak»).
+// Telegram'ning «Telefon raqamingizni ulashmoqchimisiz?» oynasi matnini o'zgartirib bo'lmaydi — shuning uchun undan
+// OLDIN shu xabar chiqadi: menyudagi «📱 Raqam ulashish» ham endi avval shuni ko'rsatadi, Telegram oynasi — keyingi bosishda.
 const PHONE_WHY =
-  "Raqamingizni ulashsangiz, botni o'chirib qayta yoqsangiz yoki keyin ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi " +
-  "va joyidan davom etaverasiz — qaytadan ro'yxatdan o'tish shart emas.\n\n" +
-  GROUP_UNLOCK +
-  "\n\nRaqamingizni ulashish ixtiyoriy!";
+  "Raqamingizni ulashsangiz:\n" +
+  "✅ Botni o'chirib qayta yoqsangiz ham ma'lumotlaringiz saqlanib qoladi\n" +
+  "✅ Ilovaga kirsangiz — sizni darhol taniymiz, joyidan davom etaverasiz\n" +
+  "✅ Qaytadan ro'yxatdan o'tish shart emas\n" +
+  `✅ «${MENU.addGroup}» ochiladi — ${ADD_GROUP_ABOUT}\n\n` +
+  "🔒 Raqamingiz boshqa foydalanuvchilarga ko'rsatilmaydi. Xohlasangiz, istalgan payt /ochirish bilan o'chirasiz.\n\n" +
+  `👇 Pastdagi «${PHONE.share}» tugmasini bosing — Telegram bir marta tasdiqlashni so'raydi.\n` +
+  "<i>Ulashish ixtiyoriy.</i>";
 
 // Hisob o'chirilgach (bot /ochirish; web'dagi o'chirishda — apps/api public.js DELETED_TEXT, ma'nosi bir xil)
 const ACCOUNT_DELETED_TEXT = "✅ Hisobingiz o'chirildi. Endi sizga hech narsa yuborilmaydi.";
@@ -575,7 +586,7 @@ export function createBot({
     const text = driver.phone
       ? `📱 Sizning raqamingiz: <b>${escapeHtml(formatContactPhone(driver.phone))}</b>\n` +
         `Almashtirish uchun pastdagi «${PHONE.change}», o'chirish uchun «${PHONE.remove}» tugmasini bosing.`
-      : `📱 <b>Telefon raqamingizni ulashasizmi?</b>\n${PHONE_WHY}`;
+      : `📱 <b>Telefon raqamingizni ulashasizmi?</b>\n\n${PHONE_WHY}`;
     await bot.api.sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: phoneKeyboard(Boolean(driver.phone)) });
   }
 
@@ -831,6 +842,9 @@ export function createBot({
   privateChat.command("raqam", (ctx) => askPhone(ctx, rememberUser(ctx)));
   // Eski menyudagi «📱 Raqamim» (2026-11-07 da bir necha daqiqa bor edi). Hozirgi «📱 Raqam ulashish» — kontakt (pastda)
   privateChat.hears(MENU.myPhone, (ctx) => askPhone(ctx, rememberUser(ctx)));
+  // Menyudagi «📱 Raqam ulashish» — endi oddiy tugma: avval afzalliklar (PHONE_WHY), Telegram oynasi — keyingi bosishda
+  // (2026-11-13). Eski menyulardagi request_contact tugmasi kontakt yuboradi — u pastdagi message:contact da saqlanadi
+  privateChat.hears(MENU.phone, (ctx) => askPhone(ctx, rememberUser(ctx)));
 
   // «📱 Raqam ulashish» bosildi (menyuda yoki /raqam da, yoki Mini App'dagi requestContact): Telegram kontakt yuboradi.
   // Faqat O'Z kontaktini saqlaymiz — ilova menyusidan birovning kontaktini ham yuborish mumkin.
@@ -1252,11 +1266,12 @@ export function createBot({
   bot.callbackQuery(/^w:(\w+):(.+)$/, async (ctx) => {
     const [, step, value] = ctx.match;
     const driver = store.getDriver(ctx.chat.id);
-    await ctx.answerCallbackQuery();
     const role = roleOf(driver);
+    const result = role && driver.draft ? applyAction(driver.draft, step, value) : null;
+    await ctx.answerCallbackQuery(result?.notice ? { text: result.notice, show_alert: true } : undefined);
     if (!role) return showStart(ctx);
-    if (!driver.draft) return startWizard(ctx, driver.profile, role);
-    const { draft, saved: done } = applyAction(driver.draft, step, value);
+    if (!result) return startWizard(ctx, driver.profile, role);
+    const { draft, saved: done } = result;
     if (done) {
       await ctx.editMessageText("✅ Javoblar qabul qilindi.");
       await saved(ctx, profileFromDraft(draft), draft.role ?? role);
@@ -1306,7 +1321,13 @@ export function createBot({
   // --- Yuborish (pipeline shularni chaqiradi) ---
   // Kanalda pastki menyu bo'lmaydi, shuning uchun u yerda tugmalar xabar ostida.
   // Faqat CHANNEL_LOADS yoqilganda (standart o'chiq): yuklar haydovchilarga shaxsiy xabarda boradi.
+  // Guruh bo'limlari (GROUP_LOADS): yuk navbatga qo'yiladi, groupTopics.js o'zi sekin-asta yuboradi — bu yerda kutilmaydi
+  const group = config.groupLoads
+    ? createGroupPoster({ api: bot.api, store, chat: config.groupLoads, botUsername: () => bot.botInfo?.username, log })
+    : null;
+
   async function publish(load, post) {
+    group?.push(load, post);
     if (!config.channel || !config.channelLoads) return null;
     const { text, url } = formatLoad(load, post);
     const keyboard = new InlineKeyboard();
@@ -1395,5 +1416,5 @@ export function createBot({
   // notices — server (apps/api) qo'ygan topshiriqlar (xaritada yo'nalish tanlandi): main.js notices.start()
   // sources — foydalanuvchi qo'shgan guruhlar kuzatuvchisi: main.js sources.start()
   // directDone — yuk beruvchiga natija (main.js worker deps.onDirect)
-  return { bot, init, publish, deliver, canReceive, directDone, members, commands, notices, sources };
+  return { bot, init, publish, deliver, canReceive, directDone, members, commands, notices, sources, group };
 }

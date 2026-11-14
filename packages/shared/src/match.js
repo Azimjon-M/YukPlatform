@@ -5,6 +5,7 @@
 // {
 //   vehicle: {
 //     truckClass: "isuzu",                 // TRUCK_CLASS_IDS (katta_isuzu ham "isuzu" yuklarini oladi — truckFamily)
+//     truckClasses: ["isuzu", "labo"],     // faqat bir nechta tanlansa (vehicles.js vehicleClasses); unda kuzov/sig'im/o'lcham yo'q
 //     bodyType: "tent",                    // BODY_TYPE_IDS (ref izotermik yukni ham oladi — BODY_ACCEPTS)
 //     capacityKg: 5000,                    // necha kg ko'taradi
 //     body: { lengthM: 4.85, widthM: 2.15, heightM: 1.95 }, // kuzov ichki o'lchami → kub va palet hisoblanadi
@@ -18,7 +19,7 @@
 //                             // (ikkalasi ham botdagi «📋 Mos yuklar» da tanlanadi, formada emas)
 // }
 import { sameArea } from "./regions.js";
-import { BODY_ACCEPTS, PALLET, TRUCK_CLASSES, bodyId, bodyTypeOf, countsPallets, truckClassOf, truckFamily } from "./vehicles.js";
+import { BODY_ACCEPTS, PALLET, bodyId, bodyTypeOf, countsPallets, truckClassOf, truckFamily, vehicleClasses } from "./vehicles.js";
 import { weightText } from "./loadText.js";
 
 const HOME = "O'zbekiston";
@@ -43,11 +44,14 @@ export function vehiclePallets(vehicle = {}) {
   return Math.max(fit(PALLET.lengthM, PALLET.widthM), fit(PALLET.widthM, PALLET.lengthM));
 }
 
-// Ko'tarish sig'imi, kg: o'zi yozilgan bo'lsa shu, aks holda mashina sinfining eng ko'pi
-export function vehicleCapacityKg(vehicle = {}) {
+// Ko'tarish sig'imi, kg: o'zi yozilgan bo'lsa shu, aks holda mashina sinfining eng ko'pi.
+// Bir nechta transport tanlangan bo'lsa — yukka mos sinflardan (sinf yozilmagan yukda — hammasidan) eng kattasi
+export function vehicleCapacityKg(vehicle = {}, load = null) {
   if (vehicle.capacityKg) return vehicle.capacityKg;
-  const truckClass = TRUCK_CLASSES.find((t) => t.id === vehicle.truckClass);
-  return truckClass ? truckClass.capacityT[1] * 1000 : null;
+  const all = vehicleClasses(vehicle);
+  const fitting = load?.truckClass ? all.filter((id) => truckFamily(id) === truckFamily(load.truckClass)) : [];
+  const tonnes = (fitting.length ? fitting : all).map((id) => truckClassOf(id)?.capacityT[1]).filter((t) => t != null);
+  return tonnes.length ? Math.max(...tonnes) * 1000 : null;
 }
 
 // Yuk xorijga bog'liqmi (qayerdan yoki qayerga O'zbekistondan tashqarida)
@@ -61,7 +65,7 @@ export function isInternational(load) {
 export function loadFitsVehicle(load, vehicle = {}) {
   const reasons = [];
 
-  const capacityKg = vehicleCapacityKg(vehicle);
+  const capacityKg = vehicleCapacityKg(vehicle, load);
   if (load.weightT != null && capacityKg != null && load.weightT * 1000 > capacityKg) {
     reasons.push(`og'irligi ${weightText(load.weightT)}, mashina ${weightText(capacityKg / 1000)} ko'taradi`);
   }
@@ -77,8 +81,10 @@ export function loadFitsVehicle(load, vehicle = {}) {
   }
 
   // Isuzu haydovchisi faqat o'ziga mos yukni ko'rishni xohlaydi: sinf yozilgan bo'lsa, aynan shu sinf.
-  // AI "katta fura" ni ham "fura" deydi — katta fura haydovchisi fura yuklarini oladi, og'irligini yuqorida tekshirdik
-  if (load.truckClass && vehicle.truckClass && truckFamily(load.truckClass) !== truckFamily(vehicle.truckClass)) {
+  // AI "katta fura" ni ham "fura" deydi — katta fura haydovchisi fura yuklarini oladi, og'irligini yuqorida tekshirdik.
+  // Bir nechta transport tanlagan haydovchiga — shulardan birortasiga mos yuk
+  const classes = vehicleClasses(vehicle);
+  if (load.truckClass && classes.length && !classes.some((id) => truckFamily(id) === truckFamily(load.truckClass))) {
     reasons.push(`${truckClassOf(load.truckClass)?.name ?? load.truckClass} kerak`);
   }
 

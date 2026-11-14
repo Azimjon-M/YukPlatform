@@ -89,7 +89,7 @@ test("/start: avval «Iltimos, rolingizni tanlang», keyin haydovchiga birinchi 
 test("tugmalar bilan to'liq ro'yxatdan o'tish va /pauza", async () => {
   const { store, calls, command, press, message } = setup();
   await command("/start");
-  for (const data of ["r:haydovchi", "w:class:isuzu", "w:body:tent", "w:capacity:5", "w:size:std", "w:sides:t.orqa", "w:sides:ok", "w:intl:yoq"]) {
+  for (const data of ["r:haydovchi", "w:class:isuzu", "w:class:ok", "w:body:tent", "w:capacity:5", "w:size:std", "w:sides:t.orqa", "w:sides:ok", "w:intl:yoq"]) {
     await press(data);
   }
   assert.equal(store.getDriver(42).draft.step, "done", "yo'nalish va «qaysi yuklar» savollari yo'q");
@@ -102,7 +102,7 @@ test("tugmalar bilan to'liq ro'yxatdan o'tish va /pauza", async () => {
   assert.equal(driver.profile.routeAt, null);
   // Tartib (Azimjon, 2026-11-10): «Saqlandi» → raqam (ixtiyoriy, bir marta) → javobdan keyin «Qayerdan?»
   assert.equal(texts(calls).at(-2), "✅ Saqlandi.", "sozlamalar ro'yxatisiz — raqam savoli ekrandan chiqib ketmasin");
-  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\nRaqamingizni ulashsangiz, botni o'chirib qayta yoqsangiz/);
+  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\n\nRaqamingizni ulashsangiz:\n✅ Botni o'chirib qayta yoqsangiz/);
   assert.deepEqual(lastMarkup(calls).keyboard.flat().map((b) => b.text), [PHONE.share, PHONE.later]);
   await message(PRIVATE, PHONE.later);
   assert.match(texts(calls).at(-2), /Mayli[\s\S]*«📱 Raqam ulashish» tugmasi[\s\S]*Endi qayerdan qayerga/);
@@ -130,6 +130,7 @@ test("sig'imni matn bilan yozish, noto'g'ri bo'lsa qayta so'raydi", async () => 
   await command("/start");
   await press("r:haydovchi");
   await press("w:class:mini_fura");
+  await press("w:class:ok");
   await press("w:body:tent");
   await message(PRIVATE, "ko'p");
   assert.match(texts(calls).at(-1), /tushunmadim/);
@@ -520,6 +521,7 @@ test("menyu tugmasi savol-javob o'rtasida ham ishlaydi, qoralama qoladi", async 
   await command("/start");
   await press("r:haydovchi");
   await press("w:class:isuzu");
+  await press("w:class:ok");
   await message(PRIVATE, MENU.apps);
   assert.match(texts(calls).at(-1), /Android: tez orada/);
   assert.doesNotMatch(texts(calls).at(-1), /@Yuk_Ekspert/, "yuklar kanalga chiqmaydi — kanalni ko'rsatmaymiz");
@@ -848,12 +850,16 @@ test("raqam: eski foydalanuvchidan /start da bir marta so'raladi; faqat o'z kont
   await command("/start");
   assert.equal(
     texts(calls).at(-1),
-    "📱 <b>Telefon raqamingizni ulashasizmi?</b>\n" +
-      "Raqamingizni ulashsangiz, botni o'chirib qayta yoqsangiz yoki keyin ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi " +
-      "va joyidan davom etaverasiz — qaytadan ro'yxatdan o'tish shart emas.\n\n" +
-      "➕ Guruh qo'shish — siz yuk guruhi yoki kanali qo'sha olasiz va ulardagi mos e'lonlar ham shu yerga keladi.\n\n" +
-      "Raqamingizni ulashish ixtiyoriy!",
-    "Azimjon matni (2026-11-10) + «Guruh qo'shish» faqat raqam ulashganlarga",
+    "📱 <b>Telefon raqamingizni ulashasizmi?</b>\n\n" +
+      "Raqamingizni ulashsangiz:\n" +
+      "✅ Botni o'chirib qayta yoqsangiz ham ma'lumotlaringiz saqlanib qoladi\n" +
+      "✅ Ilovaga kirsangiz — sizni darhol taniymiz, joyidan davom etaverasiz\n" +
+      "✅ Qaytadan ro'yxatdan o'tish shart emas\n" +
+      "✅ «➕ Guruh qo'shish» ochiladi — siz yuk guruhi yoki kanali qo'sha olasiz va ulardagi mos e'lonlar ham shu yerga keladi.\n\n" +
+      "🔒 Raqamingiz boshqa foydalanuvchilarga ko'rsatilmaydi. Xohlasangiz, istalgan payt /ochirish bilan o'chirasiz.\n\n" +
+      "👇 Pastdagi «📱 Raqam ulashish» tugmasini bosing — Telegram bir marta tasdiqlashni so'raydi.\n" +
+      "<i>Ulashish ixtiyoriy.</i>",
+    "afzalliklar ro'yxati (2026-11-13) + «Guruh qo'shish» faqat raqam ulashganlarga",
   );
   const asked = lastMarkup(calls);
   assert.deepEqual(asked.keyboard.flat(), [{ text: PHONE.share, request_contact: true }, { text: PHONE.later }]);
@@ -893,7 +899,7 @@ test("raqam: eski foydalanuvchidan /start da bir marta so'raladi; faqat o'z kont
   assert.equal(store.getDriver(42).phone, null);
   assert.ok(store.getDriver(42).phoneAskedAt > 0);
   assert.match(texts(calls).at(-1), /^✅ Raqamingiz o'chirildi\.\nXohlasangiz, keyin yana ulashasiz — pastdagi «📱 Raqam ulashish» yoki \/raqam\.$/);
-  assert.ok(buttons(lastMarkup(calls)).some((b) => b.text === MENU.phone && b.request_contact));
+  assert.ok(buttons(lastMarkup(calls)).some((b) => b.text === MENU.phone && !b.request_contact));
   await message(PRIVATE, PHONE.remove);
   assert.equal(texts(calls).at(-1), "Sizda saqlangan raqam yo'q.");
   // Raqami yo'q — /raqam oddiy savol: [📱 Raqam ulashish] / [⏭ Keyinroq]
@@ -934,9 +940,12 @@ test("/start matni: bot haqida Azimjon matni, keyin menyu; menyuda «Ilovalar» 
   assert.doesNotMatch(text, /📱 Ilovalar/);
   assert.match(text, /\/ilovalar/);
 
-  // Raqam yo'q — menyudagi tugma bir bosishda raqamni so'raydi (request_contact)
+  // Raqam yo'q — menyudagi tugma oddiy: bosilsa avval afzalliklar, keyin request_contact tugmasi (2026-11-13)
   const phoneButton = buttons(lastMarkup(calls)).find((b) => b.text === MENU.phone);
-  assert.equal(phoneButton.request_contact, true);
+  assert.ok(!phoneButton.request_contact);
+  await message(PRIVATE, MENU.phone);
+  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\n\nRaqamingizni ulashsangiz:/);
+  assert.deepEqual(lastMarkup(calls).keyboard.flat(), [{ text: PHONE.share, request_contact: true }, { text: PHONE.later }]);
   await message(PRIVATE, undefined, contact({ user_id: 42 }));
   assert.equal(store.getDriver(42).phone, "+998901234567");
 
@@ -985,6 +994,7 @@ test("bot tavsifi («Bu bot nima qila oladi?») — Azimjon matni, Telegram chek
     description,
     "🚛 Yuk Eksperti — Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz. Shuningdek, yirik guruhlar " +
       "yoki o'zingiz belgilagan guruhlardan e'lonlarni yo'nalishingiz va transportingizga mos e'lonni shaxsiy xabaringizga yuboramiz.\n\n" +
+      "📢 Kanal: @Yuk_Ekspert\n💬 Guruh: @Yuk_Ekspert_chat\n\n" +
       "Boshlash uchun /start ni bosing!",
   );
   assert.ok(description.length <= 512);
@@ -1255,7 +1265,7 @@ test("web sozlamalarida raqam o'chirildi → bot «Raqamingiz o'chirildi» deb m
   await notices.runOnce();
   assert.equal(texts(calls).at(-1), "✅ Raqamingiz o'chirildi.");
   const menuButtons = buttons(lastMarkup(calls));
-  assert.ok(menuButtons.some((b) => b.text === MENU.phone && b.request_contact), "«➕ Guruh qo'shish» o'rnida yana «📱 Raqam ulashish»");
+  assert.ok(menuButtons.some((b) => b.text === MENU.phone && !b.request_contact), "«➕ Guruh qo'shish» o'rnida yana «📱 Raqam ulashish»");
   assert.ok(!menuButtons.some((b) => b.text === MENU.addGroup));
 
   store.saveDriver(42, { phone: "+998901234567" });
@@ -1593,4 +1603,19 @@ test("/account_qosh: rolsiz — /start; ro'yxatdan o'tmagan haydovchi — avval 
   assert.equal(button.text, "📡 Telegram akkauntni ulash");
   const url = new URL(button.web_app.url);
   assert.deepEqual([url.origin, url.searchParams.get("v"), url.searchParams.get("r"), url.searchParams.has("t")], ["https://yuk.example.uz", "akkaunt", "yuk_beruvchi", false]);
+});
+
+test("bot tavsifi Telegram chegarasiga sig'adi va kanal/guruh havolasi bor", async () => {
+  const { DESCRIPTION, SHORT_DESCRIPTION } = await import("../src/bot.js");
+  assert.ok(DESCRIPTION.length <= 512, `tavsif ${DESCRIPTION.length} belgi`);
+  assert.ok(SHORT_DESCRIPTION.length <= 120, `qisqa bio ${SHORT_DESCRIPTION.length} belgi`);
+  for (const text of [DESCRIPTION, SHORT_DESCRIPTION]) assert.match(text, /@Yuk_Ekspert\n💬 Guruh: @Yuk_Ekspert_chat/);
+});
+
+test("yuk beruvchi menyudagi «📱 Raqam ulashish» ni bossa — yuk emas, raqam afzalliklari chiqadi", async () => {
+  const { store, calls, message } = setup();
+  store.saveDriver(42, { role: "yuk_beruvchi" });
+  await message(PRIVATE, MENU.phone);
+  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\n\nRaqamingizni ulashsangiz:/);
+  assert.deepEqual(lastMarkup(calls).keyboard.flat(), [{ text: PHONE.share, request_contact: true }, { text: PHONE.later }]);
 });

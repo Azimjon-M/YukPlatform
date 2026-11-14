@@ -26,8 +26,9 @@ import {
   capacityUnit,
   classBody,
   formFromProfile,
+  manyClassesPicked,
   profileFromForm,
-  selectClass,
+  toggleClass,
   showSides,
   showSize,
   sizeSummary,
@@ -87,6 +88,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
   const { intl, intlOptions } = useScopeChoices(scope);
   const hasSize = showSize(form);
   const hasSides = showSides(form);
+  const many = manyClassesPicked(form);
   const steps = useMemo(() => driverSteps({ truckClass: form.truckClass, bodyType: form.bodyType }), [form.truckClass, form.bodyType]);
   const stepOfField = useCallback((field) => Math.max(0, steps.findIndex((s) => s.sections.includes(field))), [steps]);
 
@@ -179,26 +181,36 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
       {!online && inTelegram && !canSendData && <div className="notice">{OPEN_FROM_MENU}</div>}
 
       {show("class") && (
-        <Section id="class" title="🚚 Transport turi" error={errorFor("class")}>
+        <Section
+          id="class"
+          title="🚚 Transport turi"
+          hint={
+            many
+              ? "Bir nechta transport belgilandi — kuzov turi va sig'im so'ralmaydi, hammasiga mos yuklar keladi."
+              : "Bir nechtasini belgilash mumkin — masalan: Isuzu, Kichik yuk mashinasi va Labo."
+          }
+          error={errorFor("class")}
+        >
           <Chips
             layout="list"
+            check
             options={CLASS_OPTIONS}
-            selected={(id) => form.truckClass === id}
+            selected={(id) => form.truckClasses.includes(id)}
             onPick={(id) => {
               setProblem(null);
-              setForm((f) => selectClass(f, id));
+              setForm((f) => toggleClass(f, id));
             }}
           />
         </Section>
       )}
 
-      {show("body") && needsBodyType(form.truckClass) && (
+      {show("body") && form.truckClass && needsBodyType(form.truckClass) && (
         <Section id="body" title="📦 Kuzov turi" error={errorFor("body")}>
           <Chips layout="list" options={BODY_OPTIONS} selected={(id) => form.bodyType === id} onPick={(id) => update({ bodyType: id })} />
         </Section>
       )}
 
-      {show("capacity") && (
+      {show("capacity") && !many && (
         <Section id="capacity" title="⚖️ Qancha yuk ko'taradi?" error={errorFor("capacity")}>
           {form.truckClass ? (
             <>

@@ -1310,3 +1310,144 @@ circle.truck-near {
     padding: 14px 16px;
   }
 }
+
+/* «📱 Raqam ulashish» — Telegram oynasidan oldingi afzalliklar oynasi (PhoneCard.jsx PhoneIntro) */
+.phone-intro {
+  width: min(100%, var(--content-max));
+  max-width: 100%;
+  max-height: 92dvh;
+  margin: auto auto 0;
+  padding: 0;
+  border: 0;
+  border-radius: 20px 20px 0 0;
+  background: var(--card);
+  color: var(--text);
+  overflow-y: auto;
+}
+
+.phone-intro[open] {
+  animation: phone-intro-up 0.22s ease-out;
+}
+
+.phone-intro::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+@keyframes phone-intro-up {
+  from {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-intro[open] {
+    animation: none;
+  }
+}
+
+.phone-intro-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 20px calc(20px + env(safe-area-inset-bottom));
+}
+
+.phone-intro-icon {
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  font-size: 32px;
+}
+
+.phone-intro h2 {
+  margin: 0;
+  font-size: 20px;
+  text-align: center;
+}
+
+.phone-intro-lead {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+
+.phone-intro-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.phone-intro-list li {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 8px;
+  line-height: 1.35;
+}
+
+.phone-intro-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--hint);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.phone-intro-go {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.phone-intro-later {
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.phone-intro-foot {
+  margin: 0;
+  color: var(--hint);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* «🔁 Kod kelmadimi?» — kod bosqichida, kod maydonidan oldin */
+.tg-resend {
+  width: 100%;
+  margin: 4px 0 8px;
+}
+
+/* Kodsiz kirish: QR va «Telegram'da tasdiqlash» havolasi */
+.tg-qr {
+  display: block;
+  width: min(240px, 70vw);
+  height: auto;
+  margin: 8px auto 4px;
+  border-radius: 12px;
+}
+
+.tg-link,
+.tg-qr-start {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.tg-or {
+  margin-top: 12px;
+}

@@ -20,6 +20,7 @@ import {
   sanitizeProfile,
   sanitizeShipperProfile,
   vehiclePallets,
+  vehicleClasses,
   vehicleVolumeM3,
 } from "@yuk/shared";
 
@@ -61,8 +62,11 @@ export function formFromProfile(profile) {
   else if (v.body && !sameBody(v.body, standard)) sizeMode = "custom";
   // "Yonidan" formada yo'q: eski profilda bo'lsa — o'ng va chap
   const sides = (v.loadingSides ?? []).flatMap((s) => (s === "yon" ? ["ong", "chap"] : [s])).filter((s) => FORM_SIDES.includes(s));
+  const classes = vehicleClasses(v);
   return {
-    truckClass: v.truckClass,
+    // Bir nechta transport belgilash mumkin (vehicles.js vehicleClasses); truckClass — faqat bittasi belgilanganda
+    truckClasses: [...classes],
+    truckClass: classes.length === 1 ? classes[0] : null,
     bodyType: v.bodyType ? bodyId(v.bodyType) : null,
     capacity: capacityInput(v.capacityKg, capacityUnit(v.truckClass)),
     sizeMode,
@@ -72,23 +76,38 @@ export function formFromProfile(profile) {
   };
 }
 
-// Transport turi o'zgarsa, sig'im va o'lcham qaytadan tanlanadi (Isuzu sig'imi furaga to'g'ri kelmaydi);
+// Faqat shu transport turi. Turi o'zgarsa, sig'im va o'lcham qaytadan tanlanadi (Isuzu sig'imi furaga to'g'ri kelmaydi);
 // yengil mashinada kuzov yo'q
 export function selectClass(form, id) {
-  if (form.truckClass === id) return form;
+  if (form.truckClass === id && form.truckClasses?.length === 1) return form;
+  return withClasses(form, [id]);
+}
+
+// Belgilash / olib tashlash (chekbox). Bir nechta belgilansa — kuzov, sig'im, o'lcham so'ralmaydi
+export function toggleClass(form, id) {
+  return withClasses(form, toggle(form.truckClasses ?? [], id));
+}
+
+function withClasses(form, picked) {
+  const classes = TRUCK_CLASSES.map((t) => t.id).filter((id) => picked.includes(id));
+  const single = classes.length === 1 ? classes[0] : null;
+  const next = { ...form, truckClasses: classes, truckClass: single };
+  if (single === form.truckClass) return next; // bittasi o'sha-o'sha — kiritilganlar qoladi
   return {
-    ...form,
-    truckClass: id,
-    bodyType: needsBodyType(id) ? form.bodyType : null,
+    ...next,
+    bodyType: !single || needsBodyType(single) ? form.bodyType : null,
     capacity: "",
-    sizeMode: classBody(id) ? "std" : "none",
+    sizeMode: classBody(single) ? "std" : "none",
     size: { ...EMPTY_SIZE },
   };
 }
 
-// Kuzov o'lchami va yuklash tomoni so'raladimi (tyagach, sisterna, yengil mashinada — yo'q)
-export const showSize = (form) => needsSize(form.truckClass, form.bodyType);
-export const showSides = (form) => needsSides(form.truckClass, form.bodyType);
+// Bir nechta transport belgilanganmi (unda kuzov turi, sig'im va o'lcham so'ralmaydi)
+export const manyClassesPicked = (form) => (form.truckClasses?.length ?? 0) > 1;
+
+// Kuzov o'lchami va yuklash tomoni so'raladimi (tyagach, sisterna, yengil mashinada, bir nechta transportda — yo'q)
+export const showSize = (form) => Boolean(form.truckClass) && needsSize(form.truckClass, form.bodyType);
+export const showSides = (form) => Boolean(form.truckClass) && needsSides(form.truckClass, form.bodyType);
 
 export function toggle(list, value) {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -124,6 +143,12 @@ function intlFor(id, scope) {
 // → { profile } yoki { error, field } — field: qaysi bo'limga qaytish kerak.
 // Yo'nalish bo'sh ketadi: server (va bot) saqlaganda haydovchining «📋 Mos yuklar» dagi yo'nalishini qoldiradi
 export function profileFromForm(form, scope) {
+  const { intl } = intlFor(form.intl, scope);
+  const common = { fromAreas: [], toAreas: [], domestic: intl.domestic, international: intl.international };
+  if (manyClassesPicked(form)) {
+    const result = sanitizeProfile({ vehicle: { truckClasses: form.truckClasses }, ...common }, { scope });
+    return result.error ? { ...result, field: "class" } : result;
+  }
   if (!form.truckClass) return { error: "Transport turini tanlang", field: "class" };
   if (needsBodyType(form.truckClass) && !form.bodyType) return { error: "Kuzov turini tanlang", field: "body" };
   const unit = capacityUnit(form.truckClass);
@@ -136,7 +161,6 @@ export function profileFromForm(form, scope) {
   if (showSize(form) && form.sizeMode === "custom" && !body) {
     return { error: "Kuzov o'lchamini to'g'ri yozing: uzunligi 1–20, eni 1–3,2, balandligi 0,5–4,5 metr", field: "size" };
   }
-  const { intl } = intlFor(form.intl, scope);
   const result = sanitizeProfile(
     {
       vehicle: {
@@ -147,10 +171,7 @@ export function profileFromForm(form, scope) {
         bodyGuess: Boolean(body) && form.sizeMode === "none",
         loadingSides: showSides(form) ? form.loadingSides : [],
       },
-      fromAreas: [],
-      toAreas: [],
-      domestic: intl.domestic,
-      international: intl.international,
+      ...common,
     },
     { scope },
   );

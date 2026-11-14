@@ -30,8 +30,10 @@
 //   GET  /pub/admin/users      ?q&role — foydalanuvchilar ro'yxati
 //   PATCH /pub/admin/users/:id { role } — rolni almashtirish (faol / pauza — faqat foydalanuvchining o'zi)
 //   GET  /pub/admin/tg-accounts            collector'ning Telegram akkauntlari + davom etayotgan kirish (tgLogin.js)
-//   POST /pub/admin/tg-accounts/login      { name, phone } — yangi akkaunt: Telegram kod yuboradi
+//   POST /pub/admin/tg-accounts/login      { name, phone } — yangi akkaunt: Telegram kod yuboradi;
+//                                          { name, qr: true } — kodsiz: QR / tg://login havolasi (login.qrUrl)
 //   POST /pub/admin/tg-accounts/login/:id/code      { code }
+//   POST /pub/admin/tg-accounts/login/:id/resend    «Kod kelmadi» — SMS / qo'ng'iroq bilan qayta
 //   POST /pub/admin/tg-accounts/login/:id/password  { password } — 2FA bo'lsa
 //   DELETE /pub/admin/tg-accounts/login/:id         bekor qilish / yopish
 //   GET/POST/DELETE /pub/me/tg-accounts…   xuddi shular, lekin istalgan foydalanuvchi — faqat o'z akkauntlari (Sozlamalar)
@@ -655,11 +657,14 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   };
   // Nom + raqam → Telegram kod yuboradi. Javob — kirish holati (step: code | failed …)
   admin.post("/tg-accounts/login", async (req, res) => {
-    res.status(201).json({ login: await needLogin().start({ name: req.body?.name, phone: req.body?.phone, by: req.driver.chatId }) });
+    res.status(201).json({ login: await needLogin().start({ name: req.body?.name, phone: req.body?.phone, by: req.driver.chatId, qr: req.body?.qr === true }) });
   });
   // Kod va 2FA parol: tekshiruv natijasi shu javobda (noto'g'ri bo'lsa — login.error, bosqich o'zgarmaydi)
   admin.post("/tg-accounts/login/:id/code", async (req, res) => {
     res.json({ login: await needLogin().code(req.params.id, req.body?.code) });
+  });
+  admin.post("/tg-accounts/login/:id/resend", async (req, res) => {
+    res.json({ login: await needLogin().resend(req.params.id) });
   });
   admin.post("/tg-accounts/login/:id/password", async (req, res) => {
     res.json({ login: await needLogin().password(req.params.id, req.body?.password) });
@@ -698,11 +703,14 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   });
   // { phone, name? } — name faqat o'z akkauntiga qayta kirish uchun («🔑 Qayta kirish»); yangisiga nomni server beradi
   pub.post("/me/tg-accounts/login", async (req, res) => {
-    const login = await needLogin().start({ name: req.body?.name || null, phone: req.body?.phone, by: mine(req), mine: true });
+    const login = await needLogin().start({ name: req.body?.name || null, phone: req.body?.phone, by: mine(req), mine: true, qr: req.body?.qr === true });
     res.status(201).json({ login });
   });
   pub.post("/me/tg-accounts/login/:id/code", async (req, res) => {
     res.json({ login: await needLogin().code(req.params.id, req.body?.code, mine(req)) });
+  });
+  pub.post("/me/tg-accounts/login/:id/resend", async (req, res) => {
+    res.json({ login: await needLogin().resend(req.params.id, mine(req)) });
   });
   pub.post("/me/tg-accounts/login/:id/password", async (req, res) => {
     res.json({ login: await needLogin().password(req.params.id, req.body?.password, mine(req)) });

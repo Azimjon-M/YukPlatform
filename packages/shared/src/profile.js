@@ -1,12 +1,12 @@
 // Haydovchi profili — bot (chatdagi savol-javob), Mini App (forma) va match.js uchun bitta qoidalar.
 // Mini App'dan kelgan ma'lumotga ishonib bo'lmaydi: sanitizeProfile har bir maydonni ro'yxat va chegaradan o'tkazadi.
-// Profil ko'rinishi: { vehicle: { truckClass, bodyType, capacityKg, body, bodyGuess, loadingSides }, fromAreas, toAreas,
+// Profil ko'rinishi: { vehicle: { truckClass, truckClasses? (bir nechta bo'lsa), bodyType, capacityKg, body, bodyGuess, loadingSides }, fromAreas, toAreas,
 //                      domestic, international, routeAt, mode }
 // Yo'nalish (fromAreas / toAreas) ro'yxatdan o'tishda so'ralmaydi (Azimjon, 2026-11-07: haydovchi har kuni boshqa joyda) —
 // botda «📋 Mos yuklar» bosilganda tanlanadi (routeAt — qachon). Forma saqlaganda eski yo'nalish withRoute bilan qoladi.
 import { COUNTRIES, REGIONS, REGION_IDS } from "./regions.js";
 import { DEFAULT_ROUTE_SCOPE, scopeCountries, validRouteScope } from "./scope.js";
-import { BODY_TYPE_IDS, LOADING_SIDE_IDS, TRUCK_CLASS_IDS, bodyId, needsBodyType } from "./vehicles.js";
+import { BODY_TYPE_IDS, LOADING_SIDE_IDS, TRUCK_CLASS_IDS, bodyId, needsBodyType, vehicleClasses } from "./vehicles.js";
 
 // Sig'im tugmalari, tonna (do'stimiz va Azimjon aytgan odatdagi qiymatlar; 1 t dan kami formada kg bo'lib yoziladi)
 export const CAPACITY_OPTIONS = {
@@ -129,8 +129,22 @@ export function sanitizeBody(body) {
 export function sanitizeProfile(input, { scope } = {}) {
   if (!input || typeof input !== "object") return { error: "Ma'lumot kelmadi" };
   const v = input.vehicle && typeof input.vehicle === "object" ? input.vehicle : {};
-  if (!TRUCK_CLASS_IDS.includes(v.truckClass)) return { error: "Transport turini tanlang" };
-  const hasBody = needsBodyType(v.truckClass); // yengil mashinada kuzov yo'q
+  // Bir nechta transport (vehicles.js vehicleClasses): ro'yxat tartibida, takrorsiz; kuzov va sig'im so'ralmaydi
+  const chosen = new Set(vehicleClasses(v));
+  const classes = TRUCK_CLASS_IDS.filter((id) => chosen.has(id));
+  if (classes.length === 0) return { error: "Transport turini tanlang" };
+  const intlPart = sanitizeIntl(input, scope);
+  if (intlPart.error) return intlPart;
+  if (classes.length > 1) {
+    return {
+      profile: {
+        vehicle: { truckClass: classes[0], truckClasses: classes, bodyType: null, capacityKg: null, body: null, bodyGuess: false, loadingSides: [] },
+        ...intlPart.value,
+      },
+    };
+  }
+  const [truckClass] = classes;
+  const hasBody = needsBodyType(truckClass); // yengil mashinada kuzov yo'q
 
   // "Boshqa" kuzov — match.js uchun "aytilmagan" (null); eski kodlar (bort, tral...) — yangisiga
   const raw = bodyId(v.bodyType);
@@ -146,22 +160,30 @@ export function sanitizeProfile(input, { scope } = {}) {
     if (!body) return { error: "Kuzov o'lchami noto'g'ri (uzunligi 1–20, eni 1–3.2, balandligi 0.5–4.5 m)" };
   }
 
-  const abroad = scope === undefined || scopeCountries(scope).length > 0;
-  const domestic = abroad ? input.domestic !== false : true;
-  const international = abroad && input.international === true;
-  if (!domestic && !international) return { error: "O'zbekiston yoki xalqaro — bittasini tanlang" };
-  const areas = scope === undefined ? AREAS : new Set(areaIds(scope));
-
   return {
     profile: {
       vehicle: {
-        truckClass: v.truckClass,
+        truckClass,
         bodyType,
         capacityKg,
         body,
         bodyGuess: Boolean(body) && v.bodyGuess === true, // «Bilmayman» — odatdagi o'lcham olindi
         loadingSides: hasBody ? pick(v.loadingSides, new Set(LOADING_SIDE_IDS)) : [],
       },
+      ...intlPart.value,
+    },
+  };
+}
+
+// Haydovchi profilining transportdan tashqari qismi: xalqaro, yo'nalish, rejim
+function sanitizeIntl(input, scope) {
+  const abroad = scope === undefined || scopeCountries(scope).length > 0;
+  const domestic = abroad ? input.domestic !== false : true;
+  const international = abroad && input.international === true;
+  if (!domestic && !international) return { error: "O'zbekiston yoki xalqaro — bittasini tanlang" };
+  const areas = scope === undefined ? AREAS : new Set(areaIds(scope));
+  return {
+    value: {
       fromAreas: pick(input.fromAreas, areas),
       toAreas: pick(input.toAreas, areas),
       domestic,
