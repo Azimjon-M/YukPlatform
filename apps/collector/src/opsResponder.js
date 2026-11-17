@@ -23,7 +23,18 @@ const USER_DAILY = Number(process.env.OPS_USER_DAILY) || 20;
 const TG_LIMIT = 4000; // Telegram xabari 4096 belgigacha
 
 // Hamma yo'lakda: sirlar va boshqa odamlarning ma'lumoti (baza, inbox, loglar) o'qilmaydi
+// «Read» ruxsati loyiha papkasidan tashqariga ham yetadi (sinov 2026-11-17: ~/.bashrc o'qildi) — uy papkasi
+// (git token, ~/.claude kirish ma'lumotlari, ssh) va tizim papkalari alohida taqiqlanadi
 const SECRET_DENY = [
+  "Read(~/**)",
+  "Read(//home/**)",
+  "Read(//root/**)",
+  "Read(//etc/**)",
+  "Read(//proc/**)",
+  "Read(//var/**)",
+  "Read(//tmp/**)",
+  "Read(//opt/**)",
+  "Read(//usr/local/sbin/**)",
   "Read(./.env)",
   "Read(./.env.*)",
   "Read(**/*.session)",
