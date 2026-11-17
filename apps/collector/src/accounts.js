@@ -11,6 +11,8 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { MAIN_TG_ACCOUNT } from "@yuk/store";
 import { durationText, runLive, withTimeout } from "./live.js";
+import { createAvatarRefresher } from "./avatars.js";
+import { createMediaQueue } from "./media.js";
 import { normalizeSource } from "./sources.js";
 
 const MINUTE = 60_000;
@@ -42,7 +44,8 @@ export function accountSources(store, account) {
 // Bitta akkaunt: kimligi va guruhlari ro'yxati bazaga, keyin runLive (signal kelguncha yoki xatogacha).
 // telegram — { createReader, listChats, whoAmI } (cli.js telegram.js funksiyalarini beradi, testda — soxtasi).
 // me — oldindan bilinsa (whoAmI qayta so'ralmaydi); sources — berilmasa, bazadan accountSources
-export async function runAccount({ name, client, telegram, store, me = null, sources = null, log = console.log, signal, now = Date.now, dialogsEveryMs = DIALOGS_EVERY_MS, listTimeoutMs = 90_000, ...live }) {
+// connections() — Gemini ulanishlari (ovozli xabar uchun, media.js; cli.js store.aiConnections bilan beradi)
+export async function runAccount({ name, client, telegram, store, me = null, sources = null, log = console.log, signal, now = Date.now, dialogsEveryMs = DIALOGS_EVERY_MS, listTimeoutMs = 90_000, connections = null, ...live }) {
   me ??= await telegram.whoAmI(client);
   store.saveTgAccount(name, { ...me, status: "ok", error: null });
   const main = name === MAIN_TG_ACCOUNT;
@@ -50,6 +53,7 @@ export async function runAccount({ name, client, telegram, store, me = null, sou
   let dialogsAt = -Infinity;
   let shown = null;
   const tick = async () => {
+    avatarTick().catch(() => {});
     const asked = store.dialogsRefreshRequest?.() ?? null;
     const due = now() - dialogsAt >= dialogsEveryMs || (asked != null && asked > dialogsAt && now() - dialogsAt >= MINUTE);
     if (!due) return;
@@ -66,10 +70,16 @@ export async function runAccount({ name, client, telegram, store, me = null, sou
     }
   };
 
+  const reader = telegram.createReader(client);
+  const readSources = sources ?? accountSources(store, name);
+  // Yopiq guruh rasmlari (boshqaruv markazidagi ro'yxat uchun) — sekin, bittadan
+  const avatarTick = createAvatarRefresher({ reader, sources: readSources, log, now });
+  // Ovozli xabar / dumaloq video → matn (Premium bo'lsa Telegram, bo'lmasa Gemini) → odatdagi navbat
+  if (connections) reader.media = createMediaQueue({ reader, store, connections, log, now, compare: process.env.MEDIA_COMPARE === "1" });
   await runLive({
     ...live,
-    sources: sources ?? accountSources(store, name),
-    reader: telegram.createReader(client),
+    sources: readSources,
+    reader,
     store,
     log,
     signal,

@@ -22,8 +22,10 @@ import {
   feedMode,
   feedOf,
   isOwnContact,
+  isPro,
   normalizeContactPhone,
   phoneText,
+  planFilter,
   rawProfile,
   roleOf,
   routeChosen,
@@ -40,8 +42,8 @@ import {
 } from "@yuk/shared";
 import { createCommandSync } from "./commands.js";
 import { profileFromText } from "./driverText.js";
-import { FEED_CALLBACK, GROUP_CALLBACK, feedSavedText, groupStep, modeStep, toggleSource } from "./feed.js";
-import { escapeHtml, formatLoad, formatRaw, formatTruck } from "./format.js";
+import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, feedSavedText, groupStep, modeStep, toggleSource } from "./feed.js";
+import { SENDER_TEXT, escapeHtml, formatLoad, formatRaw, formatTruck } from "./format.js";
 import { IDLE_BUTTONS } from "./idle.js";
 import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
 import { MENU, PHONE, mainMenu, matchesLabel, miniAppUrl, phoneKeyboard, settingsLabel } from "./menu.js";
@@ -126,6 +128,14 @@ const GREETING = "Assalomu alaykum!";
 // Azimjon uni ham shu matnga almashtirdi.
 const INTRO = `🚛 <b>${NAME}</b> — ${ABOUT}`;
 
+// AI yordamchi (2026-11-17, Azimjon: «bot boshida agar botni ishlatishga qiynalsangiz bizni AI ga yozing yordam beradi»):
+// operator akkaunt — unga yozilganda Claude javob beradi, muammoni egasiga tiket qilib yetkazadi (collector opsResponder.js)
+const SUPPORT_USERNAME = (process.env.SUPPORT_USERNAME ?? "YukExperti").replace(/^@/, "");
+const SUPPORT_LINE = SUPPORT_USERNAME
+  ? `🤖 Botdan foydalanishda qiynalsangiz — AI yordamchimiz @${SUPPORT_USERNAME} ga yozing, u yordam beradi.`
+  : null;
+const introLines = () => [INTRO, ...(SUPPORT_LINE ? ["", SUPPORT_LINE] : [])];
+
 // Rol so'rash (ostida ikki tugma: r:haydovchi / r:yuk_beruvchi). Avval «Siz kimsiz?» edi — Azimjon: qo'pol
 const ROLE_QUESTION = "Iltimos, rolingizni tanlang 👇";
 
@@ -160,7 +170,7 @@ function helpText(driver) {
   const role = roleOf(driver);
   if (!role) {
     return [
-      INTRO,
+      ...introLines(),
       "",
       `${ROLES.yuk_beruvchi.icon} Yuk beruvchilarga — yukingizga mos transportlar;`,
       `${ROLES.haydovchi.icon} Haydovchilarga — transportingizga mos yuklar.`,
@@ -203,7 +213,7 @@ function helpText(driver) {
       ]
     : [settingsLine, roleLine];
   return [
-    INTRO,
+    ...introLines(),
     "",
     "<b>Pastdagi menyu:</b>",
     ...loadLine,
@@ -241,8 +251,13 @@ const MAX_CALL_BUTTONS = 3;
 // sahifa esa qo'ng'iroq oynasi ochilishi bilan Mini App'ni o'zi yopadi. web_app faqat shaxsiy chatda ishlaydi — yuklar shu yerda.
 // callUrl(i) — i-raqamning sahifa manzili yoki null (tunnel o'chiq — unda faqat matndagi raqam qoladi).
 // Raqam bitta — ikkala tugma bir qatorda; bir nechta — har raqam o'z tugmasida. → InlineKeyboard yoki null (tugma yo'q)
-export function loadButtons(load, post, callUrl = () => null) {
-  const source = post?.link ? InlineKeyboard.url(SOURCE_BUTTON, post.link) : null;
+// lichka — username'i yo'q odamga «💬 Lichkasi» tugmasi (tg://user?id=, post.senderId) — faqat bot taniydigan odamga
+// (post.senderKnown — botga yozgan, drivers jadvalida): begonasini Telegram BUTTON_USER_INVALID bilan rad etadi.
+// Baribir rad etsa (maxfiylik sozlamasi), sendDirect uni olib tashlab qayta yuboradi (lichka: false)
+export function loadButtons(load, post, callUrl = () => null, { lichka = true } = {}) {
+  // Ovozli xabar / dumaloq video — «🎤 Tinglash» (guruhdagi xabarning o'zi; raqam aytilmagan bo'lsa aloqa ham shu yerda)
+  const label = post?.media === "voice" ? "🎤 Tinglash" : post?.media === "round" ? "📹 Ko'rish" : SOURCE_BUTTON;
+  const source = post?.link ? InlineKeyboard.url(label, post.link) : null;
   const phones = (load.phones ?? []).slice(0, MAX_CALL_BUTTONS);
   const calls = phones
     .map((phone, i) => {
@@ -252,7 +267,12 @@ export function loadButtons(load, post, callUrl = () => null) {
     })
     .filter(Boolean);
   const rows = calls.length <= 1 ? [[source, ...calls].filter(Boolean)] : [...(source ? [[source]] : []), ...calls.map((b) => [b])];
-  return rows[0].length ? InlineKeyboard.from(rows) : null;
+  // Username'i bor odamning lichkasi matnda (format.js senderLine, t.me havola); yo'g'ida — id bo'yicha tugma.
+  // Bot API sinovi (2026-11-16): matndagi tg://user?id havolasini botga yozmagan odam uchun Telegram olib tashlaydi,
+  // tugmani esa qabul qiladi — haydovchining Telegram'i o'sha odamni tanisa (masalan, bir guruhda) ochiladi
+  if (lichka && post?.senderKnown && !post?.sender && /^\d+$/.test(String(post?.senderId ?? ""))) rows.push([InlineKeyboard.url(`💬 ${SENDER_TEXT}`, `tg://user?id=${post.senderId}`)]);
+  const filled = rows.filter((r) => r.length);
+  return filled.length ? InlineKeyboard.from(filled) : null;
 }
 
 // Guruh yoki kanal xabaridan navbat uchun e'lon
@@ -464,7 +484,10 @@ export function createBot({
     if (roleOf(user) === "haydovchi" && !sortedReady(user.profile)) return [];
     const kind = ROLE_KIND[roleOf(user)];
     const matches = KIND_MATCHERS[kind];
-    return store.recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind }).filter((row) => matches(row.load, user.profile ?? {}).ok);
+    const allowed = planFilter(user, store.sourceOwner); // yopiq guruh e'loni — faqat Pro
+    return store
+      .recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind })
+      .filter((row) => allowed(row.post.source) && matches(row.load, user.profile ?? {}).ok);
   }
 
   // Yangi xabar yoki o'sha xabarni o'zgartirish (tugma bosilganda). "message is not modified" — o'sha tugma ikki marta bosildi.
@@ -704,7 +727,9 @@ export function createBot({
   }
 
   async function showGroups(ctx, draft, { edit = false } = {}) {
-    const { text, keyboard, page } = groupStep({ list: store.feedSources(ctx.chat.id), chosen: draft.sources, page: draft.page, mode: draft.mode });
+    const pro = isPro(store.getDriver(ctx.chat.id));
+    const list = store.feedSources(ctx.chat.id, { pro });
+    const { text, keyboard, page } = groupStep({ list, chosen: draft.sources, page: draft.page, mode: draft.mode, kind: draft.kind, pro });
     draft.page = page;
     await render(ctx, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: toKeyboard(keyboard) }, edit);
   }
@@ -1118,7 +1143,7 @@ export function createBot({
       const feed = feedOf(driver?.profile);
       if (roleOf(driver) !== "haydovchi" || !FEED_MODES[feed.mode].groups) return "";
       if (feed.sources.some((name) => name.toLowerCase() === source.name.toLowerCase())) return "";
-      const sources = store.allowedFeedSources(chatId, [...feed.sources, source.name]);
+      const sources = store.allowedFeedSources(chatId, [...feed.sources, source.name], { pro: isPro(driver) });
       if (sources.length === feed.sources.length) return "";
       store.saveDriver(chatId, { profile: { ...driver.profile, feed: { ...feed, sources } } });
       return `\n\n📌 «${MENU.groups}» ga qo'shildi — undagi yuk e'lonlari darhol keladi.`;
@@ -1177,7 +1202,7 @@ export function createBot({
       await ctx.editMessageReplyMarkup().catch(() => {});
       return roleOf(driver) === "haydovchi" ? showModes(ctx, driver) : showStart(ctx);
     }
-    const [, name, page] = ctx.match;
+    const [, name, page, kind] = ctx.match;
     const data = ctx.callbackQuery.data;
     draft.at = Date.now();
     if (data === "fg:back") {
@@ -1185,9 +1210,19 @@ export function createBot({
       feedDrafts.delete(ctx.chat.id);
       return showModes(ctx, driver, { edit: true });
     }
+    if (kind != null) {
+      await ctx.answerCallbackQuery();
+      draft.kind = kind;
+      draft.page = 0;
+      return showGroups(ctx, draft, { edit: true });
+    }
     if (name != null) {
-      // Ro'yxatda (shu odamga ko'rinadigan) bo'lmagan nom — eski tugma
-      if (!store.allowedFeedSources(ctx.chat.id, [name]).length) {
+      // Yopiq guruh, Pro emas — tanlab bo'lmaydi (e'lonlari baribir kelmasdi)
+      const pro = isPro(driver);
+      const item = store.feedSources(ctx.chat.id, { pro }).find((s) => s.name.toLowerCase() === name.toLowerCase());
+      if (item?.locked) return ctx.answerCallbackQuery({ text: CLOSED_PRO_TEXT, show_alert: true });
+      // Ro'yxatda bo'lmagan nom — eski tugma
+      if (!store.allowedFeedSources(ctx.chat.id, [name], { pro }).length) {
         await ctx.answerCallbackQuery({ text: "Bu guruh endi ro'yxatda yo'q" });
         return showGroups(ctx, draft, { edit: true });
       }
@@ -1203,7 +1238,7 @@ export function createBot({
       return showGroups(ctx, draft, { edit: true });
     }
     // fg:ok
-    const sources = store.allowedFeedSources(ctx.chat.id, draft.sources);
+    const sources = store.allowedFeedSources(ctx.chat.id, draft.sources, { pro: isPro(driver) });
     if (!sources.length) return ctx.answerCallbackQuery({ text: "Kamida bitta guruh yoki kanalni tanlang", show_alert: true });
     await ctx.answerCallbackQuery({ text: "✅ Saqlandi" });
     feedDrafts.delete(ctx.chat.id);
@@ -1364,7 +1399,7 @@ export function createBot({
     const input = role === "haydovchi" ? withPrevFeed(data?.profile, driver.profile) : data?.profile;
     let { profile, error } = data?.type === "profile" ? sanitizeProfileFor(role, input, { scope }) : { error: "noma'lum ma'lumot keldi" };
     if (profile?.feed && FEED_MODES[profile.feed.mode].groups) {
-      const sources = store.allowedFeedSources(ctx.chat.id, profile.feed.sources);
+      const sources = store.allowedFeedSources(ctx.chat.id, profile.feed.sources, { pro: isPro(driver) });
       if (sources.length) profile = { ...profile, feed: { ...profile.feed, sources } };
       else error = "tanlangan guruhlar ro'yxatda topilmadi";
     }
@@ -1585,21 +1620,28 @@ export function createBot({
   // menyu bo'ladi — ikkalasi emas. Shuning uchun pastki menyu (Mini App manzili va tokeni bilan) faqat tugmasiz yuk xabarida
   // keladi, qolgan payt — botning har javobida (/start, menyu tugmalari). 2026-11-07 dan 11-09 gacha har yuk menyu bilan borardi.
   // → { ok: true } yoki { ok: false, error } — pipeline buni deliveries ga yozadi (boshqaruv markazi «Olgan yuklari»)
-  async function deliver(chatId, load, post, kind = "yuk", loadId = null) {
-    const buttons = loadButtons(load, post, callUrl(chatId, loadId));
-    return sendDirect(chatId, directText(load, post, kind), buttons);
+  // Yozgan odam bot foydalanuvchisimi (unga «💬 Lichkasi» ID bo'yicha ishlaydi)
+  const withSender = (post) => (post?.senderId && !post.sender ? { ...post, senderKnown: Boolean(store.getDriver(Number(post.senderId))) } : post);
+
+  async function deliver(chatId, load, rawPost, kind = "yuk", loadId = null) {
+    const post = withSender(rawPost);
+    const url = callUrl(chatId, loadId);
+    return sendDirect(chatId, directText(load, post, kind), loadButtons(load, post, url), () => loadButtons(load, post, url, { lichka: false }));
   }
 
   // «⚡ Tezkor» / «📌 Mening guruhlarim» (pipeline.js createWorker deps.deliverRaw): e'lonning ASL matni, AI'siz.
   // Tugmalar yukdagidek: «📄 Asl e'lon» + «📞 Telefon qilish» (raqamlar — e'lon matnidan, @yuk/parser extractPhones)
-  async function deliverRaw(chatId, post, { phones = [] } = {}) {
+  async function deliverRaw(chatId, rawPost, { phones = [] } = {}) {
+    const post = withSender(rawPost);
     const mode = FEED_MODES[feedMode(store.getDriver(chatId)?.profile)];
     const { text } = formatRaw(post, { phones, label: mode.groups ? "📌 Guruhingizdan" : "⚡ Tezkor" });
-    return sendDirect(chatId, text, loadButtons({ phones }, post, rawCallUrl(chatId, post.id)));
+    const url = rawCallUrl(chatId, post.id);
+    return sendDirect(chatId, text, loadButtons({ phones }, post, url), () => loadButtons({ phones }, post, url, { lichka: false }));
   }
 
   // Shaxsiy xabar (yuk yoki tezkor e'lon) — tugmalar bilan, ular yo'q bo'lsa pastki menyu bilan
-  async function sendDirect(chatId, text, buttons) {
+  // fallback() — Telegram tugmalarni rad etsa sinab ko'riladigan ikkinchi to'plam («💬 Lichkasi» siz); faqat kerak bo'lganda quriladi
+  async function sendDirect(chatId, text, buttons, fallback = null) {
     const driver = store.getDriver(chatId);
     const send = (markup) => bot.api.sendMessage(chatId, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup });
     try {
@@ -1608,8 +1650,21 @@ export function createBot({
       } catch (error) {
         // Telegram tugmani qabul qilmasa (400, masalan manzil yaroqsiz) — yuk baribir yetib borsin: tugmalarsiz
         if (!buttons || !(error instanceof GrammyError) || error.error_code !== 400) throw error;
-        log(`Yuk tugmalari qabul qilinmadi (${error.description}) — tugmalarsiz yuborildi`);
-        await send(driver ? menu(driver) : {});
+        let sent = false;
+        const other = fallback?.() ?? null;
+        if (other && JSON.stringify(other) !== JSON.stringify(buttons)) {
+          try {
+            await send({ reply_markup: other });
+            sent = true;
+            log(`«💬 Lichkasi» tugmasi qabul qilinmadi (${error.description}) — usiz yuborildi`);
+          } catch (again) {
+            if (!(again instanceof GrammyError) || again.error_code !== 400) throw again;
+          }
+        }
+        if (!sent) {
+          log(`Yuk tugmalari qabul qilinmadi (${error.description}) — tugmalarsiz yuborildi`);
+          await send(driver ? menu(driver) : {});
+        }
       }
       return { ok: true };
     } catch (error) {

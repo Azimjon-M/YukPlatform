@@ -19,7 +19,24 @@ export function PageHeader({ title, subtitle, actions }) {
   );
 }
 
-export function Card({ title, actions, children, className = "", ...rest }) {
+// collapsible — sarlavhani bosib ochiladigan karta (telefonda uzun sahifani qisqartiradi). hint — yopiqligida sarlavha
+// yonidagi qisqa holat; actions ochilganda kartaning ichida (summary ichidagi tugma kartani ham ochib-yopib yuborardi)
+export function Card({ title, actions, children, className = "", collapsible = false, defaultOpen = false, hint = null, ...rest }) {
+  if (collapsible) {
+    return (
+      <details className={`card card-collapsible ${className}`} open={defaultOpen || undefined} {...rest}>
+        <summary className="card-head">
+          <span className="card-summary">
+            <h2>{title}</h2>
+            {hint && <span className="card-hint">{hint}</span>}
+          </span>
+          <span className="chevron" aria-hidden="true" />
+        </summary>
+        {actions && <div className="card-actions">{actions}</div>}
+        {children}
+      </details>
+    );
+  }
   return (
     <section className={`card ${className}`} {...rest}>
       {(title || actions) && (
@@ -213,18 +230,18 @@ export function Pager({ offset, limit, total, onChange: change }) {
 
 export function Tabs({ tabs, value, onChange, label }) {
   return (
-    <div className="tabs" role="tablist" aria-label={label}>
+    <div className="tabs chips" role="tablist" aria-label={label}>
       {tabs.map((tab) => (
         <button
           key={tab.id}
           type="button"
           role="tab"
           aria-selected={tab.id === value}
-          className={`tab ${tab.id === value ? "is-active" : ""}`}
+          className={`chip ${tab.id === value ? "is-active" : ""}`}
           onClick={() => onChange(tab.id)}
         >
           {tab.label}
-          {tab.count != null && <span className="tab-count">{formatNumber(tab.count)}</span>}
+          {tab.count != null && <span className="chip-count">{formatNumber(tab.count)}</span>}
         </button>
       ))}
     </div>
@@ -285,3 +302,46 @@ export function useTitle(title) {
     document.title = title ? `${title} — Boshqaruv markazi` : "Boshqaruv markazi";
   }, [title]);
 }
+
+// Ixcham akkordeon qatori (Yuklar, Navbat, AI): yopiq — sarlavha, ikkinchi satr va o'ngda qisqa holat;
+// bosilsa — hamma tafsilot. lead — chapdagi kichik belgi (ixtiyoriy). Ro'yxat: <ul className="rows">
+export function ExpandRow({ lead = null, title, sub = null, side = null, children, defaultOpen = false, className = "" }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const id = useId();
+  return (
+    <li className={`row-item ${open ? "is-open" : ""} ${className}`.trim()}>
+      <button type="button" className={`row-head ${lead ? "has-lead" : ""}`} aria-expanded={open} aria-controls={id} onClick={() => setOpen((v) => !v)}>
+        {lead && <span className="row-lead">{lead}</span>}
+        <span className="row-main">
+          <span className="row-title">{title}</span>
+          {sub && <span className="row-sub">{sub}</span>}
+        </span>
+        {side && <span className="row-side">{side}</span>}
+        <span className="chevron" aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="row-body" id={id}>
+          {children}
+        </div>
+      )}
+    </li>
+  );
+}
+
+// Kichik dumaloq rasm (haydovchi profili, guruh/kanal — /api/avatar/..., apps/api avatars.js). Rasm kelguncha va
+// umuman yo'q bo'lsa (404) — bosh harflar. badge — burchakdagi kichik belgi (🔒 yopiq guruh), online — yashil nuqta
+export function Avatar({ src, text, online = false, badge = null, className = "" }) {
+  const [state, setState] = useState("loading"); // loading | ok | none
+  return (
+    <span className={`avatar ${className}`} aria-hidden="true">
+      {state !== "ok" && <span className="avatar-text">{text}</span>}
+      {src && state !== "none" && (
+        <img src={src} alt="" loading="lazy" decoding="async" className={state === "ok" ? "is-loaded" : ""} onLoad={() => setState("ok")} onError={() => setState("none")} />
+      )}
+      {online && <span className="avatar-online" />}
+      {badge && <span className="avatar-badge">{badge}</span>}
+    </span>
+  );
+}
+
+export const avatarUrl = (kind, key) => `/api/avatar/${kind}/${encodeURIComponent(key)}`;

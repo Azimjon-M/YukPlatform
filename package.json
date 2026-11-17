@@ -23,6 +23,7 @@
     "tg:export": "npm run export -w @yuk/collector --",
     "tg:logout": "npm run logout -w @yuk/collector --",
     "tg:live": "npm run live -w @yuk/collector --",
+    "ops": "npm run ops -w @yuk/collector --",
     "bot": "npm run start -w @yuk/bot --",
     "bot:check": "npm run check -w @yuk/bot",
     "web": "npm run dev -w @yuk/web",

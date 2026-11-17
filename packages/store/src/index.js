@@ -5,12 +5,13 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { foldText } from "@yuk/shared";
 import { fileURLToPath } from "node:url";
 import { createAdminQueries } from "./admin.js";
 import { createUserSourceQueries } from "./userSources.js";
 import { userEvents } from "./history.js";
 import { createAiQueries } from "./ai.js";
-import { createTgAccountQueries } from "./tgAccounts.js";
+import { AUTO_PRO_SQL, createTgAccountQueries } from "./tgAccounts.js";
 import { createFeedQueries, migrateFeed } from "./feed.js";
 
 export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR } from "./lock.js";
@@ -22,6 +23,11 @@ export { hashPhone, MAIN_TG_ACCOUNT, TG_ACCOUNT_NAME } from "./tgAccounts.js";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // YUK_DB — boshqa fayl bilan sinash uchun (masalan, YUK_DB=data/sinov.db); yo'l YukPlatform papkasiga nisbatan
 export const DEFAULT_DB_FILE = path.resolve(ROOT, process.env.YUK_DB || path.join("data", "yuk.db"));
+// Profil va guruh rasmlari (boshqaruv markazidagi ro'yxatlar uchun, 2026-11-16): users/<chat id>.jpg, sources/<nom>.jpg.
+// API (apps/api avatars.js) bot orqali oladi, yopiq guruhnikini collector (avatars.js) o'qiydigan akkaunt bilan yuklaydi
+export const AVATAR_DIR = path.join(path.dirname(DEFAULT_DB_FILE), "avatars");
+// Fayl nomi: "@TutGruz" → "@tutgruz", "-1001234" → "-1001234" (boshqa belgilar — tashlanadi)
+export const avatarFileName = (key) => `${String(key).toLowerCase().replace(/[^a-z0-9@_-]/g, "")}.jpg`;
 
 // Takror matnni topish kaliti: harf kattaligi, emoji, tinish belgilari va bo'sh joy farq qilmaydi.
 // Bir xil e'lon boshqa guruhga boshqa emoji bilan tashlansa ham AI'ga ikkinchi marta yuborilmaydi (limit tejaladi).
@@ -221,6 +227,17 @@ function migrate(db) {
   // sender (2026-11-09) — e'lonni guruhga yozgan odamning Telegram username'i, @ siz («💬 Lichkasi» havolasi uchun).
   // NULL — username'i yo'q, kanal nomidan yozilgan, bot yoki eski e'lon
   if (!columns.includes("sender")) db.exec("ALTER TABLE posts ADD COLUMN sender TEXT");
+  // media (2026-11-16) — matn ovozli xabardan (voice) yoki dumaloq videodan (round) o'girilgan (collector media.js). NULL — oddiy matn
+  if (!columns.includes("media")) db.exec("ALTER TABLE posts ADD COLUMN media TEXT");
+  // sender_id (2026-11-16) — yozgan odamning Telegram ID'si: username'i bo'lmasa bot «💬 Lichkasi» ni tg://user?id= bilan beradi
+  if (!columns.includes("sender_id")) db.exec("ALTER TABLE posts ADD COLUMN sender_id TEXT");
+  // Guruh bo'yicha «shu vaqtdan keyin» (trialStats — sinovdagi har guruh, bot har daqiqada va «Manbalar» sahifasi):
+  // indekssiz guruhning hamma e'lonlari aylanardi (~700 ms × 12 guruh = 8 s, 2026-11-16) — indeks bilan ~1 ms.
+  // Birinchi ishga tushishda ~2 s quriladi
+  db.exec("CREATE INDEX IF NOT EXISTS posts_source_created ON posts (source, created_at)");
+  // text_fold (2026-11-16) — qidiruv uchun matn: kichik harf, kirill → lotin, apostrofsiz (@yuk/shared foldText).
+  // Yangi e'londa addPost yozadi; eskilari fonda bo'laklab to'ldiriladi (backfillTextFold, apps/api server.js)
+  if (!columns.includes("text_fold")) db.exec("ALTER TABLE posts ADD COLUMN text_fold TEXT");
   // Yuk beruvchining o'z yuki (2026-11-10, «📦 Yuk berish»): shipper — kim yubordi (chat id), direct — tayyor yuklar (JSON,
   // @yuk/shared shipperLoad.js yoki botdagi erkin matndan tushunilgani). Bunday e'lon AI'ga bormaydi: bot uni darhol mos
   // haydovchilarga yuboradi (apps/bot pipeline.js). source = "shipper:<chat id>", link yo'q
@@ -381,6 +398,7 @@ function driverRow(row) {
     draft: parse(row.draft),
     active: row.active === 1,
     plan: row.plan ?? "free",
+    autoPro: row.auto_pro === 1, // raqam + bog'langan akkaunt (AUTO_PRO_SQL) — roles.js planAllows Pro deb biladi
     isAdmin: row.is_admin === 1,
     phone: row.phone ?? null,
     phoneAt: row.phone_at ?? null,
@@ -443,6 +461,8 @@ function queuedPost(row) {
     queuedAt: row.created_at,
     via: row.via, // live — a'zo bo'lingan guruhdan jonli kelgan (bot uni tezroq AI'ga yuboradi)
     sender: row.sender ?? null, // e'lonni yozgan odamning username'i («💬 Lichkasi»)
+    media: row.media ?? null, // voice | round — matn ovozdan o'girilgan (🎤 / 📹)
+    senderId: row.sender_id ?? null, // yozgan odamning Telegram ID'si (username'siz «💬 Lichkasi» uchun)
     // Yuk beruvchining o'z yuki: kim yubordi va tayyor yuklar (AI'ga bormaydi, bot darhol yuboradi). Oddiy e'londa — null
     shipper: row.shipper ?? null,
     fromShipper: row.shipper != null,
@@ -459,11 +479,13 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
   db.exec(SCHEMA);
   migrate(db);
   migrateFeed(db);
+  // Qidiruv: fold(matn) LIKE fold(so'rov) — kirill/lotin va katta-kichik harf farqi yo'q (@yuk/shared searchText.js)
+  db.function("fold", { deterministic: true }, (value) => (value == null ? null : foldText(value)));
 
   const q = {
     insertPost: db.prepare(
-      `INSERT OR IGNORE INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via, sender)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via, sender, media, sender_id, text_fold)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     recentSameText: db.prepare("SELECT id FROM posts WHERE text_key = ? AND posted_at > ? LIMIT 1"),
     newPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY id LIMIT ?"),
@@ -485,17 +507,17 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, kind, created_at) VALUES (?, ?, ?, ?, ?)"),
     loadDelivery: db.prepare("UPDATE loads SET sent_to = ?, channel_message_id = ? WHERE id = ?"),
     recentLoads: db.prepare(
-      `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at, p.sender, p.shipper
+      `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at, p.sender, p.shipper, p.media, p.sender_id
        FROM loads l JOIN posts p ON p.id = l.post_id
        WHERE l.created_at > ? AND l.kind = ? ORDER BY l.id DESC LIMIT ?`,
     ),
-    getDriver: db.prepare("SELECT * FROM drivers WHERE chat_id = ?"),
+    getDriver: db.prepare(`SELECT *, ${AUTO_PRO_SQL} AS auto_pro FROM drivers WHERE chat_id = ?`),
     insertDriver: db.prepare(
       "INSERT OR IGNORE INTO drivers (chat_id, name, username, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     ),
     // Rolsiz eski yozuv profili bilan — haydovchi (driverRow dagi qoida bilan bir xil)
     activeUsers: db.prepare(
-      `SELECT * FROM drivers WHERE active = 1 AND profile IS NOT NULL AND COALESCE(role, 'haydovchi') = ? AND ${NOT_BANNED}`,
+      `SELECT *, ${AUTO_PRO_SQL} AS auto_pro FROM drivers WHERE active = 1 AND profile IS NOT NULL AND COALESCE(role, 'haydovchi') = ? AND ${NOT_BANNED}`,
     ),
     getCursor: db.prepare("SELECT last_message_id FROM cursors WHERE source = ?"),
     setCursor: db.prepare(
@@ -527,13 +549,41 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.
     // → { id, status } yoki null (bu xabar allaqachon bor). via — live | poll (collector), qolganlari null.
     // sender — e'lonni yozgan odamning username'i, @ siz (@yuk/shared telegramUsername tekshirgan; bo'lmasa null)
-    addPost({ source, messageId, link = null, text, postedAt = now(), via = null, sender = null }, { dedupeWindowMs } = {}) {
+    addPost({ source, messageId, link = null, text, postedAt = now(), via = null, sender = null, media = null, senderId = null }, { dedupeWindowMs } = {}) {
       const key = textKey(text);
       const same = dedupeWindowMs ? q.recentSameText.get(key, postedAt - dedupeWindowMs) : null;
       const status = same ? "duplicate" : "new";
-      const result = q.insertPost.run(source, messageId, link, text, key, postedAt, status, now(), via, sender);
+      const result = q.insertPost.run(source, messageId, link, text, key, postedAt, status, now(), via, sender, media, senderId == null ? null : String(senderId), foldText(text));
       if (result.changes === 0) return null;
       return { id: Number(result.lastInsertRowid), status };
+    },
+
+    // Ovozli xabarning davomi (collector media.js): shu odam bir necha xabarda aytgan (yuk — birida, telefon — keyingisida).
+    // Ikkalasining matni YANGI e'lon bo'lib yoziladi (yangi id — botning tezkor yo'li va qoidaviy parser uni darhol ko'radi),
+    // oldingisi «davomi bilan birlashtirildi» deb yopiladi. Oldingisidan yuk topilib yuborilgan bo'lsa — birlashtirilmaydi.
+    // post — addPost maydonlari (davomi xabarining o'zi); → { id, status } | null
+    mergePost(prevId, post) {
+      const prev = db.prepare("SELECT text, status FROM posts WHERE id = ?").get(prevId);
+      if (!prev || prev.status === "duplicate") return null;
+      if (db.prepare("SELECT 1 FROM loads WHERE post_id = ? LIMIT 1").get(prevId)) return null;
+      const text = `${prev.text}\n${String(post.text).trim()}`;
+      const added = this.addPost({ ...post, text });
+      if (!added) return null;
+      db.prepare("UPDATE posts SET status = 'done', error = ?, done_at = ? WHERE id = ?").run(`Davomi bilan birlashtirildi: #${added.id}`, now(), prevId);
+      return added;
+    },
+
+    // Eski e'lonlarning text_fold ustunini to'ldirish — eng yangisidan, bittada `limit` ta (~5 000 qator ≈ 0,1 s, jarayon
+    // qotmaydi). Qayerga yetgani settings «text_fold_cursor» da. → nechta to'ldirildi (0 — hammasi tayyor)
+    backfillTextFold(limit = 5000) {
+      const key = "text_fold_cursor";
+      let cursor = Number(db.prepare("SELECT value FROM settings WHERE key = ?").get(key)?.value);
+      if (!Number.isFinite(cursor)) cursor = (db.prepare("SELECT MAX(id) AS id FROM posts").get().id ?? 0) + 1;
+      if (cursor <= 1) return 0;
+      const low = Math.max(0, cursor - limit);
+      const changed = db.prepare("UPDATE posts SET text_fold = fold(text) WHERE id >= ? AND id < ? AND text_fold IS NULL").run(low, cursor).changes;
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, String(low));
+      return low > 0 ? Math.max(Number(changed), 1) : Number(changed);
     },
 
     // newest: true — eng yangi joylangan e'lonlar birinchi (bot shunday oladi: navbat to'lib qolsa ham yangi yuk
@@ -563,10 +613,10 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       const source = `shipper:${chatId}`;
       const result = db
         .prepare(
-          `INSERT INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via, sender, shipper, direct)
-           SELECT ?, COALESCE(MAX(message_id), 0) + 1, NULL, ?, ?, ?, 'new', ?, ?, ?, ?, ? FROM posts WHERE source = ?`,
+          `INSERT INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via, sender, shipper, direct, text_fold)
+           SELECT ?, COALESCE(MAX(message_id), 0) + 1, NULL, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ? FROM posts WHERE source = ?`,
         )
-        .run(source, text, textKey(text), time, time, via, sender, chatId, JSON.stringify(loads), source);
+        .run(source, text, textKey(text), time, time, via, sender, chatId, JSON.stringify(loads), foldText(text), source);
       return { id: Number(result.lastInsertRowid) };
     },
 
@@ -650,7 +700,15 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
         id: row.id,
         load: JSON.parse(row.data),
         // source "shipper:<chat id>" ham yashiriladi — null
-        post: { source: row.shipper != null ? null : row.source, link: row.link, postedAt: row.posted_at, sender: row.sender ?? null, fromShipper: row.shipper != null },
+        post: {
+          source: row.shipper != null ? null : row.source,
+          link: row.link,
+          postedAt: row.posted_at,
+          sender: row.sender ?? null,
+          fromShipper: row.shipper != null,
+          media: row.media ?? null,
+          senderId: row.sender_id ?? null,
+        },
         createdAt: row.created_at,
       }));
     },

@@ -27,6 +27,16 @@ export const postedLine = (postedAt) => `🕒 Asl e'lon: ${escapeHtml(postedText
 export const ownerLine = (postedAt) => `✅ Yuk egasining o'zi yubordi · ${escapeHtml(postedText(postedAt))}`;
 const timeLine = (post) => (post.fromShipper ? ownerLine(post.postedAt) : postedLine(post.postedAt));
 
+// Matn ovozli xabardan / dumaloq videodan o'girilgan (collector media.js, 2026-11-16): haydovchi bilsin — so'zlar
+// noto'g'ri eshitilgan bo'lishi mumkin, aniqrog'i asl xabarda (ovozni tinglash)
+export const MEDIA_LINE = { voice: "🎤 Ovozli xabardan (matnga o'girildi)", round: "📹 Dumaloq videodan (matnga o'girildi)" };
+const mediaLine = (post) => MEDIA_LINE[post.media] ?? null;
+// Raqam aytilmagan ovozli e'lon (ochiq guruh): aloqa — guruhdagi xabarning o'zi
+export const VOICE_NO_PHONE = "📞 raqam aytilmagan — xabarni guruhda tinglang va o'sha yerdan yozing";
+export const VOICE_NO_PHONE_ID = "📞 raqam aytilmagan — «💬 Lichkasi» tugmasi orqali yozing";
+// Username'siz, lekin ID bor (bot.js loadButtons «💬 Lichkasi» tugmasi) — lichka orqali; bo'lmasa — guruhdagi xabar
+const voiceNoPhone = (post) => (!post.sender && post.senderId && post.senderKnown ? VOICE_NO_PHONE_ID : post.link ? VOICE_NO_PHONE : null);
+
 // E'lonni guruhga yozgan odamning shaxsiy chati: «💬 Lichkasi» (havola). Username'i yo'q bo'lsa — qator yo'q.
 // t.me havolasi Telegram ichida «Havolani ochish» so'ramasdan darhol o'sha odam bilan chatni ochadi
 export const SENDER_TEXT = "Lichkasi";
@@ -49,9 +59,11 @@ export function formatLoad(load, post = {}) {
   if (load.when) lines.push(`📅 ${escapeHtml(load.when)}`);
   if (load.note) lines.push(`📝 ${escapeHtml(load.note)}`);
   if (load.phones?.length) lines.push(`📞 ${load.phones.map(phoneText).join(", ")}`);
+  else if (post.media && voiceNoPhone(post)) lines.push(voiceNoPhone(post));
   else lines.push("📞 telefon yozilmagan — asl e'lonni oching");
   const sender = senderLine(post.sender);
   if (sender) lines.push(sender);
+  if (mediaLine(post)) lines.push(mediaLine(post));
 
   if (post.postedAt) lines.push(timeLine(post));
 
@@ -68,8 +80,10 @@ export function formatRaw(post, { phones = [], label = "⚡ Tezkor" } = {}) {
   const text = body.length > RAW_TEXT_MAX ? `${body.slice(0, RAW_TEXT_MAX).trimEnd()}…` : body;
   const lines = [escapeHtml(text), ""];
   if (phones.length) lines.push(`📞 ${phones.map(phoneText).join(", ")}`);
+  else if (post.media && !post.sender && voiceNoPhone(post)) lines.push(voiceNoPhone(post));
   const sender = senderLine(post.sender);
   if (sender) lines.push(sender);
+  if (mediaLine(post)) lines.push(mediaLine(post));
   lines.push(`${label}${post.postedAt ? ` · 🕒 ${escapeHtml(postedText(post.postedAt))}` : ""}`);
   return { text: lines.join("\n"), url: post.link ?? null };
 }

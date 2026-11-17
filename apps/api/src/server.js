@@ -42,6 +42,21 @@ if (isDevMode()) {
 }
 
 const store = openStore();
+
+// Qidiruv ustuni (posts.text_fold, kirill/lotin farqisiz) — eski e'lonlar fonda, eng yangisidan, soniyasiga 5 000 tadan
+// to'ldiriladi (2026-11-16; har bo'lak ~0,1 s — server qotmaydi). Tugagach to'xtaydi
+const foldTimer = setInterval(() => {
+  try {
+    if (store.backfillTextFold(5000) === 0) {
+      clearInterval(foldTimer);
+      log("Qidiruv ustuni tayyor: hamma e'lonlar kirill/lotin farqisiz qidiriladi");
+    }
+  } catch (error) {
+    log(`Qidiruv ustunini to'ldirishda xato: ${error.message}`);
+    clearInterval(foldTimer);
+  }
+}, 1000);
+foldTimer.unref();
 // Manbalar jadvali bo'sh bo'lsa — .env dagi TG_SOURCES dan (collector ham shunday qiladi).
 // Bu yerda ham, chunki web'dan birinchi guruh qo'shilsa, jadval bo'sh bo'lmay qoladi va TG_SOURCES unutiladi.
 const seeded = store.seedSources((process.env.TG_SOURCES ?? "").split(/[,\s]+/).map(normalizeSourceName).filter(Boolean));

@@ -13,6 +13,10 @@ const parse = (text) => (text == null ? null : JSON.parse(text));
 // «Boshqa yo'nalish: …» — haqiqiy yuk e'loni, faqat bizning yo'nalishlardan tashqari (pipeline.js handleParsed)
 const IS_LOAD = "(status = 'done' AND (error IS NULL OR error LIKE 'Boshqa yo%'))";
 
+// Yopiq guruh — manba nomi raqamli id (-100…); ochig'i @nomi (@yuk/shared roles.js isClosedSource bilan bir xil)
+const isClosedName = (name) => /^-\d+$/.test(String(name));
+const lowerFirst = (text) => (text ? text[0].toLowerCase() + text.slice(1) : text);
+
 export function userSourceRow(row) {
   if (!row) return null;
   return {
@@ -112,6 +116,17 @@ export function createUserSourceQueries(db, now) {
     // trialMs gacha), aks holda — rad etildi. stats — nechta xabar, nechtasi yuk e'loniga o'xshaydi va h.k. (JSON)
     finishProbe(name, { ok, note = null, stats = null, trialMs = 24 * HOUR }) {
       const time = now();
+      // Yopiq guruh (raqamli id) e'loni kam bo'lsa ham o'chirilmaydi — u yerda istalgan payt e'lon tushishi mumkin
+      // (Azimjon, 2026-11-16). Faqat o'qib bo'lmasa (stats.error: a'zo emas, topilmadi) — rad
+      // Yuk guruhi deb topilgan yopiq guruh — 24 soatlik sinovsiz, darhol doimiy (Azimjon, 2026-11-16)
+      if (isClosedName(name) && (ok || !stats?.error)) {
+        const kept = ok ? note : `Yopiq guruh — e'lon kam bo'lsa ham doim kuzatiladi (${lowerFirst(note ?? "tekshiruv")})`;
+        return (
+          db
+            .prepare("UPDATE sources SET enabled = 1, check_state = 'ok', check_at = ?, check_until = NULL, check_note = ?, check_stats = ? WHERE name = ? AND check_state = 'probe'")
+            .run(time, kept, JSON.stringify({ probe: stats }), name).changes > 0
+        );
+      }
       const sql = ok
         ? "UPDATE sources SET enabled = 1, check_state = 'trial', check_at = ?, check_until = ?, check_note = ?, check_stats = ? WHERE name = ? AND check_state = 'probe'"
         : "UPDATE sources SET enabled = 0, check_state = 'failed', check_at = ?, check_until = ?, check_note = ?, check_stats = ? WHERE name = ? AND check_state = 'probe'";
@@ -150,9 +165,15 @@ export function createUserSourceQueries(db, now) {
 
     // Sinov tugadi: ok → doimiy (yoqilganligi o'zgarmaydi — admin o'chirib qo'ygan bo'lsa, o'chiq qoladi), aks holda o'chiriladi
     finishTrial(name, { ok, note = null, stats = null }) {
+      // ok va note quyida yopiq guruh uchun o'zgarishi mumkin
       const row = byName.get(name);
       if (!row || row.check_state !== "trial") return false;
       const stored = JSON.stringify({ ...(parse(row.check_stats) ?? {}), trial: stats });
+      // Yopiq guruh sinovdan yiqilmaydi — doimiy qoladi (finishProbe dagi kabi)
+      if (!ok && isClosedName(row.name)) {
+        ok = true;
+        note = `Yopiq guruh — e'lon kam bo'lsa ham doim kuzatiladi (${lowerFirst(note ?? "sinov")})`;
+      }
       db.prepare(`UPDATE sources SET ${ok ? "" : "enabled = 0, "}check_state = ?, check_at = ?, check_note = ?, check_stats = ? WHERE name = ?`).run(
         ok ? "ok" : "failed",
         now(),

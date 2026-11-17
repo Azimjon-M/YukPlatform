@@ -108,7 +108,14 @@ export function TgAccountsCard({ state, now }) {
 
   return (
     <Card
-      title="Telegram akkauntlari"
+      title="📡 Telegram akkauntlari"
+      collapsible
+      hint={
+        data
+          ? `${formatNumber(data.accounts.length)} ta akkaunt · ${formatNumber(data.accounts.filter((a) => a.status === "ok").length)} tasi ishlayapti${data.orphans?.length ? " · ⚠ ulanmagan bor" : ""}`
+          : null
+      }
+      defaultOpen={Boolean(stopped || data?.orphans?.length)}
       actions={
         data && (
           <Button onClick={refresh} busy={busy} title="Akkaunt yangi guruhga qo'shilgan bo'lsa">
@@ -199,7 +206,7 @@ export function PrivateGroupPicker({ state, onAdded }) {
   }
 
   return (
-    <Card title="Yopiq guruh qo'shish">
+    <Card title="🔒 Yopiq guruh qo'shish" collapsible hint={`${formatNumber(list.length)} ta guruh qo'shish mumkin`}>
       <p className="muted small">
         Akkauntlar a'zo bo'lgan, hali manba bo'lmagan guruh va kanallar. 🔒 Yopiq — faqat a'zo akkaunt o'qiydi; 🌐 ochig'ini asosiy akkaunt a'zo
         bo'lmasdan ham o'qiydi.

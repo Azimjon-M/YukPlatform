@@ -18,6 +18,13 @@ export function hashPhone(phone) {
   const digits = String(phone ?? "").replace(/\D/g, "");
   return digits ? createHash("sha256").update(`yuk-tg-phone:${digits}`).digest("hex") : null;
 }
+// Avtomatik Pro (Azimjon, 2026-11-16: «kontakt ulashib va accountlarni bog'lash qilgan bo'lsa unga automatic pro ber»):
+// raqamini ulashgan VA Mini App'dan kamida bitta Telegram akkauntini bog'lagan (sessiyasi bekor qilinmagan / dublikat emas).
+// Bazaga yozilmaydi — har safar hisoblanadi: raqamni o'chirsa yoki akkaunt chiqib ketsa, o'zi tushadi.
+// plan ustuni — boshqaruv markazidan qo'lda berilgani
+export const AUTO_PRO_SQL = `(drivers.phone IS NOT NULL AND EXISTS (SELECT 1 FROM tg_accounts t WHERE t.added_by = drivers.chat_id
+  AND COALESCE(t.status, 'ok') NOT IN ('logged_out', 'duplicate')))`;
+
 const REFRESH_KEY = "tg_dialogs_request";
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -174,10 +181,13 @@ export function createTgAccountQueries(db, now) {
       const time = now();
       const existing = db.prepare("SELECT * FROM sources WHERE lower(name) = lower(?)").get(name);
       if (existing && !(existing.auto_scan && existing.check_state === "failed")) return false;
-      const values = [addedBy, title, members, chatType, time, time + trialMs, note, JSON.stringify({ probe: stats }), account];
+      // Yopiq guruh (raqamli id) — sinovsiz, darhol doimiy (judgeClosed o'tkazgan; Azimjon, 2026-11-16)
+      const closed = /^-\d+$/.test(String(name));
+      const state = closed ? "ok" : "trial";
+      const values = [addedBy, title, members, chatType, time, closed ? null : time + trialMs, note, JSON.stringify({ probe: stats }), account];
       if (existing) {
         db.prepare(
-          `UPDATE sources SET enabled = 1, added_by = ?, title = ?, members = ?, chat_type = ?, check_state = 'trial', check_at = ?,
+          `UPDATE sources SET enabled = 1, added_by = ?, title = ?, members = ?, chat_type = ?, check_state = '${state}', check_at = ?,
              check_until = ?, check_note = ?, check_stats = ?, check_notified = NULL, account = ?, auto_scan = 1 WHERE name = ?`,
         ).run(...values, existing.name);
         return true;
@@ -185,7 +195,7 @@ export function createTgAccountQueries(db, now) {
       db.prepare(
         `INSERT INTO sources (added_by, title, members, chat_type, check_at, check_until, check_note, check_stats, account,
            name, enabled, note, created_at, check_state, auto_scan)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 'trial', 1)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, '${state}', 1)`,
       ).run(...values, name, "akkaunt guruhlaridan (Auto scan)", time);
       return true;
     },

@@ -1,3 +1,5 @@
+import { foldText } from "@yuk/shared";
+import { AUTO_PRO_SQL } from "./tgAccounts.js";
 // Boshqaruv markazi (apps/api) uchun so'rovlar: yuklar ro'yxati va filtrlar, navbat, haydovchilar, manbalar, ko'rsatkichlar.
 // Bot va collector bularni ishlatmaydi — ular index.js dagi asosiy funksiyalar bilan ishlaydi.
 
@@ -31,6 +33,7 @@ function postRow(row) {
     parsedBy: row.parsed_by ?? null, // rules — AI'siz qoidaviy parser tushundi, ai — AI, shipper — yuk beruvchining o'zi
     via: row.via ?? null, // yuk beruvchida: bot (oddiy xabar) | web (forma)
     fromShipper: row.shipper != null, // «📦 Yuk berish» — guruhdan emas, yuk egasining o'zi yubordi
+    media: row.media ?? null, // voice | round — matn ovozli xabar / dumaloq videodan o'girilgan
   };
 }
 
@@ -45,7 +48,8 @@ function buildWhere(conditions) {
 }
 
 export function createAdminQueries(db, now) {
-  return {
+  const metricsCache = new Map(); // hours → { at, value } (metrics maxAgeMs)
+  const queries = {
     // --- Yuklar ---
     // filters: from, to (viloyat kodi), truckClass, bodyType, q (matn), hours (oxirgi N soat)
     // → { total, items: [{ id, load, post, createdAt, sentTo, channelMessageId }] } — eng yangisi birinchi
@@ -57,7 +61,9 @@ export function createAdminQueries(db, now) {
         ["json_extract(l.data, '$.toRegion') = ?", to],
         ["json_extract(l.data, '$.truckClass') = ?", truckClass],
         ["json_extract(l.data, '$.bodyType') = ?", bodyType],
-        ["(l.data LIKE ? OR p.text LIKE ?)", q ? `%${q}%` : null],
+        // Kirill/lotin farqisiz (store fold, @yuk/shared foldText): «тошкент» = «Тошкент» = «toshkent»
+        // l.data — AI yozgan lotin joy nomlari (LIKE lotinda katta-kichik harfni farqlamaydi), p.text_fold — e'lon matni
+        ["(l.data LIKE ? OR p.text_fold LIKE ?)", q ? `%${foldText(q)}%` : null],
         ["l.created_at > ?", hours ? now() - Number(hours) * HOUR : null],
       ]);
       const values = params;
@@ -83,11 +89,16 @@ export function createAdminQueries(db, now) {
     },
 
     // --- E'lonlar navbati ---
-    // status: new | done | duplicate | failed (bo'sh — hammasi); q — matn ichida qidirish
+    // status: new | done | duplicate | failed (bo'sh — hammasi); q — matn ichida qidirish (kirill/lotin farqisiz).
+    // Qidiruvda «Hammasi» takrorlarsiz: ular asl e'lonning aynan nusxasi (asli baribir topiladi), bazaning 86 %i —
+    // takrorlar bilan 1,2 mln qator 3 s edi va API'ni band qilardi (2026-11-16). «Takror» bo'limida qidirilsa — oxirgi 24 soat.
+    // Matn — posts.text_fold (kirill → lotin, kichik harf; @yuk/shared foldText)
     listPosts({ status, q, limit, offset } = {}) {
       const { where, params } = buildWhere([
         ["status = ?", status],
-        ["text LIKE ?", q ? `%${q}%` : null],
+        ["status IN ('new', 'done', 'failed', 'skipped')", q && !status ? true : null],
+        ["created_at > ?", q && status === "duplicate" ? now() - 24 * HOUR : null],
+        ["text_fold LIKE ?", q ? `%${foldText(q)}%` : null],
       ]);
       const total = db.prepare(`SELECT COUNT(*) AS n FROM posts ${where}`).get(...params).n;
       const rows = db.prepare(`SELECT * FROM posts ${where} ORDER BY id DESC LIMIT ? OFFSET ?`).all(...params, clampLimit(limit), clampOffset(offset));
@@ -157,7 +168,7 @@ export function createAdminQueries(db, now) {
       );
       const noRaw = { today: 0, total: 0, lastAt: null, called: 0 };
       return db
-        .prepare("SELECT * FROM drivers ORDER BY updated_at DESC")
+        .prepare(`SELECT *, ${AUTO_PRO_SQL} AS auto_pro FROM drivers ORDER BY updated_at DESC`)
         .all()
         .map((row) => ({
           chatId: row.chat_id,
@@ -168,6 +179,7 @@ export function createAdminQueries(db, now) {
           registering: row.profile == null && row.draft != null,
           active: row.active === 1,
           plan: row.plan ?? "free",
+          autoPro: row.auto_pro === 1,
           isAdmin: row.is_admin === 1,
           // O'z raqami (ixtiyoriy). Faqat boshqaruv markazida (localhost) ko'rsatiladi, Mini App'dagi admin ro'yxatida — yo'q
           phone: row.phone ?? null,
@@ -387,108 +399,134 @@ export function createAdminQueries(db, now) {
     // live — jonli kelganlari; delaySec — guruhga yozilganidan navbatga tushguncha o'rtacha soniya
     // (10 daqiqadan ko'p kechikkanlari hisobga olinmaydi: ular collector to'xtab turganda yozilgan eski e'lonlar;
     // jonli e'lon kompyuter soati Telegram'dan orqada bo'lsa manfiy chiqadi (09.11: −2 s) — 0 deb olinadi)
-    sourceStats({ hours = 24 } = {}) {
-      const since = now() - hours * HOUR;
-      const posts = db
-        .prepare(
-          `SELECT source, COUNT(*) AS posts, SUM(status = 'duplicate') AS duplicates, MAX(posted_at) AS last_post_at,
-                  SUM(via = 'live') AS live,
-                  AVG(CASE WHEN created_at - posted_at BETWEEN -60000 AND 600000 THEN MAX(created_at - posted_at, 0) END) AS delay_ms
-           FROM posts WHERE created_at > ? GROUP BY source`,
-        )
-        .all(since);
-      const loads = db
-        .prepare("SELECT p.source, COUNT(*) AS loads FROM loads l JOIN posts p ON p.id = l.post_id WHERE l.created_at > ? AND l.kind = 'yuk' GROUP BY p.source")
-        .all(since);
-      const out = {};
-      for (const row of posts) {
-        out[row.source] = {
-          posts: row.posts,
-          duplicates: row.duplicates ?? 0,
-          loads: 0,
-          lastPostAt: row.last_post_at,
-          live: row.live ?? 0,
-          delaySec: row.delay_ms == null ? null : Math.round(row.delay_ms / 1000),
-        };
-      }
-      for (const row of loads) (out[row.source] ??= { posts: 0, duplicates: 0, loads: 0, lastPostAt: null, live: 0, delaySec: null }).loads = row.loads;
-      return out;
-    },
-
-    // --- Ko'rsatkichlar (bosh sahifa) ---
-    metrics({ hours = 24 } = {}) {
-      const time = now();
-      const since = time - hours * HOUR;
-      const count = (sql, ...params) => db.prepare(sql).get(...params).n;
-      const statuses = Object.fromEntries(db.prepare("SELECT status, COUNT(*) AS n FROM posts GROUP BY status").all().map((r) => [r.status, r.n]));
-
-      // Kechikish: e'lon guruhda chiqqanidan yuk bazaga yozilib yuborilguncha (oxirgi soat), daqiqa
-      const delays = db
-        .prepare("SELECT l.created_at - p.posted_at AS ms FROM loads l JOIN posts p ON p.id = l.post_id WHERE l.created_at > ?")
-        .all(time - HOUR)
-        .map((r) => r.ms);
-      const oldestNew = db.prepare("SELECT MIN(posted_at) AS t FROM posts WHERE status = 'new'").get().t;
-
-      // Soatma-soat: kelgan e'lonlar (takrorsiz), tahlil qilingan e'lonlar, yangi yuklar
-      const bucket = (rows) => {
-        const out = new Array(hours).fill(0);
-        for (const { t, n } of rows) {
-          const index = hours - 1 - Math.floor((time - t) / HOUR);
-          if (index >= 0 && index < hours) out[index] += n;
-        }
-        return out;
-      };
-      const group = (sql) => db.prepare(sql).all(since);
-      const hourly = {
-        posts: bucket(group("SELECT created_at AS t, 1 AS n FROM posts WHERE created_at > ? AND status != 'duplicate'")),
-        processed: bucket(group("SELECT done_at AS t, 1 AS n FROM posts WHERE done_at > ?")),
-        loads: bucket(group("SELECT created_at AS t, 1 AS n FROM loads WHERE created_at > ? AND kind = 'yuk'")),
-      };
-
-      // drivers — haydovchilar (rolsiz eski yozuvlar ham), shippers — yuk beruvchilar
-      const users = (role) =>
-        db
-          .prepare("SELECT COUNT(*) AS total, SUM(active) AS active FROM drivers WHERE profile IS NOT NULL AND COALESCE(role, 'haydovchi') = ?")
-          .get(role);
-      const drivers = users("haydovchi");
-      const shippers = users("yuk_beruvchi");
-      const loadStats = (kind) =>
-        db
-          .prepare("SELECT COUNT(*) AS total, SUM(sent_to > 0) AS delivered, SUM(sent_to) AS messages FROM loads WHERE created_at > ? AND kind = ?")
-          .get(since, kind);
-      const loads = loadStats("yuk");
-      const trucks = loadStats("mashina");
-      return {
-        now: time,
-        hours,
-        queue: {
-          waiting: statuses.new ?? 0,
-          failed: statuses.failed ?? 0,
-          oldestWaitingMin: oldestNew ? Math.round((time - oldestNew) / 60000) : null,
-        },
-        posts: statuses,
-        lastHour: {
-          posts: count("SELECT COUNT(*) AS n FROM posts WHERE created_at > ? AND status != 'duplicate'", time - HOUR),
-          duplicates: count("SELECT COUNT(*) AS n FROM posts WHERE created_at > ? AND status = 'duplicate'", time - HOUR),
-          processed: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ?", time - HOUR),
-          loads: delays.length,
-          medianDelayMin: delays.length ? Math.round((median(delays) / 60000) * 10) / 10 : null,
-        },
-        // Kim tushundi (oxirgi hours soatda tugagan e'lonlar): AI'siz qoidaviy parser yoki AI;
-        // noContact — telefon ham, lichka ham yo'q, shuning uchun hech kim tahlil qilmay yopilganlar (apps/bot pipeline.js NO_CONTACT)
-        parsedBy: {
-          rules: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'rules'", since),
-          ai: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'ai'", since),
-          noContact: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND error LIKE 'Aloqasiz%'", since),
-          // «📦 Yuk berish» — yuk beruvchilarning o'zi yuborgan (botga yozib yoki formadan)
-          shipper: count("SELECT COUNT(*) AS n FROM posts WHERE created_at > ? AND shipper IS NOT NULL", since),
-        },
-        loads: { total: loads.total ?? 0, delivered: loads.delivered ?? 0, messages: loads.messages ?? 0 },
-        trucks: { total: trucks.total ?? 0, delivered: trucks.delivered ?? 0, messages: trucks.messages ?? 0 },
-        drivers: { total: drivers.total ?? 0, active: drivers.active ?? 0 },
-        shippers: { total: shippers.total ?? 0, active: shippers.active ?? 0 },
-        hourly,
-      };
+    // maxAgeMs — metrics kabi: shuncha yangi hisob bo'lsa, o'shani qaytaradi (posts bo'yicha 24 soat — ~0,4 s)
+    sourceStats({ hours = 24, maxAgeMs = 0 } = {}) {
+      const key = `sources:${hours}`;
+      const cached = metricsCache.get(key);
+      if (maxAgeMs > 0 && cached && now() - cached.at < maxAgeMs) return cached.value;
+      const value = computeSourceStats(hours);
+      metricsCache.set(key, { at: now(), value });
+      return value;
     },
   };
+
+  function computeSourceStats(hours) {
+    const since = now() - hours * HOUR;
+    const posts = db
+      .prepare(
+        `SELECT source, COUNT(*) AS posts, SUM(status = 'duplicate') AS duplicates, MAX(posted_at) AS last_post_at,
+                SUM(via = 'live') AS live,
+                AVG(CASE WHEN created_at - posted_at BETWEEN -60000 AND 600000 THEN MAX(created_at - posted_at, 0) END) AS delay_ms
+         FROM posts INDEXED BY posts_created WHERE created_at > ? GROUP BY source`,
+      )
+      .all(since);
+    const loads = db
+      .prepare("SELECT p.source, COUNT(*) AS loads FROM loads l JOIN posts p ON p.id = l.post_id WHERE l.created_at > ? AND l.kind = 'yuk' GROUP BY p.source")
+      .all(since);
+    const out = {};
+    for (const row of posts) {
+      out[row.source] = {
+        posts: row.posts,
+        duplicates: row.duplicates ?? 0,
+        loads: 0,
+        lastPostAt: row.last_post_at,
+        live: row.live ?? 0,
+        delaySec: row.delay_ms == null ? null : Math.round(row.delay_ms / 1000),
+      };
+    }
+    for (const row of loads) (out[row.source] ??= { posts: 0, duplicates: 0, loads: 0, lastPostAt: null, live: 0, delaySec: null }).loads = row.loads;
+    return out;
+  }
+
+  const cachedQueries = {
+    // --- Ko'rsatkichlar (bosh sahifa) ---
+    // maxAgeMs — shuncha yangi hisob bo'lsa, o'shani qaytaradi (2026-11-16: posts million qator, bitta hisob ~0,5–1,5 s;
+    // boshqaruv markazi ochiq turganda har o'zgarishda so'ralib, API jarayoni qotib qoldi — yuk.gtpro.uz javob bermadi)
+    metrics({ hours = 24, maxAgeMs = 0 } = {}) {
+      const cached = metricsCache.get(hours);
+      if (maxAgeMs > 0 && cached && now() - cached.at < maxAgeMs) return cached.value;
+      const value = computeMetrics(hours);
+      metricsCache.set(hours, { at: now(), value });
+      return value;
+    },
+  };
+
+  function computeMetrics(hours) {
+    const time = now();
+    const since = time - hours * HOUR;
+    const count = (sql, ...params) => db.prepare(sql).get(...params).n;
+    const statuses = Object.fromEntries(db.prepare("SELECT status, COUNT(*) AS n FROM posts GROUP BY status").all().map((r) => [r.status, r.n]));
+
+    // Kechikish: e'lon guruhda chiqqanidan yuk bazaga yozilib yuborilguncha (oxirgi soat), daqiqa
+    const delays = db
+      .prepare("SELECT l.created_at - p.posted_at AS ms FROM loads l JOIN posts p ON p.id = l.post_id WHERE l.created_at > ?")
+      .all(time - HOUR)
+      .map((r) => r.ms);
+    const oldestNew = db.prepare("SELECT MIN(posted_at) AS t FROM posts WHERE status = 'new'").get().t;
+
+    // Soatma-soat: kelgan e'lonlar (takrorsiz), tahlil qilingan e'lonlar, yangi yuklar
+    const bucket = (rows) => {
+      const out = new Array(hours).fill(0);
+      for (const { t, n } of rows) {
+        const index = hours - 1 - Math.floor((time - t) / HOUR);
+        if (index >= 0 && index < hours) out[index] += n;
+      }
+      return out;
+    };
+    const group = (sql) => db.prepare(sql).all(since);
+    const hourly = {
+      posts: bucket(group("SELECT created_at AS t, 1 AS n FROM posts WHERE created_at > ? AND status != 'duplicate'")),
+      processed: bucket(group("SELECT done_at AS t, 1 AS n FROM posts WHERE done_at > ?")),
+      loads: bucket(group("SELECT created_at AS t, 1 AS n FROM loads WHERE created_at > ? AND kind = 'yuk'")),
+    };
+
+    // drivers — haydovchilar (rolsiz eski yozuvlar ham), shippers — yuk beruvchilar
+    const users = (role) =>
+      db
+        .prepare("SELECT COUNT(*) AS total, SUM(active) AS active FROM drivers WHERE profile IS NOT NULL AND COALESCE(role, 'haydovchi') = ?")
+        .get(role);
+    const drivers = users("haydovchi");
+    const shippers = users("yuk_beruvchi");
+    const loadStats = (kind) =>
+      db
+        .prepare("SELECT COUNT(*) AS total, SUM(sent_to > 0) AS delivered, SUM(sent_to) AS messages FROM loads WHERE created_at > ? AND kind = ?")
+        .get(since, kind);
+    const loads = loadStats("yuk");
+    const trucks = loadStats("mashina");
+    return {
+      now: time,
+      hours,
+      queue: {
+        waiting: statuses.new ?? 0,
+        failed: statuses.failed ?? 0,
+        oldestWaitingMin: oldestNew ? Math.round((time - oldestNew) / 60000) : null,
+      },
+      posts: statuses,
+      lastHour: {
+        // INDEXED BY posts_created: aks holda SQLite posts_status ni tanlab, million qatorli 'duplicate' ro'yxatini
+        // aylanardi (2026-11-16: 890 ms, boshqaruv markazi ochiq turganda API qotib qoldi)
+        posts: count("SELECT COUNT(*) AS n FROM posts INDEXED BY posts_created WHERE created_at > ? AND status != 'duplicate'", time - HOUR),
+        duplicates: count("SELECT COUNT(*) AS n FROM posts INDEXED BY posts_created WHERE created_at > ? AND status = 'duplicate'", time - HOUR),
+        processed: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ?", time - HOUR),
+        loads: delays.length,
+        medianDelayMin: delays.length ? Math.round((median(delays) / 60000) * 10) / 10 : null,
+      },
+      // Kim tushundi (oxirgi hours soatda tugagan e'lonlar): AI'siz qoidaviy parser yoki AI;
+      // noContact — telefon ham, lichka ham yo'q, shuning uchun hech kim tahlil qilmay yopilganlar (apps/bot pipeline.js NO_CONTACT)
+      parsedBy: {
+        rules: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'rules'", since),
+        ai: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'ai'", since),
+        noContact: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND error LIKE 'Aloqasiz%'", since),
+        // «📦 Yuk berish» — yuk beruvchilarning o'zi yuborgan (botga yozib yoki formadan)
+        shipper: count("SELECT COUNT(*) AS n FROM posts WHERE created_at > ? AND shipper IS NOT NULL", since),
+      },
+      loads: { total: loads.total ?? 0, delivered: loads.delivered ?? 0, messages: loads.messages ?? 0 },
+      trucks: { total: trucks.total ?? 0, delivered: trucks.delivered ?? 0, messages: trucks.messages ?? 0 },
+      drivers: { total: drivers.total ?? 0, active: drivers.active ?? 0 },
+      shippers: { total: shippers.total ?? 0, active: shippers.active ?? 0 },
+      hourly,
+    };
+  }
+
+  return { ...queries, ...cachedQueries };
 }

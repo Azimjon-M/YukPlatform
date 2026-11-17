@@ -8,7 +8,7 @@ import { formatNumber, formatTime } from "../format.js";
 import { useApi, useNow } from "../hooks.js";
 import { useOverview } from "../overview.js";
 import { processStatus } from "../status.js";
-import { Async, Badge, Button, Card, Empty, ErrorBox, ExternalLink, Field, PageHeader, TimeAgo, Toggle, useTitle, useToast } from "../ui.jsx";
+import { Async, Badge, Button, Card, Empty, ErrorBox, ExpandRow, ExternalLink, Field, PageHeader, TimeAgo, Toggle, useTitle, useToast } from "../ui.jsx";
 
 const TEST_HINT = "Bitta haqiqiy so'rov yuboriladi: kunlik bepul limitdan 1 tasi sarflanadi";
 // GET /api/ai → 404: server bu bo'limdan oldingi kod bilan ishga tushirilgan
@@ -54,20 +54,22 @@ function ModelRow({ apiKey, slot, now, botRunning, onRemove, removing, canRemove
     }
   }
 
+  const tagTone = status.tone === "good" ? "is-good" : status.tone === "critical" || status.tone === "serious" ? "is-critical" : "";
   return (
-    <li className={`model-row ${health ? "is-problem" : ""}`}>
-      <div className="model-line">
-        <code className="model-name">{slot.model}</code>
-        <Badge tone={status.tone} icon={status.icon}>
-          {status.label}
-        </Badge>
-        {health && (
-          <Badge tone="critical" icon="📌" title={health.error ? `Belgilangan paytdagi xato: ${health.error}` : undefined}>
-            {health.label}
-          </Badge>
-        )}
-        {status.detail && status.kind !== "problem" && <span className="model-detail">{status.detail}</span>}
-      </div>
+    <ExpandRow
+      className={health ? "is-problem" : ""}
+      title={<code className="model-name">{slot.model}</code>}
+      sub={todayText(stats)}
+      side={
+        <>
+          <span className={`mini-tag ${tagTone}`}>
+            {status.icon} {status.label}
+          </span>
+          {health && <span className="mini-tag is-critical">📌 {health.label}</span>}
+        </>
+      }
+    >
+      {status.detail && status.kind !== "problem" && <p className="model-detail small">{status.detail}</p>}
       {health && (
         <p className="model-problem small">
           {health.detail}
@@ -114,7 +116,7 @@ function ModelRow({ apiKey, slot, now, botRunning, onRemove, removing, canRemove
           <strong>{result.title}</strong> {result.text}
         </p>
       )}
-    </li>
+    </ExpandRow>
   );
 }
 
@@ -313,7 +315,7 @@ function KeyCard({ apiKey, provider, now, botRunning, reload }) {
         </div>
       )}
 
-      <ul className="model-list" aria-label="Modellar">
+      <ul className="rows model-rows" aria-label="Modellar">
         {sortSlots(apiKey.models, now).map((slot) => (
           <ModelRow
             key={slot.model}
@@ -666,7 +668,7 @@ export function AiPage() {
                 )}
                 <p className="muted small">«Sinash» — bitta haqiqiy so'rov (kunlik bepul limitdan 1 tasi sarflanadi). «Model qo'shish» va «Tekshirish» limit sarflamaydi.</p>
 
-                <Card title="Kalit qo'shish">
+                <Card title="➕ Kalit qo'shish" collapsible hint="Gemini, 1pro yoki Claude kaliti + model">
                   <AddKeyForm providers={providers} onAdded={state.reload} />
                   <div className="notice tone-warning">
                     <span aria-hidden="true">!</span>

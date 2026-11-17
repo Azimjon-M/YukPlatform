@@ -334,12 +334,50 @@ async function resolveEntity(client, source) {
   throw new Error(`id ${source.value} topilmadi: akkaunt bu chatga a'zo emas (npm run tg:dialogs)`);
 }
 
+// --- Ovozli xabar va dumaloq video (2026-11-16, Azimjon: «audio va telegramni dumaloq videoni chek qilib u e'lon va
+// e'lon emasligini check qilamiz … juda tez») ---
+// GramJS xabari → { kind: "voice" | "round", duration (s), size (bayt), mime } yoki null (boshqa media / matn)
+export function mediaOf(message) {
+  const doc = message?.media instanceof Api.MessageMediaDocument ? message.media.document : null;
+  if (!(doc instanceof Api.Document)) return null;
+  for (const attr of doc.attributes ?? []) {
+    if (attr instanceof Api.DocumentAttributeAudio && attr.voice) return { kind: "voice", duration: attr.duration ?? 0, size: Number(doc.size ?? 0), mime: doc.mimeType || "audio/ogg" };
+    if (attr instanceof Api.DocumentAttributeVideo && attr.roundMessage) return { kind: "round", duration: Math.round(attr.duration ?? 0), size: Number(doc.size ?? 0), mime: doc.mimeType || "video/mp4" };
+  }
+  return null;
+}
+
+function senderIdOf(m) {
+  const user = m.sender;
+  if (user?.className !== "User" || user.bot || user.deleted || m.senderId == null) return null;
+  return String(m.senderId);
+}
+
+// live.js uchun oddiy obyekt: matn, yozgan odam va (bo'lsa) media. raw — GramJS xabarining o'zi (yuklab olish uchun),
+// sanab chiqilmaydi (JSON / deepEqual'ga tushmaydi)
+function plainMessage(m) {
+  const media = mediaOf(m);
+  const out = { id: m.id, text: m.message ?? "", date: m.date, sender: m.message || media ? senderUsername(m.sender) : null };
+  // Yozgan odamning Telegram ID'si (faqat oddiy odam: kanal nomidan, bot, o'chirilgan akkaunt — yo'q). Username'i bo'lmasa,
+  // bot «💬 Lichkasi» tugmasini tg://user?id= bilan beradi; bir odamning ketma-ket ovozli xabarlari ham shu bilan birlashadi
+  out.senderId = senderIdOf(m);
+  if (media) {
+    out.media = media;
+    Object.defineProperty(out, "raw", { value: m, enumerable: false });
+  }
+  return out;
+}
+
+const TRANSCRIBE_POLL_MS = 1_500;
+const TRANSCRIBE_WAIT_MS = 25_000;
+
 // Jonli rejim (live.js) uchun o'quvchi. Guruh manzili bir marta aniqlanadi va eslab qolinadi:
 // Telegram manzil bo'yicha qidirishni (resolveUsername) qattiq cheklaydi, har daqiqada so'rash mumkin emas.
 export function createReader(client) {
   const entities = new Map(); // source.value → guruh (Api.Channel / Api.Chat)
   const byPeer = new Map(); // "-100123…" → source: jonli xabar qaysi manbaga tegishli
   const freshStats = () => ({ updates: 0, messages: 0, matched: 0, types: {}, bySource: {} });
+  let premium;
   const stats = freshStats();
   async function entityOf(source) {
     if (!entities.has(source.value)) {
@@ -359,7 +397,39 @@ export function createReader(client) {
     // Matnsiz xabarlar (izohsiz rasm, xizmat xabari) ham qaytadi — text "" : e'lon emas, lekin kursor ulardan o'tadi
     async since(source, minId, limit = 200) {
       const messages = await client.getMessages(await entityOf(source), { minId, limit });
-      return messages.map((m) => ({ id: m.id, text: m.message ?? "", date: m.date, sender: m.message ? senderUsername(m.sender) : null })).reverse();
+      return messages.map(plainMessage).reverse();
+    },
+
+    // Akkaunt Telegram Premium'mi (ovozni Telegram'ning o'zi matnga o'giradi) — bir marta so'raladi
+    async isPremium() {
+      if (premium === undefined) premium = Boolean((await client.getMe())?.premium);
+      return premium;
+    },
+
+    // Telegram Premium: ovozli xabar / dumaloq videoni matnga (messages.transcribeAudio). Javob «pending» bo'lsa —
+    // o'sha so'rov qayta yuboriladi (Telegram tayyor matnni qaytaradi), ko'pi bilan 25 s. → matn | null
+    async transcribe(source, messageId, { pollMs = TRANSCRIBE_POLL_MS, waitMs = TRANSCRIBE_WAIT_MS } = {}) {
+      const peer = await entityOf(source);
+      const started = Date.now();
+      for (;;) {
+        const result = await client.invoke(new Api.messages.TranscribeAudio({ peer, msgId: messageId }));
+        if (!result.pending) return (result.text ?? "").trim() || null;
+        if (Date.now() - started + pollMs > waitMs) return null;
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+    },
+
+    // Guruh/kanalning kichik rasmi (yopiq guruhlar uchun — bot ko'ra olmaydi; avatars.js) → Buffer | null
+    async photo(source) {
+      const entity = await entityOf(source);
+      if (!entity?.photo || entity.photo instanceof Api.ChatPhotoEmpty) return null;
+      const data = await client.downloadProfilePhoto(entity, { isBig: false });
+      return data?.length ? Buffer.from(data) : null;
+    },
+
+    // Faylni yuklab olish (Gemini uchun). raw — plainMessage().raw → Buffer
+    async download(raw) {
+      return client.downloadMedia(raw, {});
     },
 
     // Yopiq guruhning taklif havolasi (t.me/+hash) — qaysi guruh va akkaunt unga a'zomi (messages.checkChatInvite,
@@ -442,7 +512,7 @@ export function createReader(client) {
       const event = new NewMessage({});
       const handler = (update) => {
         const message = update.message;
-        if (!message?.message || !message.peerId) return;
+        if (!message?.peerId || !(message.message || mediaOf(message))) return;
         stats.messages++;
         let peer;
         try {
@@ -454,7 +524,7 @@ export function createReader(client) {
         if (!source) return;
         stats.matched++;
         // Jonli update'da ham yozgan odam update'ning o'zida keladi (message.sender), getSender() tarmoqqa chiqmaydi
-        onMessage(source, { id: message.id, text: message.message, date: message.date, sender: senderUsername(message.sender) });
+        onMessage(source, plainMessage(message));
       };
       // Tashxis uchun: Telegram umuman nima yuboryapti (turi bo'yicha sanaymiz, mazmuniga qaramaymiz)
       const raw = (update) => {

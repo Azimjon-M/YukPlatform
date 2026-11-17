@@ -16,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { EXIT_CONFIG, devCollectorProblem } from "@yuk/shared";
-import { acquireRunLock, openStore } from "@yuk/store";
+import { acquireRunLock, loadSecret, openStore } from "@yuk/store";
 import { accountSources, accountTitle, runAccount, superviseAccounts } from "./accounts.js";
 import { sourceLabel } from "./live.js";
 import { ask } from "./prompt.js";
@@ -215,6 +215,7 @@ async function cmdLive() {
   process.on("message", (message) => message === "stop" && controller.abort());
   const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
   const log = (message) => console.log(`[${time()}] ${message}`);
+  const aiAccess = { secret: loadSecret(), env: process.env };
   const live = {
     intervalMs,
     budgetPerMin,
@@ -222,6 +223,9 @@ async function cmdLive() {
     // Bot aloqasiz e'lonni yubormaydi — foydalanuvchi qo'shgan guruhni tekshirishda ham ular sanalmaydi (REQUIRE_CONTACT=0 — sanaladi)
     requireContact: !/^(0|yo'q|yoq|no|false|off)$/i.test(process.env.REQUIRE_CONTACT?.trim() ?? ""),
     // «🔎 Auto scan» (live.js scanNext): o'zimizning kanal va majburiy a'zolik guruhlari tekshirilmaydi
+    // Ovozli xabar / dumaloq video uchun Gemini ulanishlari (media.js) — boshqaruv markazidagi AI kalitlari, har safar yangidan.
+    // MEDIA=0 — o'chiq (ovozli xabarlar avvalgidek tashlanadi)
+    connections: /^(0|yo'q|yoq|no|false|off)$/i.test(process.env.MEDIA?.trim() ?? "") ? null : () => store.aiConnections(aiAccess),
     scanExclude: [process.env.CHANNEL_ID, ...String(process.env.REQUIRED_CHATS ?? "").split(/[,\s]+/)].map((x) => String(x ?? "").trim()).filter((x) => /^(@\w+|-?\d+)$/.test(x)),
   };
 

@@ -16,7 +16,7 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { DEFAULT_DEDUPE_WINDOW_MS, telegramUsername } from "@yuk/shared";
 import { MAIN_TG_ACCOUNT } from "@yuk/store";
-import { MISSING_ERROR, PROBE, judgeProbe } from "./probe.js";
+import { CLOSED_PROBE, MISSING_ERROR, PROBE, judgeClosed, judgeProbe } from "./probe.js";
 import { cleanText } from "./samples.js";
 
 const MINUTE = 60_000;
@@ -49,8 +49,9 @@ export async function pollSource(source, reader, store, { minLength = 20, backfi
   const messages = await reader.since(source, cursor);
   for (const message of messages) {
     cursor = Math.max(cursor, message.id);
-    const result = addMessage(source, message, store, { minLength, dedupeWindowMs, via: "poll" });
+    const result = addMessage(source, message, store, { minLength, dedupeWindowMs, via: "poll", media: reader.media });
     if (result === "short") counts.short++;
+    else if (result === "media") counts.media = (counts.media ?? 0) + 1;
     else if (result) counts[result.status === "duplicate" ? "duplicate" : "added"]++;
     // null — bu xabar allaqachon bor (jonli kelgan yoki bot ham shu guruhdan olgan)
   }
@@ -61,12 +62,20 @@ export async function pollSource(source, reader, store, { minLength = 20, backfi
 // Bitta xabarni navbatga yozadi (so'rab olingan ham, jonli kelgan ham shu yerdan o'tadi).
 // → { id, status } | "short" (e'lon uchun juda qisqa yoki matnsiz) | null (allaqachon bor)
 // message.sender — yozgan odamning username'i (senderUsername), bo'lmasa null
-export function addMessage(source, message, store, { minLength = 20, dedupeWindowMs = DEFAULT_DEDUPE_WINDOW_MS, via = null } = {}) {
+// media — media.js createMediaQueue (reader.media): matnsiz ovozli xabar / dumaloq video matnga o'girilish navbatiga
+// ketadi va keyin o'zi posts'ga yoziladi → "media"
+export function addMessage(source, message, store, { minLength = 20, dedupeWindowMs = DEFAULT_DEDUPE_WINDOW_MS, via = null, media = null } = {}) {
   const text = cleanText(message.text ?? "");
-  if (text.length < minLength) return "short";
   const link = source.kind === "username" ? `https://t.me/${source.value}/${message.id}` : null;
+  if (text.length < minLength) {
+    if (message.media && media) return media.push({ source, label: sourceLabel(source), link, message, via, dedupeWindowMs }) ? "media" : "short";
+    return "short";
+  }
   const sender = telegramUsername(message.sender);
-  return store.addPost({ source: sourceLabel(source), messageId: message.id, link, text, postedAt: message.date * 1000, via, sender }, { dedupeWindowMs });
+  return store.addPost(
+    { source: sourceLabel(source), messageId: message.id, link, text, postedAt: message.date * 1000, via, sender, senderId: message.senderId ?? null },
+    { dedupeWindowMs },
+  );
 }
 
 // GramJS xabarining jo'natuvchisi (message.sender) → username yoki null.
@@ -420,13 +429,17 @@ export async function runLive({
     await pace();
     if (signal?.aborted) return;
     try {
-      const messages = await call(reader.since(source, 0, PROBE.limit));
-      const verdict = judgeProbe(messages, { now: now(), requireContact });
+      // Yopiq guruh — o'z bahosi (probe.js judgeClosed: 100 xabar, gap orasidagi e'lon ham, nomi ham); o'tsa — sinovsiz
+      const closed = source.kind === "id";
+      const messages = await call(reader.since(source, 0, closed ? CLOSED_PROBE.limit : PROBE.limit));
+      const verdict = closed
+        ? judgeClosed(messages, { now: now(), title: row.title ?? "", channel: row.chat_type === "channel" || row.chatType === "channel" })
+        : judgeProbe(messages, { now: now(), requireContact });
       let queued = 0;
       if (verdict.ok) {
         for (const message of messages) {
           if (message.date * 1000 < now() - probeBackfillMs) continue;
-          const result = addMessage(source, message, store, { via: "poll" });
+          const result = addMessage(source, message, store, { via: "poll", media: reader.media });
           if (result && result !== "short" && result.status === "new") queued++;
         }
         store.setCursor(label, Math.max(...messages.map((m) => m.id)));
@@ -435,7 +448,8 @@ export async function runLive({
       probeTries.delete(label);
       ok();
       const tail = queued ? `; oxirgi ${Math.round(probeBackfillMs / HOUR)} soatdagi ${queued} ta e'lon navbatga qo'yildi` : "";
-      log(`${label}: foydalanuvchi qo'shgan guruh ${verdict.ok ? "sinovga olindi" : "rad etildi"} — ${verdict.note}${tail}`);
+      const outcome = closed ? (verdict.ok ? "yopiq guruh — darhol qo'shildi" : "yopiq guruh — e'lon kam, baribir kuzatiladi") : verdict.ok ? "sinovga olindi" : "rad etildi";
+      log(`${label}: foydalanuvchi qo'shgan guruh ${outcome} — ${verdict.note}${tail}`);
     } catch (error) {
       if (handleFlood(error)) return;
       const tries = (probeTries.get(label)?.tries ?? 0) + 1;
@@ -489,8 +503,12 @@ export async function runLive({
     await pace();
     if (signal?.aborted) return;
     try {
-      const messages = await call(reader.since(peer, 0, PROBE.limit));
-      const verdict = judgeProbe(messages, { now: now(), requireContact });
+      // Yopiq (username'siz) — judgeClosed, o'tsa sinovsiz doimiy; ochig'i — avvalgidek judgeProbe + 24 soat sinov
+      const closed = !dialog.username;
+      const messages = await call(reader.since(peer, 0, closed ? CLOSED_PROBE.limit : PROBE.limit));
+      const verdict = closed
+        ? judgeClosed(messages, { now: now(), title: dialog.title ?? "", channel: dialog.type === "kanal" })
+        : judgeProbe(messages, { now: now(), requireContact });
       ok();
       scanBatch.checked++;
       if (!verdict.ok) {
@@ -517,7 +535,7 @@ export async function runLive({
       if (added) {
         for (const message of messages) {
           if (message.date * 1000 < now() - probeBackfillMs) continue;
-          const result = addMessage(source, message, store, { via: "poll" });
+          const result = addMessage(source, message, store, { via: "poll", media: reader.media });
           if (result && result !== "short" && result.status === "new") queued++;
         }
         store.setCursor(label, Math.max(...messages.map((m) => m.id)));
@@ -525,7 +543,7 @@ export async function runLive({
       }
       store.finishDialogScan(dialog.peerId, { account: scan, state: "passed", note: verdict.note, stats: { ...verdict.stats, queued } });
       const tail = queued ? `; oxirgi ${Math.round(probeBackfillMs / HOUR)} soatdagi ${queued} ta e'lon navbatga qo'yildi` : "";
-      log(`${where}: akkaunt guruhi tekshirildi — ${added ? `${label} sinovga olindi` : "allaqachon manba"}: ${verdict.note}${tail}`);
+      log(`${where}: akkaunt guruhi tekshirildi — ${added ? `${label} ${closed ? "darhol qo'shildi (yopiq)" : "sinovga olindi"}` : "allaqachon manba"}: ${verdict.note}${tail}`);
     } catch (error) {
       if (handleFlood(error)) return;
       scanBatch.checked++;
@@ -685,6 +703,15 @@ export async function runLive({
     }
     const live = reader.liveStats?.();
     if (live) parts.push(`Telegram o'zi yuborgan xabarlar: ${live.matched} ta`);
+    // Ovozli xabar / dumaloq video (media.js): jami — ishga tushgandan beri
+    const media = reader.media?.stats();
+    if (media && media.telegram + media.gemini + media.empty + media.failed > 0) {
+      const done = media.telegram + media.gemini;
+      parts.push(
+        `🎤 ovozli/dumaloq: ${done} tasi matnga o'girildi (Telegram ${media.telegram}, Gemini ${media.gemini}` +
+          `${done ? `, o'rtacha ${(media.totalMs / done / 1000).toFixed(1)} s` : ""}), ${media.empty} tasida gap yo'q, ${media.failed} ta xato`,
+      );
+    }
     log(parts.join("; "));
   }
 
@@ -694,7 +721,7 @@ export async function runLive({
     if (!active.has(label)) return;
     ok();
     try {
-      const result = addMessage(source, message, store, { via: "live" });
+      const result = addMessage(source, message, store, { via: "live", media: reader.media });
       // Ketma-ket kelgan bo'lsa — kursor ham suriladi: «yangisi bormi» shu xabar uchun guruhni qayta o'qitmaydi
       // (oraliqda tushib qolgan xabar bo'lsa, kursor surilmaydi va so'rab turish uni topadi)
       if (store.getCursor(label) === message.id - 1) store.setCursor(label, message.id);

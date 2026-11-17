@@ -34,3 +34,9 @@ data/nginx/
 
 # Sinovlardan qolgan bo'sh baza nusxalari
 data/*.bo-shaq
+
+# Profil va guruh rasmlari (boshqaruv markazi ro'yxatlari) — odamlarning rasmlari, repo ochiq
+data/avatars/
+
+# Operator akkaunt (apps/collector/src/ops.js): sessiya, shaxsiy xabarlar (inbox), buyruqlar navbati
+apps/collector/ops/

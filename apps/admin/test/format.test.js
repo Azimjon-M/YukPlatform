@@ -388,3 +388,38 @@ test("scanView: Auto scan holati bir qatorda", async () => {
     "🔎 10 ta guruh tekshirilgan · 5 tasi manbaga olindi (1 tasi sinovda), 3 tasi sinovdan o'tdi · 5 tasi yuk guruhi emas · 1 tasini o'qib bo'lmadi",
   );
 });
+
+test("foydalanuvchilar ro'yxati: holat belgisi, filtr, qidiruv, bosh harflar", async () => {
+  const { DRIVER_FILTERS, driverMatches, driverPill, initials, isProDriver } = await import("../src/format.js");
+  const now = Date.UTC(2026, 10, 16, 10);
+  const base = { chatId: 700000001, name: "Sanjar Test", username: "sanjar_test", phone: "+998900000001", role: "haydovchi", active: true, profile: { vehicle: { truckClass: "isuzu" } } };
+  assert.equal(driverPill({ ...base, deletedAt: now }, null, now).label, "O'chirgan");
+  assert.equal(driverPill({ ...base, banned: { at: now } }, null, now).label, "Bloklangan");
+  assert.equal(driverPill({ ...base, profile: null, registering: true }, null, now).label, "Ro'yxatda");
+  assert.equal(driverPill({ ...base, profile: null }, null, now).label, "Profilsiz");
+  assert.equal(driverPill(base, null, now).label, "Faol");
+  assert.equal(isProDriver({ plan: "free", autoPro: true }), true);
+  assert.equal(isProDriver({ plan: "free" }), false);
+  const pro = DRIVER_FILTERS.find((f) => f.id === "pro");
+  assert.equal(pro.test({ ...base, plan: "pro" }, now), true);
+  assert.equal(driverMatches(base, "sanjar"), true);
+  assert.equal(driverMatches(base, "@sanjar_test"), true);
+  assert.equal(driverMatches(base, "90 000 00"), true, "raqam bo'shliq bilan ham");
+  assert.equal(driverMatches(base, "700000"), true, "Telegram ID");
+  assert.equal(driverMatches(base, "aziz"), false);
+  assert.equal(driverMatches(base, ""), true);
+  assert.equal(initials(base), "ST");
+  assert.equal(initials({ name: "Ali Valiyev" }), "AV");
+  assert.equal(initials({ name: "", username: "ali" }), "AL");
+});
+
+test("qidiruv kirill/lotin farqisiz: haydovchi va yopiq guruh", async () => {
+  const { driverMatches, pickableDialogs } = await import("../src/format.js");
+  const d = { chatId: 1, name: "Давронбек", username: null };
+  assert.equal(driverMatches(d, "davronbek"), true);
+  assert.equal(driverMatches(d, "ДАВРОН"), true);
+  assert.equal(driverMatches({ chatId: 2, name: "Sanjar Test" }, "санжар"), true);
+  const dialogs = [{ peerId: "-1001", title: "Кукон ISUZU ва KIA юк ташиш", username: null, account: "a", added: false }];
+  assert.equal(pickableDialogs(dialogs, [{ name: "a", status: "ok" }], "kukon").length, 1);
+  assert.equal(pickableDialogs(dialogs, [{ name: "a", status: "ok" }], "юк ташиш").length, 1);
+});

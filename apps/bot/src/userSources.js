@@ -95,6 +95,7 @@ export function intakeText(sources = [], { trialStats = () => null, rules = SOUR
     "<b>Qanday tekshiramiz:</b>",
     "1. Darhol — oxirgi 50 ta xabarini ko'ramiz: yuk e'lonlari bo'lmasa, qo'shilmaydi.",
     `2. Keyin ${Math.round(rules.trialMs / HOUR)} soat sinov: kamida ${rules.minLoads} ta yuk e'loni chiqsa — doimiy qo'shiladi, chiqmasa — o'chiriladi.`,
+    "🔒 Yopiq guruh: oxirgi 100 ta xabari ko'riladi (gap-so'z orasidagi e'lonlar ham hisobga olinadi). Yuk guruhi bo'lsa — sinovsiz, darhol qo'shiladi va o'chirilmaydi (faqat akkauntingiz uni o'qiy olishi kerak).",
   ];
   if (sources.length) {
     lines.push("", "<b>Siz qo'shgan guruhlar:</b>");
@@ -372,7 +373,9 @@ export function createSourceWatcher({ store, send, onInvite = null, log = consol
       const verdict = reviewTrial(stats, { until: source.checkUntil, now: now(), rules });
       if (!verdict.done) continue;
       store.finishTrial(source.name, { ok: verdict.ok, note: verdict.note, stats });
-      log(`${source.name}: foydalanuvchi qo'shgan guruh sinovdan ${verdict.ok ? "o'tdi" : "o'tmadi, o'chirildi"} — ${verdict.note}`);
+      // Yopiq guruh (raqamli id) yiqilmaydi — store.finishTrial uni doimiy qoldiradi
+      const kept = !verdict.ok && /^-\d+$/.test(source.name);
+      log(`${source.name}: foydalanuvchi qo'shgan guruh sinovdan ${verdict.ok ? "o'tdi" : kept ? "o'tmadi, lekin yopiq guruh — kuzatuvda qoladi" : "o'tmadi, o'chirildi"} — ${verdict.note}`);
     }
   }
 

@@ -5,10 +5,9 @@ import { formatNumber } from "../format.js";
 import { useApi, useDebounced, useNow } from "../hooks.js";
 import { useOverview } from "../overview.js";
 import { POST_TABS, postNote, postStatus, tabCounts } from "../status.js";
-import { Async, Badge, Button, Empty, ExternalLink, Field, PageHeader, Pager, Tabs, TimeAgo, useTitle, useToast } from "../ui.jsx";
+import { Async, Badge, Button, Empty, ExpandRow, ExternalLink, PageHeader, Pager, TimeAgo, useTitle, useToast } from "../ui.jsx";
 
 const LIMIT = 50;
-const LONG_TEXT = 220;
 
 const EMPTY_TEXT = {
   "": "Collector hali birorta e'lon yozmagan. Jarayonlar sahifasida collector ishlayotganini tekshiring.",
@@ -19,13 +18,15 @@ const EMPTY_TEXT = {
   duplicate: "Takror e'lon yo'q.",
 };
 
-function PostCard({ item, now, onChanged }) {
+const TAG_TONE = { good: "is-good", critical: "is-critical", serious: "is-critical", info: "is-info" };
+
+// Yopiq: holat belgisi, e'lon matnining boshi, manba · #id, o'ngda — qachon. Ochiq: to'liq matn, izoh, havola
+function PostRow({ item, now, onChanged }) {
   const notify = useToast();
-  const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const meta = postStatus(item.status);
   const note = postNote(item);
-  const long = item.text.length > LONG_TEXT || item.text.split("\n").length > 3;
+  const source = item.fromShipper ? `📦 Yuk beruvchi · ${item.source.slice(8)}` : item.source;
 
   async function retry() {
     setBusy(true);
@@ -41,16 +42,35 @@ function PostCard({ item, now, onChanged }) {
   }
 
   return (
-    <article className="post-card">
-      <div className="post-head">
+    <ExpandRow
+      lead={<span title={meta.label}>{meta.icon}</span>}
+      title={
+        <span className="post-title">
+          {item.media ? (item.media === "voice" ? "🎤 " : "📹 ") : ""}
+          {item.text.replace(/\s+/g, " ").trim() || "—"}
+        </span>
+      }
+      sub={`${source} · #${item.id}`}
+      side={
+        <>
+          <TimeAgo ts={item.postedAt} now={now} />
+          <span className={`mini-tag ${TAG_TONE[meta.tone] ?? ""}`}>{meta.label}</span>
+        </>
+      }
+    >
+      <div className="row-tags">
         <Badge tone={meta.tone} icon={meta.icon}>
           {meta.label}
         </Badge>
         {/* «📦 Yuk berish»: guruhdan emas — yuk beruvchining o'zi (botga yozdi yoki formadan). source = shipper:<chat id> */}
-        <span className="post-source">{item.fromShipper ? `📦 Yuk beruvchi · ${item.source.slice(8)}` : item.source}</span>
         {item.fromShipper && (
           <Badge tone="good" icon="✅" title="Yuk egasining o'zi yubordi — AI'ga bormaydi, darhol mos haydovchilarga">
             {item.via === "web" ? "Formadan" : "Botga yozdi"}
+          </Badge>
+        )}
+        {item.media && (
+          <Badge tone="info" icon={item.media === "voice" ? "🎤" : "📹"} title="Collector matnga o'girdi (Telegram Premium yoki Gemini)">
+            {item.media === "voice" ? "Ovozli xabar" : "Dumaloq video"}
           </Badge>
         )}
         {item.parsedBy === "rules" && (
@@ -64,25 +84,12 @@ function PostCard({ item, now, onChanged }) {
             Aloqasiz
           </Badge>
         )}
-        <span className="muted small">#{item.id}</span>
-        <span className="muted small post-time">
-          <TimeAgo ts={item.postedAt} now={now} />
-        </span>
       </div>
-
-      <p className={`post-text ${expanded ? "" : "is-clamped"}`} id={`post-text-${item.id}`}>
-        {item.text}
-      </p>
-      {long && (
-        <button type="button" className="link-button" aria-expanded={expanded} aria-controls={`post-text-${item.id}`} onClick={() => setExpanded((v) => !v)}>
-          {expanded ? "Yig'ish" : "To'liq ko'rsatish"}
-        </button>
-      )}
-
+      <p className="post-text">{item.text}</p>
       {note && <p className={note.tone === "critical" ? "inline-error" : "post-note"}>{note.text}</p>}
-
       <div className="post-foot">
-        <ExternalLink href={item.link}>Asl e'lon</ExternalLink>
+        {item.link && <ExternalLink href={item.link}>Asl e'lon</ExternalLink>}
+        <span className="muted small">{source}</span>
         {item.doneAt && (
           <span className="muted small">
             Tahlil: <TimeAgo ts={item.doneAt} now={now} />
@@ -94,7 +101,7 @@ function PostCard({ item, now, onChanged }) {
           </Button>
         )}
       </div>
-    </article>
+    </ExpandRow>
   );
 }
 
@@ -149,18 +156,29 @@ export function QueuePage() {
         }
       />
 
-      <Tabs tabs={tabs} value={status} onChange={setStatus} label="E'lon holati" />
-
-      <form className="filters" role="search" onSubmit={(e) => e.preventDefault()}>
-        <Field label="Qidiruv" className="field-grow">
-          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="E'lon matnidan qidirish…" />
-        </Field>
+      <div className="list-toolbar queue-toolbar">
+        <input type="search" className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="E'lon matnidan qidirish…" aria-label="E'lonlardan qidirish" />
+        <div className="chips" role="tablist" aria-label="E'lon holati">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={t.id === status}
+              className={`chip ${t.id === status ? "is-active" : ""}`}
+              onClick={() => setStatus(t.id)}
+            >
+              {t.label}
+              {t.count != null && <span className="chip-count">{formatNumber(t.count)}</span>}
+            </button>
+          ))}
+        </div>
         {status === "failed" && counts.failed > 0 && (
           <Button className="filters-reset" onClick={retryAll} busy={retrying}>
             Hammasini qayta navbatga
           </Button>
         )}
-      </form>
+      </div>
 
       <Async state={state}>
         {(data) =>
@@ -169,11 +187,11 @@ export function QueuePage() {
           ) : (
             <>
               <p className="muted small list-count">{formatNumber(data.total)} ta e'lon</p>
-              <div className="post-list">
+              <ul className="rows">
                 {data.items.map((item) => (
-                  <PostCard key={item.id} item={item} now={now} onChanged={refresh} />
+                  <PostRow key={item.id} item={item} now={now} onChanged={refresh} />
                 ))}
-              </div>
+              </ul>
               <Pager offset={offset} limit={LIMIT} total={data.total} onChange={(o) => setPage({ key, offset: o })} />
             </>
           )

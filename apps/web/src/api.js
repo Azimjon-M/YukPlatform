@@ -67,7 +67,32 @@ export function takeTokenFromUrl(location = window.location, history = window.hi
   return match[1];
 }
 
-export async function request(method, path, { body, token = tokenStore.get() } = {}) {
+// Server bir necha soniya javob bermasa (qayta ishga tushirilyapti: 2026-11-16 da «saytimizda err» — tunnel 18:19:56 da
+// qayta ochilgan payt) — ilova o'zi kutib, qayta uradi. 502/503 — nginx/API yo'q, 530 — Cloudflare tunnel ulanmagan:
+// so'rov serverga yetib bormagan, qayta yuborish xavfsiz (POST ham). Tarmoq xatosida esa so'rov yetib borgan bo'lishi
+// mumkin — faqat qayta yuborilsa zarari yo'q (GET/PUT/DELETE) so'rovlar. Jami ~20 s
+export const RETRY_DELAYS_MS = [1500, 3000, 5000, 10000];
+const NOT_REACHED = new Set([502, 503, 530]);
+const IDEMPOTENT = new Set(["GET", "PUT", "DELETE"]);
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function request(method, path, options = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await requestOnce(method, path, options);
+    } catch (error) {
+      const retry =
+        attempt < RETRY_DELAYS_MS.length &&
+        error instanceof ApiError &&
+        error.code === "offline" &&
+        (NOT_REACHED.has(error.status) || (!error.status && IDEMPOTENT.has(method)));
+      if (!retry) throw error;
+      await pause(options.retryDelays?.[attempt] ?? RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+async function requestOnce(method, path, { body, token = tokenStore.get() } = {}) {
   const headers = { accept: "application/json", "ngrok-skip-browser-warning": "1" };
   if (token) headers.authorization = `Bearer ${token}`;
   if (body !== undefined) headers["content-type"] = "application/json";

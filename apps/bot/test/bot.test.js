@@ -938,6 +938,7 @@ test("/start matni: bot haqida Azimjon matni, keyin menyu; menyuda «Ilovalar» 
     "Assalomu alaykum!\n\n" +
       "🚛 <b>Yuk Eksperti</b> — Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz. Shuningdek, yirik guruhlar " +
       "yoki o'zingiz belgilagan guruhlardan e'lonlarni yo'nalishingiz va transportingizga mos e'lonni shaxsiy xabaringizga yuboramiz.\n\n" +
+      "🤖 Botdan foydalanishda qiynalsangiz — AI yordamchimiz @YukExperti ga yozing, u yordam beradi.\n\n" +
       "<b>Pastdagi menyu:</b>\n" +
       "🚚 Ro'yxatdan o'tish — sizga qanday e'lonlar yo'naltirishimiz haqida\n" +
       "🔄 Rolni almashtirish — haydovchi va yuk beruvchi\n\n" +
@@ -996,6 +997,7 @@ test("/start matni rol tanlanmaganda (Azimjon matni) va yuk beruvchida ham to'g'
     "Assalomu alaykum!\n\n" +
       "🚛 <b>Yuk Eksperti</b> — Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz. Shuningdek, yirik guruhlar " +
       "yoki o'zingiz belgilagan guruhlardan e'lonlarni yo'nalishingiz va transportingizga mos e'lonni shaxsiy xabaringizga yuboramiz.\n\n" +
+      "🤖 Botdan foydalanishda qiynalsangiz — AI yordamchimiz @YukExperti ga yozing, u yordam beradi.\n\n" +
       "📦 Yuk beruvchilarga — yukingizga mos transportlar;\n" +
       "🚚 Haydovchilarga — transportingizga mos yuklar.",
   );
@@ -1761,4 +1763,37 @@ test("tezkor xabar (deliverRaw): asl matn, telefonlar, «📄 Asl e'lon» va e'l
   assert.equal(kb[0].url, "https://t.me/TutGruz/5");
   assert.equal(kb[1].web_app.url, `${MINIAPP}pub/call?c=tok0`);
   assert.deepEqual(links, [{ postId: 77, phone: 0, chatId: 42 }]);
+});
+
+test("«💬 Lichkasi» tugmasi: username'i yo'q, bot taniydigan odamga — ID bo'yicha; begonaga va username bo'lsa — tugma yo'q", async () => {
+  const { loadButtons } = await import("../src/bot.js");
+  const urls = (kb) => (kb ? kb.inline_keyboard.flat().map((b) => b.url ?? b.web_app?.url) : []);
+  assert.ok(urls(loadButtons({ phones: [] }, { link: "https://t.me/g/1", senderId: "5551234", senderKnown: true })).includes("tg://user?id=5551234"));
+  assert.ok(!urls(loadButtons({ phones: [] }, { link: "https://t.me/g/1", senderId: "5551234" })).some((u) => u.startsWith("tg://")), "begona — Telegram rad etadi");
+  assert.ok(!urls(loadButtons({ phones: [] }, { link: "https://t.me/g/1", senderId: "5551234", sender: "ali" })).some((u) => u.startsWith("tg://")));
+  assert.ok(!urls(loadButtons({ phones: [] }, { senderId: "5551234" }, () => null, { lichka: false })).length, "zaxira to'plam — lichkasiz");
+  const voice = loadButtons({ phones: [] }, { link: "https://t.me/g/1", media: "voice", senderId: "7", senderKnown: true });
+  assert.deepEqual(voice.inline_keyboard.flat().map((b) => b.text), ["🎤 Tinglash", "💬 Lichkasi"]);
+});
+
+test("«📌 Qaysi guruhlardan?»: 🌐 Ochiq / 🔒 Yopiq bo'limlari; Pro bo'lmaganga yopig'i 🔒 · Pro", async () => {
+  const { groupStep, CLOSED_PRO_TEXT } = await import("../src/feed.js");
+  const list = [
+    { name: "@TutGruz", title: "Tut Gruz", perDay: 30, closed: false, locked: false },
+    { name: "-1001", title: "Yopiq ISUZU", perDay: 5, closed: true, locked: true },
+    { name: "-1002", title: "O'zimniki", perDay: 2, closed: true, locked: false, mine: true },
+  ];
+  const open = groupStep({ list, chosen: ["@TutGruz", "-1002"] });
+  const texts = (step) => step.keyboard.flat().map((b) => b.text);
+  assert.deepEqual(texts(open).slice(0, 2), ["● 🌐 Ochiq · 1 (✅1)", "🔒 Yopiq · 2 (✅1)"]);
+  assert.ok(texts(open).some((t) => t.startsWith("✅ Tut Gruz")));
+  assert.ok(!texts(open).some((t) => t.includes("Yopiq ISUZU")), "ochiq bo'limda yopiqlar yo'q");
+  const closed = groupStep({ list, chosen: ["-1002"], kind: "closed" });
+  assert.ok(texts(closed).includes("🔒 Yopiq ISUZU · Pro"));
+  assert.ok(texts(closed).some((t) => t.startsWith("✅ 🔒 O'zimniki")));
+  assert.ok(closed.text.includes(CLOSED_PRO_TEXT));
+  assert.ok(groupStep({ list, kind: "closed", pro: true }).text.includes("Pro foydalanuvchi sifatida"));
+  // Yopiq guruh umuman yo'q — bo'lim tugmalari yo'q
+  assert.ok(!texts(groupStep({ list: [list[0]] })).some((t) => t.includes("Yopiq ·")));
+  assert.ok([...CLOSED_PRO_TEXT].length <= 200, "Telegram alert matni 200 belgigacha");
 });

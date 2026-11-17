@@ -54,10 +54,12 @@ import {
   distanceKm,
   formatContactPhone,
   isAdmin,
+  isPro,
   parseAdminIds,
   phoneText,
   placePoint,
   placeText,
+  planFilter,
   roleOf,
   routeCounts,
   routeInScope,
@@ -260,7 +262,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     name: driver.name,
     username: driver.username,
     role: roleOf(driver),
-    plan: driver.plan ?? "free",
+    plan: isPro(driver) ? "pro" : (driver.plan ?? "free"), // avtomatik Pro ham (raqam + bog'langan akkaunt)
     isAdmin: isAdmin(driver, adminIds),
     profile: driver.profile,
     active: driver.active,
@@ -380,7 +382,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (result.error) return res.status(400).json({ error: result.error, field: result.field ?? null });
     // «📌 Mening guruhlarim»: faqat shu odamga ko'rinadigan guruhlar (yozilishi — ro'yxatdagidek); hech biri qolmasa — xato
     if (result.profile?.feed && FEED_MODES[result.profile.feed.mode].groups) {
-      const sources = store.allowedFeedSources(req.driver.chatId, result.profile.feed.sources);
+      const sources = store.allowedFeedSources(req.driver.chatId, result.profile.feed.sources, { pro: isPro(req.driver) });
       if (!sources.length) return res.status(400).json({ error: "Tanlangan guruhlar ro'yxatda topilmadi — qaytadan tanlang", field: "groups" });
       result.profile = { ...result.profile, feed: { ...result.profile.feed, sources } };
     }
@@ -391,11 +393,13 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile, draft: null, active: true })));
   });
 
-  // «📌 Mening guruhlarim» ro'yxati (store feed.js feedSources): ochiq guruhlar + o'zi qo'shgan yopiqlari;
-  // perDay — oxirgi 24 soatdagi e'lonlar, mine — o'zi «➕ Guruh qo'shish» bilan qo'shgan. chosen — hozirgi tanlovi
+  // «📌 Mening guruhlarim» ro'yxati (store feed.js feedSources): ochiq va yopiq guruhlar (yopig'ini Pro tanlaydi — boshqalarga
+  // locked); perDay — oxirgi 24 soatdagi e'lonlar, mine — o'zi «➕ Guruh qo'shish» bilan qo'shgan. chosen — hozirgi tanlovi,
+  // pro — shu odam yopiq guruhlarni tanlay oladimi
   pub.get("/me/feed-sources", (req, res) => {
     const feed = req.driver.profile?.feed;
-    res.json({ sources: store.feedSources(req.driver.chatId), chosen: feed?.sources ?? [], max: FEED_SOURCES_MAX });
+    const pro = isPro(req.driver);
+    res.json({ sources: store.feedSources(req.driver.chatId, { pro }), chosen: feed?.sources ?? [], max: FEED_SOURCES_MAX, pro });
   });
 
   pub.patch("/me", (req, res) => {
@@ -458,7 +462,10 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const hours = clamp(Number(req.query.hours) || 24, 1, MAX_HOURS);
     const from = text(req.query.from);
     if (from && !validRouteArea(profile, scope, from)) throw httpError(400, "Bunday joy tanlab bo'lmaydi");
-    const rows = store.recentLoads({ sinceMs: hours * HOUR, limit: 5000, kind: "yuk" }).filter(({ load }) => routeInScope(load, scope));
+    const allowed = planFilter(req.driver, store.sourceOwner);
+    const rows = store
+      .recentLoads({ sinceMs: hours * HOUR, limit: 5000, kind: "yuk" })
+      .filter(({ load, post }) => allowed(post.source) && routeInScope(load, scope));
     res.json({ hours, from, ...routeCounts({ profile, scope, rows, from }) });
   });
 
@@ -501,8 +508,11 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const radius = clamp(Number(req.query.r) || 50, 1, 5000);
     const matches = KIND_MATCHERS[kind];
 
+    // Yopiq guruh e'loni — faqat Pro obunadagilarga (va guruhni qo'shganga): «Hammasi» da ham
+    const allowed = planFilter(req.driver, store.sourceOwner);
     let rows = store
       .recentLoads({ sinceMs: hours * HOUR, limit: 5000, kind })
+      .filter(({ post }) => allowed(post.source))
       .filter(({ load }) => routeInScope(load, scope) && atArea(load, "from", from) && atArea(load, "to", to))
       // profile = null (ro'yxatdan o'tmagan) — matchTruck bo'sh profil bilan ishlaydi (cheklovlar yo'q)
       .filter(({ load }) => view === "all" || matches(load, profile ?? {}).ok);
@@ -588,7 +598,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   admin.use((req, res, next) => next(isAdmin(req.driver, adminIds) ? undefined : httpError(403, "Bu bo'lim faqat adminlar uchun", "forbidden")));
 
   admin.get("/overview", (req, res) => {
-    const m = store.metrics();
+    const m = store.metrics({ maxAgeMs: 15_000 }); // og'ir hisob — 15 s kesh (store admin.js metrics)
     const today = pacificDay(now()); // Gemini kunlik limiti Tinch okeani vaqti bilan yangilanadi
     // AI ulanishlari: kalitning o'zi ham, "…a1B2" ko'rsatkichi ham yuborilmaydi
     const ai = store.listAiKeys().flatMap((key) =>

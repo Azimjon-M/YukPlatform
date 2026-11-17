@@ -72,3 +72,18 @@ test("e'londagi matn HTML sifatida buzilmaydi", () => {
   assert.match(text, /&lt;script&gt;/);
   assert.match(text, /telefon yozilmagan/);
 });
+
+test("ovozli xabar / dumaloq videodan o'girilgan e'lon — belgisi bilan (saralangan ham, tezkor ham)", async () => {
+  const { formatLoad, formatRaw, MEDIA_LINE } = await import("../src/format.js");
+  const load = { fromCity: "Toshkent", toCity: "Samarqand", phones: ["+998901234567"] };
+  assert.ok(formatLoad(load, { media: "voice", postedAt: Date.UTC(2026, 10, 16, 9) }).text.includes(MEDIA_LINE.voice));
+  assert.ok(formatRaw({ text: "Toshkentdan Samarqandga yuk bor", media: "round" }).text.includes(MEDIA_LINE.round));
+  assert.ok(!formatLoad(load, {}).text.includes("matnga o'girildi"));
+});
+
+test("raqamsiz ovozli e'lon — «xabarni guruhda tinglang»", async () => {
+  const { formatLoad, VOICE_NO_PHONE } = await import("../src/format.js");
+  const load = { fromCity: "Toshkent", toCity: "Samarqand", phones: [] };
+  assert.ok(formatLoad(load, { media: "voice", link: "https://t.me/g/1" }).text.includes(VOICE_NO_PHONE));
+  assert.ok(!formatLoad(load, { link: "https://t.me/g/1" }).text.includes(VOICE_NO_PHONE));
+});

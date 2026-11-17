@@ -862,3 +862,80 @@ test("tezkor: deliverRaw berilmasa (eski main.js) — tezkor yo'l o'chiq, tezkor
   await createWorker(deps, { log: () => {} }).runOnce();
   assert.deepEqual(delivered.sort(), [1, 7, 9]);
 });
+
+// --- Obuna: yopiq guruh (qo'shimcha akkaunt o'qiydi, manba nomi -100…) e'loni — faqat Pro va guruhni qo'shganga ---
+const CLOSED = "-1001234567";
+
+test("yopiq guruh: yuk faqat Pro va guruhni qo'shgan haydovchiga; kanal va guruh bo'limlariga chiqmaydi", async () => {
+  const { store, deps, published, delivered } = setup([
+    { ok: true, postType: "yuk_bor", loads: [LOAD] },
+    { ok: true, postType: "yuk_bor", loads: [{ ...LOAD, toCity: "Buxoro", toRegion: "buxoro" }] },
+  ]);
+  store.saveDriver(4, { profile: FURA, active: true, plan: "pro" });
+  store.saveDriver(5, { profile: FURA, active: true });
+  store.addUserSource({ name: CLOSED, chatId: 5, account: "dost" });
+  store.addPost({ source: CLOSED, messageId: 1, text: `yopiq ${"x".repeat(20)}`, postedAt: Date.now() - 2000 });
+  await processPost(store.takeNewPosts()[0], deps);
+  assert.deepEqual(delivered.sort(), [4, 5], "1 (bepul) olmaydi; 4 — Pro, 5 — guruhni o'zi qo'shgan");
+  assert.equal(published.length, 0, "ochiq kanal / guruh bo'limlariga yo'q");
+  // Ochiq guruhdagi yuk — avvalgidek hammaga va kanalga
+  delivered.length = 0;
+  store.addPost({ source: "@g", messageId: 2, text: `ochiq ${"x".repeat(20)}`, postedAt: Date.now() - 1000 });
+  await processPost(store.takeNewPosts()[0], deps);
+  assert.deepEqual(delivered.sort(), [1, 4, 5]);
+  assert.equal(published.length, 1);
+});
+
+test("yopiq guruh: tezkor rejimda ham asl matn faqat Pro'ga", async () => {
+  const { store, deps, raw, post } = rawSetup();
+  deps.pool = noAi;
+  store.saveDriver(10, { role: "haydovchi", profile: TEZKOR, active: true, plan: "pro" });
+  post(CLOSED, 1, LOAD_TEXT);
+  post("@g", 2, LOAD_TEXT.replace("0001", "0005"));
+  await createWorker(deps, { log: () => {} }).runOnce();
+  const got = raw.map(([chatId, id]) => `${id}→${chatId}`).sort();
+  assert.deepEqual(got, ["1→10", "2→10", "2→7"], "7 (bepul tezkor) yopiq guruhdan olmaydi");
+});
+
+// --- Ovozli xabar (collector media.js): ochiq guruhda aloqa — xabarning havolasi ---
+test("ovozli xabar: ochiq guruhda raqamsiz va lichkasiz ham yuboriladi (havola bilan); yopiq guruhda — aloqasiz", async () => {
+  const { store, deps, raw, post } = rawSetup();
+  deps.pool = noAi;
+  deps.requireContact = true;
+  const text = "Toshkentdan Samarqandga 20 tonna un bor, tent fura kerak";
+  store.addPost({ source: "@g", messageId: 1, link: "https://t.me/g/1", text, postedAt: Date.now() - 1000, media: "voice" });
+  store.addPost({ source: "-1001234567", messageId: 2, text: `${text}.`, postedAt: Date.now() - 1000, media: "voice" });
+  store.addPost({ source: "@g", messageId: 3, link: "https://t.me/g/3", text: `${text}!`, postedAt: Date.now() - 1000 });
+  void post;
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(raw.map(([chatId, id]) => `${id}→${chatId}`).sort(), ["1→7"], "faqat ochiq guruhdagi ovozli xabar; oddiy matn va yopiq guruh — aloqasiz");
+  const closed = store.listPosts({}).items.filter((p) => p.messageId !== 1);
+  assert.ok(closed.every((p) => p.status === "done" && p.error?.startsWith("Aloqasiz")));
+});
+
+test("ovozli xabar: yopiq guruhda — gapirgan odam bot foydalanuvchisi bo'lsa (ID bilan «💬 Lichkasi»); begona ID — aloqa emas", async () => {
+  const { store, deps, raw } = rawSetup();
+  deps.pool = noAi;
+  deps.requireContact = true;
+  store.saveDriver(7, { plan: "pro" }); // yopiq guruh e'loni — faqat Pro
+  store.saveDriver(5551234, { name: "Gapirgan" }); // botga yozgan — bot uni taniydi
+  const text = "Toshkentdan Samarqandga 20 tonna un bor, tent fura kerak";
+  store.addPost({ source: "-1001234567", messageId: 1, text, postedAt: Date.now() - 1000, media: "voice", senderId: "5551234" });
+  store.addPost({ source: "-1001234567", messageId: 2, text: `${text}.`, postedAt: Date.now() - 1000, media: "voice" });
+  store.addPost({ source: "-1001234567", messageId: 3, text: `${text}!`, postedAt: Date.now() - 1000, media: "voice", senderId: "999000" });
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(raw.map(([chatId, id]) => `${id}→${chatId}`), ["1→7"], "ID'siz va begona ID — aloqasiz");
+});
+
+test("«📌 Mening guruhlarim»da yopiq guruh: Pro haydovchiga asl matn keladi; Pro'si yo'qolsa — kelmaydi", async () => {
+  const { store, deps, raw, post } = rawSetup();
+  deps.pool = noAi;
+  store.saveDriver(8, { plan: "pro", profile: { ...GURUHLARIM, feed: { mode: "guruhlarim", sources: ["-1001234567"] } } });
+  post("-1001234567", 1, LOAD_TEXT);
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.ok(raw.some(([chatId, id]) => chatId === 8 && id === 1));
+  store.saveDriver(8, { plan: "free" });
+  post("-1001234567", 2, LOAD_TEXT.replace("0001", "0009"));
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.ok(!raw.some(([chatId, id]) => chatId === 8 && id === 2), "Pro emas — yopiq guruhdan yo'q");
+});

@@ -499,7 +499,7 @@ test("oxirgi yuklar: eng yangisi birinchi, muddatdan eskisi tushmaydi", () => {
   store.addLoad({ postId: post.id, key: "k2", load: { fromCity: "Andijon" } });
   const all = store.recentLoads({ sinceMs: 60_000 });
   assert.deepEqual(all.map((r) => r.load.fromCity), ["Andijon", "Toshkent"]);
-  assert.deepEqual(all[0].post, { source: "@a", link: "https://t.me/a/1", postedAt: 5, sender: null, fromShipper: false });
+  assert.deepEqual(all[0].post, { source: "@a", link: "https://t.me/a/1", postedAt: 5, sender: null, fromShipper: false, media: null, senderId: null });
   assert.deepEqual(store.recentLoads({ sinceMs: 5_000 }).map((r) => r.load.fromCity), ["Andijon"]);
   assert.equal(store.recentLoads({ sinceMs: 60_000, limit: 1 }).length, 1);
 });
@@ -603,5 +603,56 @@ test("botga topshiriqlar (bot_notices): bir odamga bittadan, olingach o'chadi, 1
   store.setRouteMessage(42, null);
   assert.equal(store.routeMessage(42), null);
   assert.equal(store.routeMessage(999), null, "yo'q odam");
+  store.close();
+});
+
+test("metrics maxAgeMs: shuncha yangi hisob bo'lsa — qayta hisoblamaydi (og'ir so'rov, API qotmasin)", () => {
+  let time = 1_000_000;
+  const store = openStore({ file: ":memory:", now: () => time });
+  const first = store.metrics({ maxAgeMs: 15_000 });
+  store.addPost({ source: "@a", messageId: 1, text: "yangi e'lon matni uzunroq", postedAt: time });
+  assert.equal(store.metrics({ maxAgeMs: 15_000 }), first, "15 s ichida — o'sha natija");
+  assert.equal(store.metrics().queue.waiting, 1, "maxAgeMs'siz — har doim yangi");
+  time += 16_000;
+  assert.equal(store.metrics({ maxAgeMs: 15_000 }).queue.waiting, 1);
+  store.close();
+});
+
+test("qidiruv kirill/lotin farqisiz: «тошкент» = «Тошкент» = «toshkent», «Қўқон» = «qo'qon»; takrorlar qidiruvda yo'q", () => {
+  const store = openStore({ file: ":memory:" });
+  store.addPost({ source: "@a", messageId: 1, text: "Тошкентдан Қўқонга 5 тонна юк бор", postedAt: 1 });
+  store.addPost({ source: "@a", messageId: 2, text: "Toshkentdan Samarqandga yuk bor", postedAt: 2 });
+  store.addPost({ source: "@b", messageId: 3, text: "Тошкентдан Қўқонга 5 тонна юк бор", postedAt: 3 }, { dedupeWindowMs: 60_000 });
+  const found = (q, extra = {}) => store.listPosts({ q, ...extra }).total;
+  assert.equal(found("тошкент"), 2);
+  assert.equal(found("ТОШКЕНТ"), 2);
+  assert.equal(found("toshkent"), 2);
+  assert.equal(found("qo'qon"), 1);
+  assert.equal(found("Қўқон"), 1);
+  assert.equal(found("samarqand"), 1);
+  assert.equal(found("Самарқанд"), 1, "kirillcha so'rov lotin e'lonni ham topadi");
+  assert.equal(found("тошкент", { status: "duplicate" }), 1, "«Takror» bo'limida — takrorlar");
+  store.close();
+});
+
+test("backfillTextFold: eski e'lonlar (text_fold yo'q) eng yangisidan to'ldiriladi, keyin 0", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const { DatabaseSync } = await import("node:sqlite");
+  const file = path.join(mkdtempSync(path.join(tmpdir(), "yuk-fold-")), "t.db");
+  let store = openStore({ file });
+  for (let i = 1; i <= 7; i++) store.addPost({ source: "@a", messageId: i, text: `Тошкент ${i}`, postedAt: i });
+  store.close();
+  const raw = new DatabaseSync(file);
+  raw.exec("UPDATE posts SET text_fold = NULL"); // eski baza: ustun hali bo'sh
+  raw.close();
+  store = openStore({ file });
+  assert.equal(store.listPosts({ q: "toshkent" }).total, 0, "to'ldirilmaguncha topilmaydi");
+  let rounds = 0;
+  while (store.backfillTextFold(3) > 0) rounds++;
+  assert.equal(rounds, 3, "7 ta qator, 3 tadan");
+  assert.equal(store.listPosts({ q: "toshkent" }).total, 7);
+  assert.equal(store.backfillTextFold(3), 0);
   store.close();
 });

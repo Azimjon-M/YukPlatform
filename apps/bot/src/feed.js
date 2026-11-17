@@ -7,7 +7,11 @@
 import { FEED_MODES, FEED_MODE_IDS, FEED_SOURCES_MAX, feedOf, sourceKey } from "@yuk/shared";
 
 export const FEED_CALLBACK = /^fm:(\w+)$/;
-export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|ok|back)$/;
+export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|k:(open|closed)|ok|back)$/;
+
+// Pro bo'lmagan haydovchi yopiq guruhni bossa (Pro — boshqaruv markazidan yoki avtomatik: raqam + bog'langan akkaunt)
+export const CLOSED_PRO_TEXT =
+  "🔒 Yopiq guruhlardagi e'lonlar faqat Pro foydalanuvchilarga keladi. Pro avtomatik beriladi: raqamingizni ulashing va o'z Telegram akkauntingizni bog'lang (/account_qosh).";
 export const GROUPS_PAGE = 8;
 
 const modeTitle = (id) => `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`;
@@ -31,15 +35,22 @@ export function modeStep({ profile = null, intro = null } = {}) {
 function groupLabel(source, chosen) {
   const name = source.title || source.name;
   const short = name.length > 26 ? `${name.slice(0, 25)}…` : name;
-  return `${chosen ? "✅" : "▫️"} ${short} · ${source.perDay}/kun`;
+  if (source.locked) return `🔒 ${short} · Pro`;
+  return `${chosen ? "✅" : "▫️"} ${source.closed ? "🔒 " : ""}${short} · ${source.perDay}/kun`;
 }
 
-// list — store.feedSources(chatId) (eng faoli birinchi), chosen — tanlangan nomlar, mode — guruhlarim | guruhlarim_plus
-export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim" }) {
+// list — store.feedSources(chatId, { pro }) (eng faoli birinchi), chosen — tanlangan nomlar, mode — guruhlarim | guruhlarim_plus,
+// kind — qaysi bo'lim ko'rinadi: open (🌐 ochiq) | closed (🔒 yopiq; Azimjon, 2026-11-16: «publik va private guruhlardan
+// tanlaydigan qil»). Yopiq guruh bo'lmasa — bo'lim tugmalari yo'q
+export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", kind = "open", pro = false }) {
   const keys = new Set(chosen.map(sourceKey));
-  const pages = Math.max(1, Math.ceil(list.length / GROUPS_PAGE));
+  const open = list.filter((s) => !s.closed);
+  const closed = list.filter((s) => s.closed);
+  const tab = kind === "closed" && closed.length ? "closed" : "open";
+  const part = tab === "closed" ? closed : open;
+  const pages = Math.max(1, Math.ceil(part.length / GROUPS_PAGE));
   const p = Math.min(Math.max(0, Math.floor(page) || 0), pages - 1);
-  const shown = list.slice(p * GROUPS_PAGE, (p + 1) * GROUPS_PAGE);
+  const shown = part.slice(p * GROUPS_PAGE, (p + 1) * GROUPS_PAGE);
   const rest = mode === "guruhlarim_plus" ? "Qolgan guruhlardan esa — mashinangiz va yo'nalishingizga moslari." : "Boshqa guruhlardan hech narsa kelmaydi.";
   const lines = [
     `${modeTitle(mode)}`,
@@ -52,7 +63,16 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim" }) 
       : "Ro'yxat hozircha bo'sh.",
     "Kerakli guruh ro'yxatda yo'q bo'lsa — «➕ Guruh qo'shish» bilan qo'shing: tekshiruvdan o'tsa, shu yerda chiqadi.",
   ];
-  const keyboard = shown.map((source) => [{ text: groupLabel(source, keys.has(sourceKey(source.name))), data: `fg:t:${source.name}` }]);
+  if (tab === "closed") lines.push("", pro ? "🔒 <b>Yopiq guruhlar</b> — Pro foydalanuvchi sifatida ulardagi e'lonlar ham sizga keladi." : CLOSED_PRO_TEXT);
+  const count = (items) => items.filter((s) => keys.has(sourceKey(s.name))).length;
+  const keyboard = [];
+  if (closed.length) {
+    keyboard.push([
+      { text: `${tab === "open" ? "● " : ""}🌐 Ochiq · ${open.length}${count(open) ? ` (✅${count(open)})` : ""}`, data: "fg:k:open" },
+      { text: `${tab === "closed" ? "● " : ""}🔒 Yopiq · ${closed.length}${count(closed) ? ` (✅${count(closed)})` : ""}`, data: "fg:k:closed" },
+    ]);
+  }
+  keyboard.push(...shown.map((source) => [{ text: groupLabel(source, keys.has(sourceKey(source.name))), data: `fg:t:${source.name}` }]));
   if (pages > 1) {
     keyboard.push([
       { text: p > 0 ? "⬅️" : "·", data: `fg:p:${Math.max(0, p - 1)}` },

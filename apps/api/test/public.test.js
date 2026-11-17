@@ -194,6 +194,19 @@ test("yuklar: hammasi — faqat doiradagilar, eng yangisi birinchi, telefon bila
   assert.equal((await call("GET", "/pub/loads?view=all&hours=1", { token })).body.total, 0);
 });
 
+test("yopiq guruh e'loni: bepulga ko'rinmaydi («Hammasi» da ham), Pro'ga — ko'rinadi", async () => {
+  const { token } = await login();
+  const post = store.addPost({ source: "-1009876543", messageId: 99, text: "yopiq e'lon", postedAt: NOW - HOUR });
+  store.addLoad({ postId: post.id, key: "k99", load: { fromRegion: "buxoro", toRegion: "navoiy", truckClass: "fura" }, kind: "yuk" });
+  const total = async () => (await call("GET", "/pub/loads?view=all", { token })).body.total;
+  assert.equal(await total(), 3, "bepul — yopiq guruh yuki yo'q");
+  const pro = await fetch(`${adminBase}/api/drivers/${USER.id}`, { method: "PATCH", headers: { "x-yuk-admin": "1", "content-type": "application/json" }, body: JSON.stringify({ plan: "pro" }) });
+  assert.equal(pro.status, 200);
+  assert.equal(await total(), 4, "Pro — ko'rinadi");
+  store.saveDriver(USER.id, { plan: "free" });
+  assert.equal(await total(), 3);
+});
+
 test("mos yuklar: rol yoki profil bo'lmasa — 409; saqlangach — faqat mosi", async () => {
   const { token } = await login();
   const noRole = await call("GET", "/pub/loads", { token });

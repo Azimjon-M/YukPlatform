@@ -24,8 +24,9 @@ export function Chips({ options, selected, onPick, layout = "wrap", check = fals
           <button
             key={o.id}
             type="button"
-            className={`chip${on ? " on" : ""}`}
+            className={`chip${on ? " on" : ""}${o.disabled ? " locked" : ""}`}
             aria-pressed={on}
+            aria-disabled={o.disabled || undefined}
             onClick={() => {
               haptic.select();
               onPick(o.id);

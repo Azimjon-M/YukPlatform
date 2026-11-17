@@ -92,3 +92,56 @@ test("sinov hisobi: yuk e'lonlari, boshqa guruhdagining nusxasi, eskirganlar san
   assert.deepEqual(store.trialStats("@yangi", since), { posts: 7, loads: 2, processed: 4, waiting: 1, repeats: 1, noContact: 1 });
   assert.deepEqual(store.trialStats("@yangi", now() + 1), { posts: 0, loads: 0, processed: 0, waiting: 0, repeats: 0, noContact: 0 });
 });
+
+test("yopiq guruh o'chirilmaydi: yuk kam bo'lsa ham kuzatuvda qoladi; o'qib bo'lmasa — rad", () => {
+  const store = openStore({ file: ":memory:" });
+  store.addUserSource({ name: "-1001111111", chatId: 7, account: "dost" });
+  assert.equal(store.finishProbe("-1001111111", { ok: false, note: "Oxirgi 50 ta xabarda yuk e'loni yo'q", stats: { messages: 50, loadLike: 0 } }), true);
+  let row = store.listSources().find((s) => s.name === "-1001111111");
+  assert.equal(row.enabled, true);
+  assert.equal(row.checkState, "ok");
+  assert.match(row.checkNote, /^Yopiq guruh — e'lon kam bo'lsa ham doim kuzatiladi \(oxirgi 50/);
+
+  // Yuk guruhi deb topilsa — sinovsiz, darhol doimiy
+  store.addUserSource({ name: "-1002222222", chatId: 7, account: "dost" });
+  store.finishProbe("-1002222222", { ok: true, note: "Yuk guruhi: 3 ta yuk e'loni", stats: {} });
+  row = store.listSources().find((s) => s.name === "-1002222222");
+  assert.deepEqual([row.enabled, row.checkState, row.checkNote], [true, "ok", "Yuk guruhi: 3 ta yuk e'loni"]);
+  assert.equal(store.trialSources().length, 0, "sinovga tushmaydi");
+
+  // Eski sinovdagi yopiq guruh ham yiqilmaydi
+  store.addUserSource({ name: "-1004444444", chatId: 7, account: "dost" });
+  store.finishProbe("-1004444444", { ok: true, note: "bor", stats: {} });
+  row = store.listSources().find((s) => s.name === "-1004444444");
+  assert.equal(row.checkState, "ok");
+
+  // Akkaunt o'qiy olmadi (a'zo emas) — rad etiladi
+  store.addUserSource({ name: "-1003333333", chatId: 7, account: "dost" });
+  store.finishProbe("-1003333333", { ok: false, note: "o'qib bo'lmadi", stats: { error: "CHANNEL_PRIVATE" } });
+  row = store.listSources().find((s) => s.name === "-1003333333");
+  assert.equal(row.checkState, "failed");
+
+  // Ochiq guruh — avvalgidek o'chiriladi
+  store.addUserSource({ name: "@Ochiq", chatId: 7 });
+  store.finishProbe("@Ochiq", { ok: true, note: "", stats: {} });
+  store.finishTrial("@Ochiq", { ok: false, note: "kam", stats: {} });
+  row = store.listSources().find((s) => s.name === "@Ochiq");
+  assert.equal(row.enabled, false);
+  assert.equal(row.checkState, "failed");
+  store.close();
+});
+
+test("mergePost: ovozli xabar davomi — birga yangi e'lon, oldingisi yopiladi; yuk topilgan bo'lsa — birlashtirilmaydi", () => {
+  const store = openStore({ file: ":memory:" });
+  const a = store.addPost({ source: "@g", messageId: 1, text: "Toshkentdan Samarqandga yuk bor", postedAt: 1 });
+  store.finishPost(a.id, "done", "Aloqasiz: telefon raqami ham, lichkasi ham yo'q");
+  const merged = store.mergePost(a.id, { source: "@g", messageId: 2, text: "Nomerimiz +998 93 123 45 67", postedAt: 2, media: "voice" });
+  assert.equal(merged.status, "new");
+  const [post] = store.takeNewPosts(5);
+  assert.deepEqual([post.id, post.text, post.media], [merged.id, "Toshkentdan Samarqandga yuk bor\nNomerimiz +998 93 123 45 67", "voice"]);
+  assert.match(store.listPosts({}).items.find((p) => p.id === a.id).error, /^Davomi bilan birlashtirildi: #/);
+  const b = store.addPost({ source: "@g", messageId: 3, text: "Buxorodan Navoiyga yuk bor +998901112233", postedAt: 3 });
+  store.addLoad({ postId: b.id, key: "k", load: {}, kind: "yuk" });
+  assert.equal(store.mergePost(b.id, { source: "@g", messageId: 4, text: "qo'shimcha", postedAt: 4 }), null, "yuk allaqachon topilgan");
+  store.close();
+});

@@ -248,12 +248,13 @@ export function ErrorsPage() {
           </>
         }
       />
-      <p className="muted small page-note">
+      <details className="howto page-note">
+        <summary>ℹ️ Bu sahifa nimani ko'rsatadi</summary>
         Server xatolari — bot, collector, nginx, tunnel loglaridan va serverning o'zidan (server qayta yoqilsa bo'shaydi). Brauzer xatolari —
         shu boshqaruv markazi sahifalarida chiqqanlar (shu brauzerda saqlanadi). Qatorni bosing — to'liq matn va «Nusxa olish».
         «🗑 O'chirish» — shu yozuv o'chadi, xato yana chiqsa qaytadi. «🙈 E'tiborsiz qoldirish» — bu xato boshqa ko'rsatilmaydi (yana
         chiqsa ham), «🙈 E'tiborsiz» bo'limidan qaytarasiz.
-      </p>
+      </details>
 
       {oldServer ? (
         <ErrorBox error={{ kind: "client", message: "Server eski versiyada — server xatolari ishga-tushirish.bat (npm start) qayta yoqilgandan keyin ko'rinadi. Hozir faqat brauzer xatolari." }} />

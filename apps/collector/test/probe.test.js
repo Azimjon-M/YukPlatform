@@ -138,7 +138,7 @@ test("collector: yuk e'loni yo'q guruh rad etiladi va o'qilmaydi; topilmagan gur
 });
 
 // --- Akkaunt guruhlarini tekshirish «🔎 Auto scan» (live.js scanNext, 2026-11-13) ---
-test("Auto scan: bosilmaguncha hech narsa tekshirilmaydi; bosilgach «➕ Guruh qo'shish» tekshiruvidan o'tgani sinovga (yopig'i — shu akkaunt bilan), egasiga xabar yo'q", async () => {
+test("Auto scan: bosilmaguncha hech narsa tekshirilmaydi; bosilgach «➕ Guruh qo'shish» tekshiruvidan o'tgan ochig'i sinovga, yopig'i — sinovsiz doimiy (shu akkaunt bilan), egasiga xabar yo'q", async () => {
   const clock = { t: NOW };
   const store = openStore({ file: ":memory:", now: () => clock.t });
   store.setTgAccountOwner("ufk-1", 560);
@@ -170,9 +170,10 @@ test("Auto scan: bosilmaguncha hech narsa tekshirilmaydi; bosilgach «➕ Guruh 
   const logs = await run(3);
   // Uchala guruh 30 soniyada bittadan, a'zolar ko'pidan boshlab; o'zimizning kanal — tegilmadi
   assert.deepEqual(reads.map((r) => r.slice(0, 2)), [["id", "-1001"], ["id", "-1002"], ["id", "-1003"]]);
-  assert.ok(reads.every((r) => r[2] === 0 && r[3] === 50));
+  // Yopiq guruh (username'siz) — 100 ta xabar (judgeClosed), ochig'i — 50 ta
+  assert.deepEqual(reads.map((r) => [r[2], r[3]]), [[0, 100], [0, 50], [0, 100]]);
   const closed = store.findSource("-1001");
-  assert.deepEqual([closed.checkState, closed.enabled, closed.addedBy, closed.title], ["trial", true, 560, "Yopiq yuklar"]);
+  assert.deepEqual([closed.checkState, closed.enabled, closed.addedBy, closed.title], ["ok", true, 560, "Yopiq yuklar"], "yopiq — sinovsiz, darhol doimiy");
   assert.equal(store.listSources().find((s) => s.name === "-1001").account, "ufk-1", "yopig'ini shu akkaunt o'qiydi");
   const open = store.findSource("@ochiq_yuk");
   assert.deepEqual([open.checkState, open.chatType], ["trial", "channel"]);
@@ -186,8 +187,8 @@ test("Auto scan: bosilmaguncha hech narsa tekshirilmaydi; bosilgach «➕ Guruh 
   const summary = store.dialogScanSummary("ufk-1");
   assert.equal(summary.running, false, "navbat tugadi — so'rov o'chdi");
   assert.equal(summary.doneAt != null, true);
-  assert.deepEqual([summary.checked, summary.pending, summary.rejected, summary.trial], [3, 0, 1, 2]);
-  assert.ok(logs.some((l) => l.includes("«Yopiq yuklar»: akkaunt guruhi tekshirildi — -1001 sinovga olindi")));
+  assert.deepEqual([summary.checked, summary.pending, summary.rejected, summary.trial, summary.ok], [3, 0, 1, 1, 1]);
+  assert.ok(logs.some((l) => l.includes("«Yopiq yuklar»: akkaunt guruhi tekshirildi — -1001 darhol qo'shildi (yopiq)")));
   assert.ok(logs.some((l) => l.startsWith("Auto scan tugadi: shu safar 3 ta guruh tekshirildi, 2 tasi sinovga olindi")));
 
   // Keyin o'z-o'zidan qayta tekshirilmaydi; yana bosilsa — rad etilgani qayta ko'riladi, manbalarga tegilmaydi
@@ -221,7 +222,7 @@ test("yopiq guruh («➕ Guruh qo'shish»): foydalanuvchi akkaunti id bo'yicha t
   };
   await simulate({ clock, minutes: 2, sources: () => [], reader, store, scan: "ufk-1", probeAccount: "ufk-1" });
   assert.deepEqual(reads, [["id", "-1001234567"]], "faqat o'ziga biriktirilgan yopiq guruh; ochig'ini asosiy tekshiradi");
-  assert.equal(store.findSource("-1001234567").checkState, "trial");
+  assert.equal(store.findSource("-1001234567").checkState, "ok", "yuk guruhi bo'lgan yopiq guruh — sinovsiz doimiy");
   assert.equal(store.findSource("@ochiq").checkState, "probe");
   const results = store.inviteResults();
   assert.deepEqual(
@@ -231,4 +232,51 @@ test("yopiq guruh («➕ Guruh qo'shish»): foydalanuvchi akkaunti id bo'yicha t
       [missing, "invalid", null, null, null],
     ],
   );
+});
+
+test("yopiq guruh: gap-so'z orasidagi e'lonlar ham, nomi ham hisobga olinadi; jimlik rad sababi emas", async () => {
+  const { judgeClosed } = await import("../src/probe.js");
+  const NOW = Date.UTC(2026, 10, 16, 12);
+  const msg = (text, daysAgo = 0, sender = null) => ({ id: Math.random(), text, date: (NOW - daysAgo * 86_400_000) / 1000, sender });
+  const chat = Array.from({ length: 40 }, (_, i) => msg(`Assalomu alaykum, qalaysizlar aka-ukalar ${i}`));
+  const load = msg("Toshkentdan Samarqandga 10 tonna un bor, isuzu kerak", 0, { username: "ali_yuk" });
+  const load2 = msg("Farg'onadan Andijonga 3 tonna sement bor, labo kerak", 0, { username: "vali" });
+
+  // Gap ko'p, orada 2 ta e'lon (telefonsiz — yozgan odamning lichkasi) → yuk guruhi
+  assert.equal(judgeClosed([...chat, load, load2], { now: NOW, title: "Do'stlar" }).ok, true);
+  // 1 ta e'lon + nomida «ISUZU» → yuk guruhi
+  assert.equal(judgeClosed([...chat, load], { now: NOW, title: "Кукон ISUZU ва KIA юк ташиш" }).ok, true);
+  // 1 ta e'lon, nomida ham, gapda ham yuk yo'q → yo'q
+  assert.equal(judgeClosed([...chat, load], { now: NOW, title: "Qarindoshlar" }).ok, false);
+  // E'lon yo'q, lekin haydovchilar ish haqida gaplashadi va nomi yuk guruhi → ha
+  const talk = Array.from({ length: 6 }, (_, i) => msg(`Ertaga fura bo'shaydi, zagruzka bormi ${i}`));
+  assert.equal(judgeClosed([...chat, ...talk], { now: NOW, title: "Хундай Кия Спринтир Шафёлар Группаси" }).ok, true);
+  // Oddiy oilaviy guruh → yo'q
+  assert.equal(judgeClosed(chat, { now: NOW, title: "Oilam" }).ok, false);
+  // 20 kun jim, lekin e'lonlari bor → baribir qo'shiladi (izohda jimligi aytiladi)
+  const old = judgeClosed([msg("Toshkentdan Buxoroga 20 tonna yuk bor fura kerak +998901112233", 20), msg("Namangandan Toshkentga 5 tonna olma bor isuzu kerak +998901112234", 20)], {
+    now: NOW,
+    title: "Bogdod 952 tentofka",
+  });
+  assert.equal(old.ok, true);
+  assert.match(old.note, /jim/);
+  // Taksi guruhi — yo'lovchi e'loni yukka o'xshasa ham, 2 tasi yetmaydi
+  const taxi = [msg("Toshkentdan Bog'dodga 2 kishi bor +998901112235"), msg("Bog'doddan Toshkentga pochta bor +998901112236")];
+  assert.equal(judgeClosed(taxi, { now: NOW, title: "Toshkent Bog'dod Taksi" }).ok, false);
+  assert.equal(judgeClosed([], { now: NOW, title: "ISUZU" }).ok, false);
+  // Yopiq kanal (gap-so'z yo'q): yangiliklar orasida 5 ta yuk e'loni — yuk kanali emas; e'lonlar asosiy bo'lsa — ha
+  const news = Array.from({ length: 95 }, (_, i) => msg(`Viloyatda bugun yangi maktab ochildi, hokim tabrikladi ${i}`));
+  const fiveLoads = Array.from({ length: 5 }, (_, i) => msg(`Termizdan Toshkentga ${i + 5} tonna yuk bor, fura kerak +99890111223${i}`));
+  assert.equal(judgeClosed([...news, ...fiveLoads], { now: NOW, title: "Surxondaryoliklar.Uz | Расмий", channel: true }).ok, false);
+  assert.equal(judgeClosed([...news.slice(0, 10), ...fiveLoads], { now: NOW, title: "Yuk e'lonlari", channel: true }).ok, true);
+});
+
+test("yopiq guruh nomi kirillchada: «Кия» so'z sifatida topiladi, «Кияли» — yo'q", async () => {
+  const { judgeClosed } = await import("../src/probe.js");
+  const now = Date.UTC(2026, 10, 16, 12);
+  const one = [{ id: 1, text: "Салом", date: now / 1000 }];
+  assert.equal(judgeClosed(one, { now, title: "Кия шофёрлар" }).stats.titleHit, true);
+  assert.equal(judgeClosed(one, { now, title: "КИЯ" }).stats.titleHit, true);
+  assert.equal(judgeClosed(one, { now, title: "Кияли дўстлар" }).stats.titleHit, false);
+  assert.equal(judgeClosed(one, { now, title: "Юк ташиш хизмати" }).stats.titleHit, true);
 });

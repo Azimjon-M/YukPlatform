@@ -190,3 +190,26 @@ test("rejim: 50 tadan ortiq guruh tanlab bo'lmaydi", () => {
   for (let i = 0; i < 50; i++) form = toggleFeedSource(form, `@guruh_${i}_yuk`).form;
   assert.match(toggleFeedSource(form, "@yana_bir_guruh").error, /50 ta/);
 });
+
+test("«📌 Mening guruhlarim» ro'yxati: yopiq guruh belgisi, Pro'siz — tanlab bo'lmaydi, raqamli id ko'rsatilmaydi", async () => {
+  const { groupOptions } = await import("../src/feedGroups.js");
+  const options = groupOptions(
+    [
+      { name: "@TutGruz", title: "Tut Gruz", perDay: 3, closed: false, locked: false },
+      { name: "-1001", title: "Yopiq ISUZU", perDay: 1, closed: true, locked: true },
+    ],
+    [],
+  );
+  assert.deepEqual(options.map((o) => [o.id, o.closed, o.disabled, o.note]), [
+    ["@TutGruz", false, false, "@TutGruz"],
+    ["-1001", true, true, "🔒 Pro uchun"],
+  ]);
+});
+
+test("«📌 Mening guruhlarim» qidiruvi kirill/lotin farqisiz", async () => {
+  const { groupOptions } = await import("../src/feedGroups.js");
+  const { foldText } = await import("@yuk/shared");
+  const [o] = groupOptions([{ name: "-1001", title: "Кукон ISUZU юк", perDay: 1, closed: true, locked: false }], []);
+  assert.ok(o.search.includes(foldText("kukon")));
+  assert.ok(o.search.includes(foldText("ЮК")));
+});

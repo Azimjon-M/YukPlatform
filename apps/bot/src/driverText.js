@@ -2,12 +2,14 @@
 // (yoki qoidaviy parserga) beramiz — parseLoad —, natijadagi mashina ma'lumotini (truckClass/bodyType/weightT) haydovchi
 // PROFILIGA aylantiramiz. Yo'nalish bu yerda so'ralmaydi (u «📋 Mos yuklar» da tanlanadi) — faqat transport va xalqaro.
 // Preview bilan tasdiqlanadi (bot.js), shuning uchun AI ozroq adashsa ham foydalanuvchi ko'rib tuzatadi.
-import { sanitizeProfile } from "@yuk/shared";
+import { foldText, sanitizeProfile } from "@yuk/shared";
 
 // Matnda «xalqaro / qo'shni davlatlar / chet» belgilari bo'lsa — international (xomroq, lekin preview tasdiqlaydi).
 // scope UZ-only bo'lsa, sanitizeProfile baribir international'ni o'chiradi.
+// Matn avval foldText dan o'tadi (kichik harf, kirill → lotin, apostrofsiz): «Халқаро», «қўшни», «Қозоғистон», «чет эл»,
+// «междунар…» ham shu lotin so'zlarga tushadi (2026-11-16: oldin o'zbekcha kirillcha so'zlar umuman tanilmasdi)
 const INTL_RE =
-  /xalqaro|qo['’ʻ`]?shni|chet\s*el|xorij|chegaradan|qozog|qozoq|qirg'?iz|qirgiz|tojik|turkman|afg|rossiy|kazax|qazaq|казах|росси|междунар|киргиз|таджик|туркмен/i;
+  /xalqaro|qoshni|chet\s*el|xorij|chegaradan|qozog|qozoq|qirgiz|kirgiz|tojik|tadjik|turkm|afg|rossi|kazax|qazaq|mejdunar/;
 
 // parsed — parseLoad natijasi: { postType, loads: [{ truckClass, bodyType, weightT, loadingSides, ... }] } yoki null.
 // rawText — foydalanuvchi yozgan matn (xalqaromi — shundan aniqlanadi). scope — yo'nalish doirasi (.env ROUTE_SCOPE).
@@ -23,7 +25,7 @@ export function profileFromText(parsed, rawText, { scope } = {}) {
         "Yoki «🚚 Ro'yxatdan o'tish» formasidan to'ldiring.",
     };
   }
-  const international = INTL_RE.test(String(rawText ?? ""));
+  const international = INTL_RE.test(foldText(rawText));
   return sanitizeProfile(
     {
       vehicle: {

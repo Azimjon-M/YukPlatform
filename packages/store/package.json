@@ -8,5 +8,8 @@
   },
   "scripts": {
     "test": "node --disable-warning=ExperimentalWarning --test"
+  },
+  "dependencies": {
+    "@yuk/shared": "*"
   }
 }

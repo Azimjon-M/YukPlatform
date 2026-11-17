@@ -12,6 +12,7 @@ import {
   KIND_ROLE,
   feedMode,
   loadKeys,
+  isClosedSource,
   planAllows,
   rawWanted,
   routeChosen,
@@ -32,6 +33,16 @@ const POST_KIND = { yuk_bor: "yuk", mashina_bor: "mashina" };
 // @VODIY_BOYLAB_YUKLAR dagi GLogistics / Targo.uz e'lonlari (aloqa — ularning sayti yoki boti orqali).
 // Boshqaruv markazi izohni «Aloqasiz» deb taniydi (posts.error shu so'z bilan boshlanadi)
 export const NO_CONTACT = "Aloqasiz: telefon raqami ham, lichkasi ham yo'q";
+
+// Ochiq guruhdagi ovozli xabar / dumaloq video (collector media.js): gapirgan odamning username'i ko'pincha yo'q va raqamini
+// aytmaydi — aloqa «📄 Asl e'lon» orqali: haydovchi guruhda o'sha xabarni ochib eshitadi va o'sha yerdan yozadi
+// (Azimjon, 2026-11-16: «Buni qil»). Yopiq guruhda havola yo'q — haydovchi u yerga a'zo emas, shuning uchun bu istisno yo'q
+// Gapirgan odamning Telegram ID'si ham aloqa: bot «💬 Lichkasi» tugmasini tg://user?id= bilan beradi (Azimjon: «raqam
+// berilmasa u yuk e'loni emas degani emas! … lichkasi yoki id sidan foydalanib uni chatiga link qo'yish kerak»)
+// ID faqat bot taniydigan odam uchun ishlaydi (botga yozgan — drivers jadvalida): begonasini Telegram tugmada
+// BUTTON_USER_INVALID bilan rad etadi (2026-11-16 jonli loglarida 89 marta). known(id) — store.getDriver bo'yicha
+export const knownUser = (store) => (id) => Boolean(store?.getDriver?.(Number(id)));
+export const linkContact = (post, known = () => false) => Boolean(post?.media && (post?.link || (post?.senderId && known(post.senderId))));
 const NO_CONTACT_SKIPPED = `${NO_CONTACT} — AI'ga yuborilmadi`;
 
 // Tahlil natijasi tayyor bo'lgan bitta e'lon: yo'nalish doirasi → takrorni tashlash → bazaga yozish → kanal → foydalanuvchilar.
@@ -63,7 +74,7 @@ export async function handleParsed(post, result, deps) {
 
   // Telefon ham, lichka ham yo'q — bog'lanib bo'lmaydi: yuk saqlanmaydi va hech kimga yuborilmaydi.
   // Odatda bunday e'lon AI'gacha yopiladi (createWorker), bu — oxirgi to'siq (masalan, processPost yo'li)
-  if (deps.requireContact && post.shipper == null && !post.sender && result.loads.every((load) => !load.phones?.length)) {
+  if (deps.requireContact && post.shipper == null && !post.sender && !linkContact(post, knownUser(store)) && result.loads.every((load) => !load.phones?.length)) {
     store.finishPost(post.id, "done", NO_CONTACT, by);
     return { status: "skipped", reason: "contact", kind };
   }
@@ -90,10 +101,14 @@ export async function handleParsed(post, result, deps) {
   const matches = KIND_MATCHERS[kind];
   // Tezkor yo'lda bu e'lonni asl matn bilan olganlar (yoki navbatida turganlar) — ularga yuk qayta yuborilmaydi
   const rawSent = kind === "yuk" && fresh.length ? (deps.rawSentTo?.(post.id) ?? new Set(store.postDeliveredTo?.(post.id) ?? [])) : new Set();
+  // Yopiq guruh e'loni — faqat Pro obunadagilarga va guruhni qo'shgan odamga (roles.js planAllows);
+  // ochiq kanal va guruh bo'limlariga umuman chiqmaydi
+  const closed = post.shipper == null && isClosedSource(post.source);
+  const plan = { kind, source: closed ? post.source : null, owner: closed ? (store.sourceOwner?.(post.source) ?? null) : null };
   let sent = 0;
   for (const { id, load } of fresh) {
     // Kanal faqat yuklar uchun (va faqat CHANNEL_LOADS=1 bo'lsa — bot.js publish)
-    const channelMessageId = kind === "yuk" ? ((await deps.publish?.(load, post)) ?? null) : null;
+    const channelMessageId = kind === "yuk" && !closed ? ((await deps.publish?.(load, post)) ?? null) : null;
     let count = 0;
     for (const user of users) {
       if (kind === "yuk" && rawWanted(user.profile, post.source)) {
@@ -109,8 +124,8 @@ export async function handleParsed(post, result, deps) {
         if (kind === "yuk" && !routeChosen(user.profile)) continue;
         if (!matches(load, user.profile).ok) continue;
       }
-      // Obuna (hozircha hamma bepul va hammaga yuboriladi — roles.js planAllows)
-      if (!planAllows(user, { kind })) continue;
+      // Obuna: yopiq guruh e'loni — faqat Pro (roles.js planAllows)
+      if (!planAllows(user, plan)) continue;
       // Kanal va guruhimizga a'zo emas — yuborilmaydi (bot.js canReceive o'zi kuniga bir marta «a'zo bo'ling» deb eslatadi)
       if (deps.canReceive && !(await deps.canReceive(user))) continue;
       // deliver → { ok, error } (bot.js) yoki true/false. Har biri yoziladi: boshqaruv markazida kim qancha yuk olgani ko'rinadi
@@ -196,6 +211,7 @@ export function createWorker(
   { idleMs = 5000, fastMs = 1000, rawMaxAgeMs = 30 * 60_000, batch, fillWaitMs, liveWaitMs, log = console.log, now = Date.now, maxParallel, maxAgeMs = 0 } = {},
 ) {
   const { store } = deps;
+  const contactOf = (post) => hasContact(post) || linkContact(post, knownUser(store));
   const pool = deps.pool ?? poolFromParser(deps.parser);
   const size = batch ?? pool.batchSize ?? 10;
   const fillWait = fillWaitMs ?? pool.batchWaitMs ?? 90_000;
@@ -242,7 +258,7 @@ export function createWorker(
   // Aloqasiz e'lon — darhol yopiladi (AI so'rovi ham, qoidaviy parser ham kerak emas). true — yopildi
   let noContactCount = 0;
   function contactless(post) {
-    if (!deps.requireContact || hasContact(post)) return false;
+    if (!deps.requireContact || contactOf(post)) return false;
     store.finishPost(post.id, "done", NO_CONTACT_SKIPPED);
     noContactCount++;
     return true;
@@ -263,7 +279,7 @@ export function createWorker(
 
   // Bitta e'lon: kimga kerak (rejim + guruh) → yuk e'lonimi (AI'siz) → tezkor rejimda chet el emasmi → yuborish navbatiga
   function fast(post, users) {
-    if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || !hasContact(post)) return;
+    if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || !contactOf(post)) return;
     const wanted = users.filter((u) => rawWanted(u.profile, post.source));
     if (!wanted.length) return;
     let look;
@@ -281,12 +297,14 @@ export function createWorker(
     if (!targets.length) return;
     rawPending.set(post.id, new Set(targets.map((u) => u.chatId)));
     const phones = extractPhones(post.text);
+    const closed = isClosedSource(post.source);
+    const plan = { kind: "yuk", source: closed ? post.source : null, owner: closed ? (store.sourceOwner?.(post.source) ?? null) : null };
     rawChain = rawChain.then(async () => {
       let count = 0;
       for (const user of targets) {
         if (controller.signal.aborted) break;
         try {
-          if (!planAllows(user, { kind: "yuk" })) continue;
+          if (!planAllows(user, plan)) continue; // yopiq guruh — faqat Pro
           if (deps.canReceive && !(await deps.canReceive(user))) continue;
           const outcome = await deps.deliverRaw(user.chatId, post, { phones });
           const ok = outcome === true || outcome?.ok === true;

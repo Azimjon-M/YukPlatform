@@ -41,3 +41,15 @@ test("yengil mashinada kuzov yo'q — xato bermaydi", () => {
   assert.equal(profile.vehicle.bodyType, null);
   assert.equal(profile.vehicle.capacityKg, 500);
 });
+
+test("xalqaro ishlashi kirillchada ham tushuniladi («халқаро», «қўшни», «Қозоғистон», «международные»)", async () => {
+  const { profileFromText } = await import("../src/driverText.js");
+  const parsed = { loads: [{ truckClass: "fura", bodyType: "tent", weightT: 20 }] };
+  const intl = (text) => profileFromText(parsed, text, { scope: "qoshni" }).profile?.international;
+  assert.equal(intl("Фура тент 20 тонна, халқаро ҳам юраман"), true);
+  assert.equal(intl("фура, қўшни давлатларга"), true);
+  assert.equal(intl("фура 20т Қозоғистонга ҳам"), true);
+  assert.equal(intl("фура тент, международные рейсы"), true);
+  assert.equal(intl("Fura tent, xalqaro"), true);
+  assert.equal(intl("Фура тент 20 тонна, фақат Ўзбекистон"), false);
+});

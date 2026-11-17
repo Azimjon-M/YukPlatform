@@ -273,7 +273,9 @@ export function DriverDetails({ driver, now, onPurged, idleSince = null }) {
             <Item label="Oxirgi o'zgarish">
               <When ts={driver.updatedAt} now={now} />
             </Item>
-            <Item label="Obuna">{PLANS[driver.plan]?.name ?? driver.plan}</Item>
+            <Item label="Obuna">
+              {driver.plan !== "pro" && driver.autoPro ? "Pro (avtomatik: raqam + bog'langan akkaunt)" : (PLANS[driver.plan]?.name ?? driver.plan)}
+            </Item>
             {(driver.deletedCount > 0 || shown.deleted) && (
               <Item label="Hisobini o'chirgan">
                 {formatNumber(driver.deletedCount)} marta

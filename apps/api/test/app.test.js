@@ -95,6 +95,9 @@ test("haydovchilar: faol / pauzani boshqaruv markazidan o'zgartirib bo'lmaydi (f
   assert.equal((await send("PATCH", "/api/drivers/8", {})).status, 400);
   assert.equal((await send("PATCH", "/api/drivers/9", { isAdmin: true })).status, 404);
   assert.equal((await send("PATCH", "/api/drivers/8", { isAdmin: "ha" })).status, 400);
+  assert.equal((await send("PATCH", "/api/drivers/8", { plan: "pro" })).body.plan, "pro", "Pro obuna — faqat boshqaruv markazidan");
+  assert.equal((await send("PATCH", "/api/drivers/8", { plan: "vip" })).status, 400);
+  assert.equal((await send("PATCH", "/api/drivers/8", { plan: "free" })).body.plan, "free");
 });
 
 test("manbalar: qo'shish, takror, o'chirib-yoqish, o'chirish", async () => {

@@ -4,7 +4,7 @@ import { BODY_TYPES, REGIONS, TRUCK_CLASSES } from "@yuk/shared";
 import { get } from "../api.js";
 import { formatNumber, loadView } from "../format.js";
 import { useApi, useDebounced, useNow } from "../hooks.js";
-import { Async, Badge, Button, Empty, ExternalLink, Field, PageHeader, Pager, TimeAgo, useTitle } from "../ui.jsx";
+import { Async, Badge, Button, Empty, ExpandRow, ExternalLink, Field, PageHeader, Pager, TimeAgo, useTitle } from "../ui.jsx";
 
 const LIMIT = 50;
 const HOURS = [
@@ -35,81 +35,93 @@ const regionOptions = REGIONS.map((r) => ({ value: r.id, label: r.name }));
 const truckOptions = TRUCK_CLASSES.map((t) => ({ value: t.id, label: t.name }));
 const bodyOptions = BODY_TYPES.map((b) => ({ value: b.id, label: b.name }));
 
-function LoadCard({ item, now }) {
+// Yopiq: yo'nalish, mashina va yuk, o'ngda — qachon va nechta haydovchiga ketgani. Ochiq: hamma ma'lumot
+function LoadRow({ item, now }) {
   const v = loadView(item.load ?? {});
   const source = item.post?.source;
+  const sent = item.sentTo > 0;
   return (
-    <article className="load-card">
-      <div className="load-head">
-        <h3 className="load-route">
+    <ExpandRow
+      title={
+        <>
           {v.from} <span className="arrow" aria-hidden="true">→</span>
           <span className="sr-only">dan</span> {v.to}
-        </h3>
-        <span className="muted small nowrap">
+        </>
+      }
+      sub={[v.vehicle, v.cargo, v.price !== "narx yozilmagan" ? v.price : null].filter(Boolean).join(" · ") || v.category || "—"}
+      side={
+        <>
           <TimeAgo ts={item.createdAt} now={now} />
-        </span>
-      </div>
-
-      <dl className="load-facts">
-        {v.cargo && (
+          {sent && (
+            <span className="mini-tag is-good" title={`${item.sentTo} haydovchiga yuborildi`}>
+              ✓ {formatNumber(item.sentTo)}
+            </span>
+          )}
+        </>
+      }
+    >
+        <dl className="load-facts">
+          {v.cargo && (
+            <div>
+              <dt>Yuk</dt>
+              <dd>{v.cargo}</dd>
+            </div>
+          )}
+          {v.vehicle && (
+            <div>
+              <dt>Mashina</dt>
+              <dd>{v.vehicle}</dd>
+            </div>
+          )}
           <div>
-            <dt>Yuk</dt>
-            <dd>{v.cargo}</dd>
+            <dt>Narx</dt>
+            <dd>{v.price}</dd>
           </div>
-        )}
-        {v.vehicle && (
+          {v.when && (
+            <div>
+              <dt>Qachon</dt>
+              <dd>{v.when}</dd>
+            </div>
+          )}
+          {v.note && (
+            <div>
+              <dt>Izoh</dt>
+              <dd>{v.note}</dd>
+            </div>
+          )}
           <div>
-            <dt>Mashina</dt>
-            <dd>{v.vehicle}</dd>
+            <dt>Telefon</dt>
+            <dd>
+              {v.phones.length ? (
+                v.phones.map((p, i) => (
+                  <span key={p.href}>
+                    {i > 0 && ", "}
+                    <a href={p.href} className="phone">
+                      {p.text}
+                    </a>
+                  </span>
+                ))
+              ) : (
+                <span className="muted">yozilmagan — asl e'lonni oching</span>
+              )}
+            </dd>
           </div>
-        )}
-        <div>
-          <dt>Narx</dt>
-          <dd>{v.price}</dd>
+        </dl>
+        <div className="row-tags">
+          {v.category && <Badge>{v.category}</Badge>}
+          <Badge tone={sent ? "good" : "neutral"} icon={sent ? "✓" : "–"}>
+            {sent ? `${formatNumber(item.sentTo)} haydovchiga yuborildi` : "Haydovchiga yuborilmagan"}
+          </Badge>
+          {item.channelMessageId && (
+            <Badge tone="info" icon="✓">
+              Kanalda
+            </Badge>
+          )}
         </div>
-        {v.when && (
-          <div>
-            <dt>Qachon</dt>
-            <dd>{v.when}</dd>
-          </div>
-        )}
-        {v.note && (
-          <div>
-            <dt>Izoh</dt>
-            <dd>{v.note}</dd>
-          </div>
-        )}
-        <div>
-          <dt>Telefon</dt>
-          <dd>
-            {v.phones.length ? (
-              v.phones.map((p, i) => (
-                <span key={p.href}>
-                  {i > 0 && ", "}
-                  <a href={p.href} className="phone">
-                    {p.text}
-                  </a>
-                </span>
-              ))
-            ) : (
-              <span className="muted">yozilmagan — asl e'lonni oching</span>
-            )}
-          </dd>
-        </div>
-      </dl>
-
-      <div className="load-foot">
-        {v.category && <Badge>{v.category}</Badge>}
-        <Badge tone={item.sentTo > 0 ? "good" : "neutral"} icon={item.sentTo > 0 ? "✓" : "–"}>
-          {item.sentTo > 0 ? `${formatNumber(item.sentTo)} haydovchiga yuborildi` : "Haydovchiga yuborilmagan"}
-        </Badge>
-        <Badge tone={item.channelMessageId ? "info" : "neutral"} icon={item.channelMessageId ? "✓" : "–"}>
-          {item.channelMessageId ? "Kanalda" : "Kanalga chiqmagan"}
-        </Badge>
-        <span className="load-source">
-          {source && <span className="muted">{source}</span>}
+        <div className="row-meta">
+          {source && <span>{source}</span>}
           {item.post?.postedAt && (
-            <span className="muted">
+            <span>
               {" · e'lon "}
               <TimeAgo ts={item.post.postedAt} now={now} />
             </span>
@@ -120,9 +132,8 @@ function LoadCard({ item, now }) {
               <ExternalLink href={item.post.link}>Asl e'lon</ExternalLink>
             </>
           )}
-        </span>
-      </div>
-    </article>
+        </div>
+    </ExpandRow>
   );
 }
 
@@ -144,6 +155,8 @@ export function LoadsPage() {
   });
   const set = (name) => (value) => setFilters((f) => ({ ...f, [name]: value }));
   const dirty = q || Object.values(filters).some(Boolean);
+  const activeFilters = Object.values(filters).filter(Boolean).length;
+  const [showFilters, setShowFilters] = useState(false);
 
   return (
     <>
@@ -157,15 +170,27 @@ export function LoadsPage() {
         }
       />
 
-      <form className="filters" role="search" onSubmit={(e) => e.preventDefault()}>
-        <Select label="Qayerdan" value={filters.from} onChange={set("from")} options={regionOptions} placeholder="Hamma joy" />
-        <Select label="Qayerga" value={filters.to} onChange={set("to")} options={regionOptions} placeholder="Hamma joy" />
-        <Select label="Mashina turi" value={filters.truckClass} onChange={set("truckClass")} options={truckOptions} placeholder="Hammasi" />
-        <Select label="Kuzov" value={filters.bodyType} onChange={set("bodyType")} options={bodyOptions} placeholder="Hammasi" />
-        <Select label="Vaqt" value={filters.hours} onChange={set("hours")} options={HOURS} />
-        <Field label="Qidiruv" className="field-grow">
-          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Yuk, shahar, izoh…" />
-        </Field>
+      <form className="list-toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
+        <div className="toolbar-row">
+          <input
+            type="search"
+            className="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Yuk, shahar, izoh…"
+            aria-label="Yuklardan qidirish"
+          />
+          <Button className="filters-toggle" aria-expanded={showFilters} onClick={() => setShowFilters((v) => !v)}>
+            Filtr{activeFilters ? ` · ${activeFilters}` : ""}
+          </Button>
+        </div>
+        <div className={`filters-panel ${showFilters ? "is-open" : ""}`}>
+          <Select label="Qayerdan" value={filters.from} onChange={set("from")} options={regionOptions} placeholder="Hamma joy" />
+          <Select label="Qayerga" value={filters.to} onChange={set("to")} options={regionOptions} placeholder="Hamma joy" />
+          <Select label="Mashina turi" value={filters.truckClass} onChange={set("truckClass")} options={truckOptions} placeholder="Hammasi" />
+          <Select label="Kuzov" value={filters.bodyType} onChange={set("bodyType")} options={bodyOptions} placeholder="Hammasi" />
+          <Select label="Vaqt" value={filters.hours} onChange={set("hours")} options={HOURS} />
+        </div>
         {dirty && (
           <Button
             variant="ghost"
@@ -175,7 +200,7 @@ export function LoadsPage() {
               setQ("");
             }}
           >
-            Tozalash
+            Filtrlarni tozalash
           </Button>
         )}
       </form>
@@ -188,11 +213,11 @@ export function LoadsPage() {
             </Empty>
           ) : (
             <>
-              <div className="load-list">
+              <ul className="rows">
                 {data.items.map((item) => (
-                  <LoadCard key={item.id} item={item} now={now} />
+                  <LoadRow key={item.id} item={item} now={now} />
                 ))}
-              </div>
+              </ul>
               <Pager offset={offset} limit={LIMIT} total={data.total} onChange={(o) => setPage({ key, offset: o })} />
             </>
           )

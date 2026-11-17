@@ -13,6 +13,7 @@ import {
   TRUCK_CLASSES,
   bodyId,
   feedOf,
+  foldText,
   formatContactPhone,
   idleState,
   intlOption,
@@ -505,7 +506,7 @@ export function reloginHint(name) {
 // Faqat ishlayotgan (ok) akkauntlarning ro'yxati — sessiyasi yo'q akkaunt guruhni o'qiy olmaydi
 export function pickableDialogs(dialogs, accounts, query = "") {
   const working = new Set(accounts.filter((a) => a.status === "ok").map((a) => a.name));
-  const words = query.trim().toLowerCase();
+  const words = foldText(query.trim()); // kirill/lotin farqisiz
   const byPeer = new Map();
   for (const d of dialogs) {
     if (d.added || !working.has(d.account)) continue;
@@ -516,7 +517,7 @@ export function pickableDialogs(dialogs, accounts, query = "") {
     }
     byPeer.set(d.peerId, { ...d, accounts: [d.account] });
   }
-  const list = [...byPeer.values()].filter((d) => !words || [d.title, d.username ? `@${d.username}` : "", d.peerId].some((v) => v.toLowerCase().includes(words)));
+  const list = [...byPeer.values()].filter((d) => !words || [d.title, d.username ? `@${d.username}` : "", d.peerId].some((v) => foldText(v).includes(words)));
   return list.sort((a, b) => Number(Boolean(a.username)) - Number(Boolean(b.username)) || a.title.localeCompare(b.title));
 }
 
@@ -589,4 +590,59 @@ export function scanView(scan) {
   if (scan.rejected) parts.push(`${scan.rejected} tasi yuk guruhi emas`);
   if (scan.errors) parts.push(`${scan.errors} tasini o'qib bo'lmadi`);
   return { running: scan.running, text: parts.join(" · ") };
+}
+
+// --- Foydalanuvchilar ro'yxati (ixcham qator, 2026-11-16) ---
+// Yopiq qatordagi bitta holat belgisi: eng muhimi — o'chirgan > bloklangan > chiqqan > ro'yxatsiz > faol / pauza
+export function driverPill(driver, idleSince = null, now = Date.now()) {
+  const shown = driverShown(driver);
+  if (shown.deleted) return { tone: "critical", icon: "🗑", label: "O'chirgan" };
+  if (driver.banned) return { tone: "critical", icon: "🚫", label: "Bloklangan" };
+  if (shown.signedOut) return { tone: "warning", icon: "🚪", label: "Chiqqan" };
+  if (!driver.profile) return driver.registering ? { tone: "warning", icon: "◷", label: "Ro'yxatda" } : { tone: "neutral", icon: "–", label: "Profilsiz" };
+  if (driver.subOk === false) return { tone: "critical", icon: "🔒", label: "A'zo emas" };
+  const v = activeView(driver, idleSince, now);
+  return { tone: v.tone, icon: v.icon, label: v.label };
+}
+
+export const isProDriver = (driver) => driver.plan === "pro" || driver.autoPro === true;
+
+// Filtr tugmalari: id → shart
+export const DRIVER_FILTERS = [
+  { id: "all", label: "Hammasi", test: () => true },
+  { id: "active", label: "Faol", test: (d) => Boolean(d.profile) && d.active && !driverShown(d).deleted },
+  { id: "online", label: "Onlayn", test: (d, now) => activityView(d, now).online },
+  { id: "pro", label: "Pro", test: (d) => isProDriver(d) },
+  { id: "paused", label: "Pauzada", test: (d) => Boolean(d.profile) && !d.active },
+  { id: "noprofile", label: "Ro'yxatsiz", test: (d) => !d.profile && !driverShown(d).deleted && !driverShown(d).signedOut },
+  { id: "gone", label: "Chiqqan / o'chirgan", test: (d) => driverShown(d).deleted || driverShown(d).signedOut },
+];
+
+// Qidiruv: ism, @username, telefon raqami (raqamlari), Telegram ID
+export function driverMatches(driver, query) {
+  const q = foldText(String(query ?? "").trim().replace(/^@/, "")); // «давронбек» = «Davronbek»
+  if (!q) return true;
+  const digits = q.replace(/\D/g, "");
+  const phone = String(driverShown(driver).phone ?? "").replace(/\D/g, "");
+  return (
+    foldText(driver.name).includes(q) ||
+    foldText(driver.username).includes(q) ||
+    (digits.length >= 3 && (phone.includes(digits) || String(driver.chatId).includes(digits)))
+  );
+}
+
+// Yopiq qatordagi ikkinchi satr: «🚚 Haydovchi · Isuzu · 7 tonna» yoki ro'yxatdan qayergacha o'tgani
+export function driverLine(driver) {
+  const shown = driverShown(driver);
+  const role = shown.role ? ROLES[shown.role] : null;
+  const p = profileSummary(shown.profile);
+  const what = p ? p.vehicle : registrationText(driver);
+  return [role ? `${role.icon} ${role.name}` : null, what].filter(Boolean).join(" · ");
+}
+
+// Avatar uchun bosh harflar: «GT RUSHSHER» → «GR», ismsiz → username yoki «?»
+export function initials(driver) {
+  const words = String(driver.name || driver.username || "?").trim().split(/\s+/).filter(Boolean);
+  const letters = words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? "?").slice(0, 2);
+  return letters.toUpperCase();
 }

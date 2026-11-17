@@ -855,17 +855,9 @@ input[type="checkbox"] {
 }
 
 /* --- Tablar --- */
+/* Bo'limlar (ui.jsx Tabs) — .chips ko'rinishida (pastda), faqat ostidan joy */
 .tabs {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
   margin-bottom: 14px;
-  padding: 4px;
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  width: fit-content;
-  max-width: 100%;
 }
 
 .tab {
@@ -1867,11 +1859,29 @@ input[type="checkbox"] {
   font-size: 14.5px;
 }
 
-@media (max-width: 560px) {
-  .dialog-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
+/* Telefonda ham nom chapda, kichik «Qo'shish» o'ngda — ro'yxat qisqa bo'lsin */
+.dialog-list {
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.dialog-list .dialog-row {
+  border: 0;
+  border-radius: 0;
+  padding: 8px 12px;
+}
+
+.dialog-list .dialog-row + .dialog-row {
+  border-top: 1px solid var(--grid);
+}
+
+.dialog-row > .btn {
+  flex: none;
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: 13.5px;
 }
 
 /* --- Loglar --- */
@@ -2719,4 +2729,860 @@ a.btn {
 
 .sidebar-exit {
   color: var(--text-2);
+}
+
+/* ============================================================
+   Ixcham ro'yxatlar (2026-11-16): yopiq — bir qator, ochiq — hammasi.
+   Haydovchilar (.people / .person), Yuklar, Navbat (.rows / .row-item) va AI ulanishlari shu uslubda.
+   ============================================================ */
+
+/* Raqamlar qatori: 4 ta kichik ko'rsatkich (telefonda 2 × 2) */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-good .stat-value {
+  color: var(--good-text);
+}
+
+.stat-critical .stat-value {
+  color: var(--critical-text);
+}
+
+@media (max-width: 560px) {
+  .stats {
+    gap: 6px;
+  }
+
+  .stat {
+    padding: 8px 10px;
+  }
+
+  .stat-value {
+    font-size: 18px;
+  }
+
+  .stat-label {
+    font-size: 11.5px;
+  }
+}
+
+/* Qidiruv + filtr tugmalari */
+.list-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.search {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px 0 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23898781' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='m11 11 3.5 3.5'/%3E%3C/svg%3E")
+    no-repeat 12px center;
+  color: var(--text);
+  font: inherit;
+}
+
+/* Telefonda filtrlar bir qatorda, yon tomonga suriladi (sahifa emas) */
+.chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -16px;
+  padding: 0 16px 2px;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 861px) {
+  .chips {
+    flex-wrap: wrap;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: var(--surface-hover);
+}
+
+.chip.is-active {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--page);
+}
+
+.chip-count {
+  font-size: 12px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Odamlar ro'yxati (Haydovchilar) --- */
+.people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.person + .person {
+  border-top: 1px solid var(--grid);
+}
+
+.person-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.person-head:hover {
+  background: var(--surface-hover);
+}
+
+.person.is-open > .person-head {
+  background: var(--surface-2);
+}
+
+.person.is-deleted > .person-head .person-main,
+.person.is-deleted > .person-head .avatar {
+  opacity: 0.6;
+}
+
+.avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.avatar-online {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--good);
+  border: 2px solid var(--surface);
+}
+
+.person-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.person-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.person-name strong {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.person-sub {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pro-mark,
+.admin-mark {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+}
+
+.pro-mark {
+  background: linear-gradient(135deg, #f5b40f, #eb6834);
+  color: #fff;
+}
+
+.admin-mark {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.person-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.person-time {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ▸ / ▾ — CSS bilan chizilgan burchak */
+.chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--axis);
+  border-bottom: 2px solid var(--axis);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  justify-self: center;
+}
+
+[aria-expanded="true"] > .chevron {
+  transform: rotate(45deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}
+
+.person-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 18px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--grid);
+}
+
+.person-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.person-controls > * {
+  min-width: 0;
+}
+
+.person-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.person-facts > section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.person-facts h4 {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 900px) {
+  .person-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .person-head {
+    gap: 10px;
+    padding: 11px 12px;
+  }
+
+  .avatar {
+    width: 34px;
+    height: 34px;
+    font-size: 12.5px;
+  }
+
+  .person-body {
+    padding: 12px 10px 14px;
+  }
+
+  .detail-list {
+    grid-template-columns: minmax(84px, max-content) minmax(0, 1fr);
+    gap: 6px 10px;
+  }
+}
+
+/* --- Sahifa sarlavhasi telefonda: sarlavha va tugma bir qatorda --- */
+@media (max-width: 560px) {
+  .page-header {
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+
+  .page-header > div:first-child {
+    flex: 1 1 55%;
+    min-width: 0;
+  }
+
+  .page-actions {
+    flex-wrap: wrap;
+  }
+
+  .page-header h1 {
+    font-size: 21px;
+  }
+
+  .page-subtitle {
+    font-size: 13px;
+  }
+
+  .page-actions .btn {
+    padding-inline: 12px;
+  }
+}
+
+.person-alerts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.person-delivered {
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.person-delivered h4 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Telefonda «Hisob · Chiqish» faqat menyu ochilganda (oldin yopiq menyuda ham alohida qator bo'lib turardi) */
+@media (max-width: 860px) {
+  .sidebar-exit-row {
+    display: none;
+  }
+
+  .sidebar.is-open .sidebar-exit-row {
+    display: flex;
+    justify-content: flex-start;
+    padding: 4px 10px 10px;
+  }
+}
+
+/* --- Ixcham akkordeon qatorlari (ui.jsx ExpandRow) --- */
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.row-item + .row-item {
+  border-top: 1px solid var(--grid);
+}
+
+.row-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 16px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row-head.has-lead {
+  grid-template-columns: auto minmax(0, 1fr) auto 16px;
+}
+
+.row-head:hover {
+  background: var(--surface-hover);
+}
+
+.row-item.is-open > .row-head {
+  background: var(--surface-2);
+}
+
+.row-lead {
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+}
+
+.row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.row-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.row-sub {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px 16px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--grid);
+}
+
+.row-body .load-facts {
+  margin: 0;
+}
+
+.row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.row-meta {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* Yon belgi: «✓ 3» — nechta haydovchiga ketgani */
+.mini-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.mini-tag.is-good {
+  background: color-mix(in srgb, var(--good) 14%, transparent);
+  color: var(--good-text);
+}
+
+.mini-tag.is-critical {
+  background: color-mix(in srgb, var(--critical) 14%, transparent);
+  color: var(--critical-text);
+}
+
+.mini-tag.is-info {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+@media (max-width: 560px) {
+  .row-head {
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .row-body {
+    padding: 10px 12px 14px;
+  }
+}
+
+/* --- Filtrlar: telefonda yig'ilgan, «Filtrlar» tugmasi bilan ochiladi --- */
+.toolbar-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.toolbar-row .search {
+  flex: 1;
+  min-width: 0;
+}
+
+.filters-toggle {
+  flex: none;
+  height: 40px;
+}
+
+.filters-panel {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+@media (min-width: 861px) {
+  .filters-toggle {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .filters-panel {
+    display: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .filters-panel.is-open {
+    display: grid;
+  }
+}
+
+form.list-toolbar {
+  margin-bottom: 14px;
+}
+
+.list-toolbar .filters-reset {
+  align-self: flex-start;
+}
+
+.queue-toolbar {
+  margin-bottom: 12px;
+}
+
+.row-body .post-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.post-title {
+  font-weight: 500;
+}
+
+/* --- Ochiladigan karta (ui.jsx Card collapsible) --- */
+.card-collapsible > summary {
+  cursor: pointer;
+  list-style: none;
+  margin: -18px -20px;
+  padding: 16px 20px;
+  border-radius: var(--radius);
+}
+
+.card-collapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.card-collapsible > summary:hover {
+  background: var(--surface-hover);
+}
+
+.card-collapsible[open] > summary {
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--grid);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.card-collapsible[open] > summary + * {
+  margin-top: 30px;
+}
+
+.card-collapsible[open] > .chevron,
+.card-collapsible[open] > summary > .chevron {
+  transform: rotate(45deg);
+}
+
+.card-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.card-hint {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 560px) {
+  .card-collapsible > summary {
+    margin: -14px;
+    padding: 13px 14px;
+  }
+
+  .card-collapsible[open] > summary + * {
+    margin-top: 26px;
+  }
+}
+
+/* «Qanday ishlaydi» — uzun izoh yashirin */
+.howto {
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+
+.howto > summary {
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 500;
+  width: fit-content;
+}
+
+.howto[open] > summary {
+  margin-bottom: 8px;
+}
+
+.howto p + p {
+  margin-top: 8px;
+}
+
+/* Manba qatori ichida (ExpandRow): eski .source-row ko'rinishi */
+.row-item.is-off > .row-head .row-main {
+  opacity: 0.6;
+}
+
+.row-body .source-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row-body .source-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--grid);
+}
+
+/* Yopiq guruh tanlash ro'yxati telefonda: nom va tugma bir qatorda, sahifa yon tomonga surilmaydi */
+.dialog-row {
+  min-width: 0;
+}
+
+.dialog-row .source-main {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* AI: modellar — ixcham qatorlar (kalit kartasi ichida) */
+.model-rows {
+  box-shadow: none;
+}
+
+.model-rows .row-item.is-problem > .row-head {
+  box-shadow: inset 3px 0 0 var(--critical);
+}
+
+.model-rows .model-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  background: none;
+  padding: 0;
+}
+
+.model-rows .row-side {
+  max-width: 46vw;
+}
+
+.model-rows .row-side .mini-tag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Ko'rsatkich kartalari telefonda: izoh 2 qatordan oshmasin */
+@media (max-width: 560px) {
+  .tiles .tile {
+    padding: 10px 12px;
+  }
+
+  .tile-label {
+    font-size: 12px;
+  }
+
+  .tiles .tile-value {
+    font-size: 20px;
+  }
+
+  .tile-unit {
+    font-size: 13px;
+  }
+
+  .tile-sub {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    font-size: 11.5px;
+  }
+}
+
+/* --- Rasmlar (ui.jsx Avatar): profil / guruh rasmi, yo'q bo'lsa — bosh harflar --- */
+.avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.avatar img.is-loaded {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar img {
+    transition: none;
+  }
+}
+
+.avatar-online {
+  z-index: 1;
+}
+
+.avatar-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--surface);
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Manbalar qatori — kichikroq */
+.avatar.avatar-sm {
+  width: 30px;
+  height: 30px;
+  font-size: 11px;
 }

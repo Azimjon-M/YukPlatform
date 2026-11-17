@@ -4,9 +4,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
-import { isAdmin, parseAdminIds } from "@yuk/shared";
+import { PLAN_IDS, isAdmin, parseAdminIds } from "@yuk/shared";
 import { MAIN_TG_ACCOUNT, tunnelUrl } from "@yuk/store";
 import { createAiTools } from "./ai.js";
+import { createAvatars } from "./avatars.js";
 import { COOKIE_NAME, createAdminAuth, requestToken } from "./adminAuth.js";
 import { createErrorLog } from "./errorLog.js";
 import { createLive, processMarks } from "./live.js";
@@ -86,6 +87,8 @@ const validLabel = (value) => (value == null || String(value).trim() === "" ? nu
 // live — jonli yangilanish (live.js); berilmasa shu yerda yaratiladi (bazadan + jarayonlardan belgilar)
 // errors — xatolar jurnali (errorLog.js): server.js jarayon loglarini ham shunga beradi
 // slowMs — API javobi shundan uzoq cho'zilsa, «Xatolar» ga ogohlantirish yoziladi
+export const METRICS_TTL_MS = 15_000;
+
 export function createApp({
   store,
   processes,
@@ -99,6 +102,7 @@ export function createApp({
   auth = null,
   errors = createErrorLog(),
   slowMs = SLOW_MS,
+  avatars = createAvatars({ token: env.BOT_TOKEN?.trim() }),
 }) {
   const app = express();
   // Kirish: secret (data/secret.key) bo'lsa — parol bilan himoyalangan (.env ADMIN_PASS yoki panel orqali qo'yiladi).
@@ -219,9 +223,10 @@ export function createApp({
   // Jonli yangilanish: ochiq sahifaga «drivers o'zgardi» kabi xabarlar (SSE, live.js). Ma'lumotning o'zi — oddiy GET'larda
   api.get("/live", (req, res) => changes.handler(req, res));
 
+  // Ko'rsatkichlar og'ir (store.metrics, ~0,5–1,5 s) — METRICS_TTL_MS ichida qayta ishlatiladi (store admin.js)
   api.get("/overview", (req, res) => {
     res.json({
-      metrics: store.metrics(),
+      metrics: store.metrics({ maxAgeMs: METRICS_TTL_MS }),
       processes: processes.list(),
       config: configInfo(env, { publicUrl, tunnel: tunnelUrl(store) }),
       errors: errors.summary(), // yon paneldagi «Xatolar» soni uchun
@@ -267,6 +272,14 @@ export function createApp({
   // --- Haydovchilar ---
   // idleSince — avtomatik pauza soati qachondan (bot idle.js birinchi tekshiruvi): sahifa «qachon pauza bo'ladi» ni
   // @yuk/shared idleState bilan hisoblaydi
+  // Ro'yxatlardagi kichik rasmlar (avatars.js): yo'q bo'lsa 404 — ilova bosh harflarni ko'rsatadi
+  api.get("/avatar/:kind/:key", async (req, res) => {
+    const { kind, key } = req.params;
+    const data = kind === "user" ? await avatars.user(key) : kind === "source" ? await avatars.source(key) : null;
+    if (!data) return res.status(404).set("cache-control", "private, max-age=3600").end();
+    res.set({ "content-type": "image/jpeg", "cache-control": "private, max-age=86400" }).send(data);
+  });
+
   api.get("/drivers", (req, res) => res.json({ items: store.listDrivers(), idleSince: Number(store.getSetting("idle_since")) || null }));
 
   // «Batafsil» (akkordeon): saqlangan sozlamalar (ikkala rol), tarix, oxirgi yuborilgan yuklar
@@ -307,7 +320,13 @@ export function createApp({
       res.json({ ...store.getDriver(chatId), banned: store.banOf(store.getDriver(chatId)) });
       return;
     }
-    if (!("isAdmin" in body)) throw httpError(400, "isAdmin yoki blocked kerak");
+    if ("plan" in body) {
+      // Obuna: «pro» — yopiq guruhlar e'lonlari ham keladi (roles.js planAllows). Faqat boshqaruv markazidan
+      if (!PLAN_IDS.includes(body.plan)) throw httpError(400, `plan: ${PLAN_IDS.join(" | ")}`);
+      res.json(store.saveDriver(chatId, { plan: body.plan, why: "admin" }));
+      return;
+    }
+    if (!("isAdmin" in body)) throw httpError(400, "isAdmin, plan yoki blocked kerak");
     if (body.isAdmin === true && store.banOf(driver)) throw httpError(409, "Bloklangan foydalanuvchini admin qilib bo'lmaydi — avval blokdan chiqaring");
     res.json(store.saveDriver(chatId, { isAdmin: bool(body.isAdmin, "isAdmin"), why: "admin" })); // tarixda: «boshqaruv markazidan»
   });
@@ -326,7 +345,7 @@ export function createApp({
   // Foydalanuvchi qo'shgan manbada (bot «➕ Guruh qo'shish», 2026-11-10): addedByUser — kim (ism, username), trial —
   // sinov boshlanganidan beri nechta yuk e'loni (store.trialStats; faqat sinovdagilarda)
   api.get("/sources", (req, res) => {
-    const stats = store.sourceStats();
+    const stats = store.sourceStats({ maxAgeMs: METRICS_TTL_MS }); // og'ir (posts 24 soat) — 15 s kesh
     const empty = { posts: 0, duplicates: 0, loads: 0, lastPostAt: null, live: 0, delaySec: null };
     const userOf = (chatId) => {
       if (chatId == null) return null;

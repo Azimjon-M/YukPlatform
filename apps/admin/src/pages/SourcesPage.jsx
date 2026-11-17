@@ -2,10 +2,11 @@
 // O'zgarish collector'ning keyingi aylanishida kuchga kiradi.
 // Foydalanuvchilar ham qo'shadi (bot «➕ Guruh qo'shish», 2026-11-10): kim qo'shgani, tekshiruv va 24 soatlik sinov holati.
 import { useState } from "react";
+import { foldText } from "@yuk/shared";
 import { del, get, patch, post } from "../api.js";
 import { formatDateTime, formatNumber, sourceCheckView } from "../format.js";
 import { useApi, useNow } from "../hooks.js";
-import { Async, Badge, Button, Card, Empty, ExternalLink, Field, PageHeader, TimeAgo, Toggle, useTitle, useToast } from "../ui.jsx";
+import { Async, Avatar, Badge, Button, Card, Empty, ExpandRow, ExternalLink, Field, PageHeader, TimeAgo, Toggle, avatarUrl, useTitle, useToast } from "../ui.jsx";
 import { PrivateGroupPicker, TgAccountsCard, useTgAccounts } from "./TgAccounts.jsx";
 
 const NOTE = "O'zgarish collector'da bir necha soniyada kuchga kiradi.";
@@ -145,7 +146,7 @@ function AddSource({ onAdded }) {
   }
 
   return (
-    <Card title="Manba qo'shish">
+    <Card title="➕ Manba qo'shish" collapsible hint="ochiq guruh yoki kanal: @nomi yoki t.me havola">
       <form className="add-source" onSubmit={submit}>
         <Field label="Guruh yoki kanal" className="field-grow">
           <input
@@ -220,8 +221,31 @@ function SourceRow({ source, account, now, onChanged }) {
   // Yopiq guruhning manzili yo'q: nomi asosiy, raqami yonida
   const titled = !link && source.title;
   const accountDown = source.account && account?.status !== "ok";
+  const sub = [
+    titled ? source.name : source.title,
+    `24 s: ${formatNumber(s.posts)} e'lon · ${formatNumber(s.loads)} yuk`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <li className={`source-row ${enabled ? "" : "is-off"}`}>
+    <ExpandRow
+      className={enabled ? "" : "is-off"}
+      lead={<Avatar src={avatarUrl("source", source.name)} text={sourceInitials(source)} badge={link ? null : "🔒"} className="avatar-sm" />}
+      title={titled ? source.title : source.name}
+      sub={sub}
+      side={
+        <>
+          {s.lastPostAt ? <TimeAgo ts={s.lastPostAt} now={now} /> : <span>e'lon yo'q</span>}
+          {accountDown ? (
+            <span className="mini-tag is-critical">akkaunt ishlamayapti</span>
+          ) : check ? (
+            <span className={`mini-tag ${check.tone === "good" ? "is-good" : check.tone === "critical" ? "is-critical" : "is-info"}`}>{check.label}</span>
+          ) : (
+            <span className={`mini-tag ${enabled ? "is-good" : ""}`}>{enabled ? "kuzatilyapti" : "o'chiq"}</span>
+          )}
+        </>
+      }
+    >
       <div className="source-main">
         <div className="source-name">
           {link ? <ExternalLink href={link}>{source.name}</ExternalLink> : <strong>{titled ? source.title : source.name}</strong>}
@@ -297,9 +321,30 @@ function SourceRow({ source, account, now, onChanged }) {
           </Button>
         )}
       </div>
-    </li>
+    </ExpandRow>
   );
 }
+
+// Rasm bo'lmasa — nomining bosh harflari («@TutGruz» → «TU», «Кукон ISUZU» → «КI»)
+const sourceInitials = (source) => {
+  const words = String(source.title || source.name.replace(/^@/, "")).replace(/[^\p{L}\p{N}\s]/gu, " ").trim().split(/\s+/).filter(Boolean);
+  return (words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? "?").slice(0, 2)).toUpperCase();
+};
+
+// Ro'yxat filtrlari
+const SOURCE_FILTERS = [
+  { id: "all", label: "Hammasi", test: () => true },
+  { id: "on", label: "Kuzatilyapti", test: (s) => s.enabled },
+  { id: "off", label: "O'chiq", test: (s) => !s.enabled },
+  { id: "private", label: "Yopiq", test: (s) => !s.name.startsWith("@") },
+  { id: "users", label: "Foydalanuvchilarniki", test: (s) => s.addedBy != null },
+  { id: "quiet", label: "24 soatda jim", test: (s) => s.enabled && !s.stats?.posts },
+];
+
+const sourceMatches = (source, query) => {
+  const q = foldText(query.trim()); // kirill/lotin farqisiz: «кукон» → «Кукон ISUZU», «qoqon» ham
+  return !q || foldText(source.name).includes(q) || foldText(source.title).includes(q);
+};
 
 export function SourcesPage() {
   useTitle("Manbalar");
@@ -323,6 +368,10 @@ export function SourcesPage() {
       !["probe", "trial"].includes(s.checkState),
   );
   const queued = items.filter((s) => s.joinState === "wanted").length;
+  const [filter, setFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const counts = Object.fromEntries(SOURCE_FILTERS.map((f) => [f.id, items.filter(f.test).length]));
+  const currentFilter = SOURCE_FILTERS.find((f) => f.id === filter) ?? SOURCE_FILTERS[0];
   const byUsers = items.filter((s) => s.addedBy != null);
   const checking = byUsers.filter((s) => ["probe", "trial"].includes(s.checkState)).length;
 
@@ -345,9 +394,9 @@ export function SourcesPage() {
         title="Manbalar"
         subtitle={
           state.data
-            ? `${formatNumber(items.length)} ta guruh, ${formatNumber(items.filter((s) => s.enabled).length)} tasi kuzatilyapti, ${formatNumber(items.filter((s) => s.joined).length)} tasiga a'zo` +
-              (queued ? ` · a'zo bo'lish navbatida: ${formatNumber(queued)}` : "") +
-              (byUsers.length ? ` · foydalanuvchilar qo'shgan: ${formatNumber(byUsers.length)}${checking ? ` (tekshiruvda ${formatNumber(checking)})` : ""}` : "")
+            ? `${formatNumber(items.length)} ta guruh · ${formatNumber(items.filter((s) => s.enabled).length)} tasi kuzatilyapti · ${formatNumber(items.filter((s) => s.joined).length)} tasiga a'zo` +
+              (queued ? ` · navbatda: ${formatNumber(queued)}` : "") +
+              (checking ? ` · tekshiruvda: ${formatNumber(checking)}` : "")
             : "Collector e'lon o'qiydigan Telegram guruhlari"
         }
         actions={
@@ -364,18 +413,21 @@ export function SourcesPage() {
         }
       />
       <div className="stack">
-        <p className="muted small">
-          🔄 Har 25 s — collector guruhni o'z navbati bilan so'raydi: ko'p yozadigan guruh tez-tez (20 s gacha), jim guruh siyrak (10 daqiqagacha);
-          so'rovlar soni bir xil qoladi, faqat kerakli joyga taqsimlanadi. 🔔 Yangisi bo'lsa darhol — collector akkaunti guruhga a'zo: hamma
-          shunday guruhlarda yangi xabar bormi, har 15 soniyada bitta so'rov bilan tekshiriladi. ⚡ Jonli — Telegram yangi xabarni o'zi ham
-          yuboryapti (~1 s). «A'zo bo'lish» — collector akkauntini guruhga qo'shadi: 5 daqiqada bittadan, kuniga ko'pi bilan 15 ta (birdaniga ko'p
-          qo'shilish Telegram'ga spam-akkauntdek ko'rinadi), bildirishnomasi o'chiriladi; a'zolikni admin tasdiqlaydigan guruhga so'rov yuboriladi.
-        </p>
-        <p className="muted small">
-          👤 Foydalanuvchilar ham qo'shadi (raqamini ulashganlar, botdagi «➕ Guruh qo'shish»): 🔎 collector oxirgi 50 ta xabarini ko'radi —
-          yuk e'loni kam bo'lsa, darhol rad etiladi; 🧪 keyin 24 soat sinov — kamida 5 ta yuk e'loni chiqsa, doimiy qoladi, chiqmasa — o'chiriladi.
-          Natijani bot qo'shgan odamga o'zi yozadi.
-        </p>
+        <details className="howto">
+          <summary>ℹ️ Collector guruhlarni qanday o'qiydi</summary>
+          <p>
+            🔄 Har 25 s — collector guruhni o'z navbati bilan so'raydi: ko'p yozadigan guruh tez-tez (20 s gacha), jim guruh siyrak (10 daqiqagacha);
+            so'rovlar soni bir xil qoladi, faqat kerakli joyga taqsimlanadi. 🔔 Yangisi bo'lsa darhol — collector akkaunti guruhga a'zo: hamma
+            shunday guruhlarda yangi xabar bormi, har 15 soniyada bitta so'rov bilan tekshiriladi. ⚡ Jonli — Telegram yangi xabarni o'zi ham
+            yuboryapti (~1 s). «A'zo bo'lish» — collector akkauntini guruhga qo'shadi: 5 daqiqada bittadan, kuniga ko'pi bilan 15 ta (birdaniga ko'p
+            qo'shilish Telegram'ga spam-akkauntdek ko'rinadi), bildirishnomasi o'chiriladi; a'zolikni admin tasdiqlaydigan guruhga so'rov yuboriladi.
+          </p>
+          <p>
+            👤 Foydalanuvchilar ham qo'shadi (raqamini ulashganlar, botdagi «➕ Guruh qo'shish»): 🔎 collector oxirgi 50 ta xabarini ko'radi —
+            yuk e'loni kam bo'lsa, darhol rad etiladi; 🧪 keyin 24 soat sinov — kamida 5 ta yuk e'loni chiqsa, doimiy qoladi, chiqmasa — o'chiriladi.
+            Natijani bot qo'shgan odamga o'zi yozadi.
+          </p>
+        </details>
         <AddSource onAdded={state.reload} />
         <TgAccountsCard state={tg} now={now} />
         <PrivateGroupPicker
@@ -399,17 +451,46 @@ export function SourcesPage() {
                 </p>
               </Empty>
             ) : (
-              <ul className="source-list">
-                {data.items.map((source) => (
-                  <SourceRow
-                    key={`${source.name}:${source.enabled}`}
-                    source={source}
-                    account={source.account ? (accountsByName.get(source.account) ?? null) : null}
-                    now={now}
-                    onChanged={state.reload}
+              <>
+                <div className="list-toolbar">
+                  <input
+                    type="search"
+                    className="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Guruh nomi yoki @manzil"
+                    aria-label="Manbalardan qidirish"
                   />
-                ))}
-              </ul>
+                  <div className="chips" role="tablist" aria-label="Filtr">
+                    {SOURCE_FILTERS.map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={f.id === filter}
+                        className={`chip ${f.id === filter ? "is-active" : ""}`}
+                        onClick={() => setFilter(f.id)}
+                      >
+                        {f.label}
+                        <span className="chip-count">{formatNumber(counts[f.id])}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <ul className="rows">
+                  {data.items
+                    .filter((source) => currentFilter.test(source) && sourceMatches(source, query))
+                    .map((source) => (
+                      <SourceRow
+                        key={`${source.name}:${source.enabled}`}
+                        source={source}
+                        account={source.account ? (accountsByName.get(source.account) ?? null) : null}
+                        now={now}
+                        onChanged={state.reload}
+                      />
+                    ))}
+                </ul>
+              </>
             )
           }
         </Async>

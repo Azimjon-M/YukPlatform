@@ -9,7 +9,9 @@ import {
   isAdmin,
   matchTruck,
   parseAdminIds,
+  isClosedSource,
   planAllows,
+  planFilter,
   roleOf,
   sanitizeProfileFor,
   sanitizeShipperProfile,
@@ -40,9 +42,23 @@ test("admin: .env dagi ADMIN_IDS yoki boshqaruv markazidagi belgi", () => {
   assert.equal(isAdmin(null, [123]), false);
 });
 
-test("obuna: hozircha hamma uchun yuboriladi (pullik obuna uchun joy)", () => {
+test("obuna: ochiq guruh e'loni — hammaga, yopiq guruh e'loni — faqat Pro va guruhni qo'shganga", () => {
   assert.equal(planAllows({ plan: "free" }, { kind: "yuk" }), true);
   assert.equal(planAllows({}, {}), true);
+  assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "@TutGruz" }), true);
+  assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "shipper:5" }), true);
+  assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "-1001234567" }), false);
+  assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "-1001234567", owner: 2 }), false);
+  assert.equal(planAllows({ plan: "free", chatId: 2 }, { source: "-1001234567", owner: 2 }), true);
+  assert.equal(planAllows({ plan: "pro", chatId: 1 }, { source: "-1001234567" }), true);
+  assert.equal(planAllows({ plan: "free", autoPro: true, chatId: 1 }, { source: "-1001234567" }), true, "avtomatik Pro");
+  assert.equal(isClosedSource("-1001234567"), true);
+  assert.equal(isClosedSource("@abc"), false);
+  assert.equal(isClosedSource(null), false);
+  const asked = [];
+  const allowed = planFilter({ plan: "free", chatId: 7 }, (s) => (asked.push(s), s === "-1002" ? 7 : null));
+  assert.deepEqual(["@a", "-1001", "-1002", "-1001", null].map(allowed), [true, false, true, false, true]);
+  assert.deepEqual(asked, ["-1001", "-1002"], "har yopiq guruh bir marta so'raladi");
 });
 
 test("yuk beruvchi profili: ro'yxatdan tashqarisi tashlanadi, doira hisobga olinadi", () => {

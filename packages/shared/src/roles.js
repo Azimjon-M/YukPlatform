@@ -33,18 +33,42 @@ export const ROLE_KIND = { haydovchi: "yuk", yuk_beruvchi: "mashina" };
 export const KIND_ROLE = { yuk: "haydovchi", mashina: "yuk_beruvchi" };
 
 // --- Obuna ---
-// Pullik obuna hali yo'q (Azimjon: "qachondir qilamiz, hozir emas — joy qo'yib qo'y").
-// Keyin shu yerga reja qo'shiladi (masalan, pro: darhol; free: kechikib yoki kuniga N ta) va planAllows o'zgaradi.
+// free — bepul; pro — boshqaruv markazidan beriladi (Azimjon, 2026-11-16: «Yopiq guruhlardagi e'lonlar faqat men pro
+// beradigan foydalanuvchilarga … tekin e'lonlar va yopiq/pulli e'lonlar aralashib ketmasin»)
 export const PLANS = {
   free: { name: "Bepul" },
+  pro: { name: "Pro" },
 };
 export const DEFAULT_PLAN = "free";
+export const PLAN_IDS = Object.keys(PLANS);
 
-// Shu foydalanuvchiga hozir yuborilsinmi. Hozircha hamma uchun ha.
-// kind — "yuk" | "mashina", now — vaqt (keyin kechiktirish hisoblanganda kerak bo'ladi)
+// Yopiq guruh (qo'shimcha Telegram akkaunt o'qiydi): manba nomi raqam (-100…), ochiq guruh esa @nomi.
+// Yuk beruvchining o'zi yuborgan yuk (source null yoki "shipper:…") — ochiq
+export const isClosedSource = (source) => typeof source === "string" && /^-\d+$/.test(source);
+
+// Pro: boshqaruv markazidan berilgan (plan) yoki avtomatik — raqamini ulashgan va Telegram akkauntini bog'lagan
+// (store AUTO_PRO_SQL → user.autoPro)
+export const isPro = (user) => user?.plan === "pro" || user?.autoPro === true;
+
+// Shu e'lon shu foydalanuvchiga ko'rsatilsin / yuborilsinmi.
+// Yopiq guruhdan — faqat Pro obunadagilarga va shu guruhni o'z akkaunti bilan qo'shgan odamning o'ziga (owner — sources.added_by).
+// Ochiq guruhlardan — hammaga. kind, now — keyingi rejalar uchun (masalan, free: kechikib)
 // eslint-disable-next-line no-unused-vars
-export function planAllows(user, { kind, now } = {}) {
-  return true;
+export function planAllows(user, { kind, now, source = null, owner = null } = {}) {
+  if (!isClosedSource(source)) return true;
+  if (isPro(user)) return true;
+  return owner != null && user?.chatId != null && Number(owner) === Number(user.chatId);
+}
+
+// Ro'yxat uchun (web «📋 Yuklar», xarita, botdagi «📋 Mos yuklar»): source → ko'rsatilsinmi.
+// ownerOf(source) — store.sourceOwner; har yopiq guruh bir marta so'raladi
+export function planFilter(user, ownerOf) {
+  const owners = new Map();
+  return (source) => {
+    if (!isClosedSource(source)) return true;
+    if (!owners.has(source)) owners.set(source, ownerOf?.(source) ?? null);
+    return planAllows(user, { source, owner: owners.get(source) });
+  };
 }
 
 // --- Blok (boshqaruv markazidan; Azimjon, 2026-11-09) ---
