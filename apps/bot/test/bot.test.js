@@ -1633,6 +1633,7 @@ test("bot tavsifi Telegram chegarasiga sig'adi va kanal/guruh havolasi bor", asy
   const { DESCRIPTION, SHORT_DESCRIPTION } = await import("../src/bot.js");
   assert.ok(DESCRIPTION.length <= 512, `tavsif ${DESCRIPTION.length} belgi`);
   assert.ok(SHORT_DESCRIPTION.length <= 120, `qisqa bio ${SHORT_DESCRIPTION.length} belgi`);
+  assert.match(SHORT_DESCRIPTION, /🤖 AI yordamchi: @YukExperti$/);
   for (const text of [DESCRIPTION, SHORT_DESCRIPTION]) assert.match(text, /@Yuk_Ekspert\n💬 Guruh: @Yuk_Ekspert_chat/);
 });
 

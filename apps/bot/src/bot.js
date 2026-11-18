@@ -70,7 +70,9 @@ const ABOUT =
 const LINKS = "📢 Kanal: @Yuk_Ekspert\n💬 Guruh: @Yuk_Ekspert_chat";
 export const DESCRIPTION = `🚛 ${NAME} — ${ABOUT}\n\n${LINKS}\n\nBoshlash uchun /start ni bosing!`;
 // Bot profilidagi qisqa bio («About»; Telegram cheki — 120 belgi)
-export const SHORT_DESCRIPTION = `Yuk beruvchidan haydovchiga — to'g'ridan-to'g'ri.\n${LINKS}`;
+// AI yordamchi (2026-11-18, Azimjon: «Botni biosiga AI yordamchi: @YukExperti deb yozib qo'shib qo'y»); .env SUPPORT_USERNAME, bo'sh — yo'q
+const BIO_SUPPORT = (process.env.SUPPORT_USERNAME ?? "YukExperti").replace(/^@/, "");
+export const SHORT_DESCRIPTION = `Yukni to'g'ridan-to'g'ri haydovchiga.\n${LINKS}${BIO_SUPPORT ? `\n🤖 AI yordamchi: @${BIO_SUPPORT}` : ""}`;
 
 // Rolni almashtirishdan oldin (/rol, «🔄 Rolni almashtirish»)
 // Ro'yxatdan o'tishdagi oxirgi qadamdan oldin (forma va raqamdan keyin) — «Qayerdan?» shu matndan keyin keladi
