@@ -16,6 +16,7 @@ test("groupPrompt: faqat internet qidiruv, jim belgisi", () => {
   const p = groupPrompt({ title: "Test", about: "PUBG", ownerId: "1" });
   assert.match(p, /faqat internet qidiruv/);
   assert.match(p, /befarosat/);
+  assert.match(p, /«SIZ»/);
   assert.match(p, /<<JIM>>/);
 });
 
