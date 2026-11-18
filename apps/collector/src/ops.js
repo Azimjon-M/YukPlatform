@@ -28,6 +28,7 @@ import { Api } from "telegram";
 import { NewMessage } from "telegram/events/index.js";
 import { authErrorAction } from "./authErrors.js";
 import { ask } from "./prompt.js";
+import { createGroupResponder } from "./opsGroup.js";
 import { createResponder } from "./opsResponder.js";
 import { createClient, sendLoginCode, signInWithCode, signInWithPassword } from "./telegram.js";
 
@@ -324,11 +325,18 @@ async function listen(name) {
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
   // Egasi yozsa — Claude o'zi javob beradi (opsResponder.js). OPS_OWNER_ID bo'lmasa — faqat inbox
-  const responder = process.env.OPS_OWNER_ID
-    ? createResponder({ client, name, ownerId: process.env.OPS_OWNER_ID.trim(), opsDir: OPS_DIR, root: ROOT, audit })
+  const ownerId = process.env.OPS_OWNER_ID?.trim();
+  // Guruhlar (opsGroup.js): faqat ops/<nom>.groups.json dagilar, faqat egasi belgilangan bo'lsa
+  const groups = ownerId ? createGroupResponder({ client, name, ownerId, opsDir: OPS_DIR, audit }) : null;
+  const groupTitles = groups ? await groups.load().catch((e) => (console.error(`Guruhlar yuklanmadi: ${e.message}`), [])) : [];
+  const responder = ownerId
+    ? createResponder({ client, name, ownerId, opsDir: OPS_DIR, root: ROOT, audit, groups })
     : null;
   client.addEventHandler(async (event) => {
     const m = event.message;
+    if (event.isGroup && !m.out && groups) {
+      return groups.handle(m).catch((e) => console.error(`Guruh xabari xatosi: ${e.message}`));
+    }
     if (!event.isPrivate || m.out) return;
     try {
       const sender = await m.getSender();
@@ -350,7 +358,7 @@ async function listen(name) {
       console.error(`Xabarni yozib bo'lmadi: ${error.message}`);
     }
   }, new NewMessage({ incoming: true }));
-  console.log(JSON.stringify({ listening: true, pid: process.pid, autoReplyTo: responder?.ownerId ?? null }));
+  console.log(JSON.stringify({ listening: true, pid: process.pid, autoReplyTo: responder?.ownerId ?? null, groups: groupTitles }));
   await audit(`[${name}] listen start`);
   // Outbox: boshqa jarayon (npm run ops -- send …) yozgan buyruqlar
   await mkdir(outboxDir(name), { recursive: true, mode: 0o700 });

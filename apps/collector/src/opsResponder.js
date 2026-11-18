@@ -123,12 +123,17 @@ Oxirida foydalanuvchiga boradigan 1–3 jumlali matn (ichki tafsilotsiz):
 <<FOYDALANUVCHIGA>>…<</FOYDALANUVCHIGA>>`;
 
 // claude -p → { ok, text, sessionId, error }
-export function runClaude({ prompt, system, allowed, denied, sessionId, cwd, timeoutMs }) {
+// extraArgs / model — guruh yo'lagi uchun (opsGroup.js: --restricted, --tools WebSearch, --system-prompt, arzon model)
+export function runClaude({ prompt, system, allowed, denied, sessionId, cwd, timeoutMs, extraArgs, model }) {
   return new Promise((resolve) => {
-    const args = ["-p", prompt, "--output-format", "json", "--append-system-prompt", system,
-      "--allowedTools", ...allowed, "--disallowedTools", ...denied];
+    const args = ["-p", prompt, "--output-format", "json"];
+    if (system) args.push("--append-system-prompt", system);
+    if (allowed?.length) args.push("--allowedTools", ...allowed);
+    if (denied?.length) args.push("--disallowedTools", ...denied);
+    if (extraArgs?.length) args.push(...extraArgs);
     if (sessionId) args.push("--resume", sessionId);
-    if (process.env.OPS_CLAUDE_MODEL) args.push("--model", process.env.OPS_CLAUDE_MODEL);
+    const chosen = model ?? process.env.OPS_CLAUDE_MODEL;
+    if (chosen) args.push("--model", chosen);
     // .env sirlari (BOT_TOKEN, TG_SESSION, AI kalitlari) Claude jarayoniga o'tmasin
     const env = { ...process.env };
     for (const key of Object.keys(env)) if (/TOKEN|SESSION|KEY|SECRET|PASSWORD|API_ID|API_HASH/i.test(key)) delete env[key];
@@ -172,7 +177,7 @@ function lane() {
   };
 }
 
-export function createResponder({ client, name, ownerId, opsDir, root, audit }) {
+export function createResponder({ client, name, ownerId, opsDir, root, audit, groups = null }) {
   const owner = String(ownerId);
   const usersDir = path.join(opsDir, `${name}.users`);
   const ticketsFile = path.join(opsDir, `${name}.tickets.json`);
@@ -250,7 +255,17 @@ export function createResponder({ client, name, ownerId, opsDir, root, audit }) 
       { await toOwner("🆕 Suhbat xotirasi tozalandi."); return true; }
     }
     if (c === "/holat") {
-      await toOwner(`Navbatlar: suhbat ${lanes.owner.size}, qabulxona ${lanes.reception.size}, tuzatish ${lanes.fix.size}.`);
+      const g = groups ? `\nGuruhlar (${groups.enabled ? "yoqiq" : "o'chiq"}):\n${groups.usageText() || "—"}` : "";
+      await toOwner(`Navbatlar: suhbat ${lanes.owner.size}, qabulxona ${lanes.reception.size}, tuzatish ${lanes.fix.size}.${g}`);
+      return true;
+    }
+    // /guruh on|off — guruhlarda gapirishni yoqish/o'chirish; /guruh yangila — groups.json ni qayta o'qish
+    if (c === "/guruh" && groups) {
+      const a = String(arg ?? "").toLowerCase();
+      if (a === "on" || a === "yoq") groups.enabled = true;
+      else if (a === "off" || a === "ochir" || a === "o'chir") groups.enabled = false;
+      else if (a === "yangila") await groups.load();
+      await toOwner(`Guruhlar: ${groups.enabled ? "✅ yoqiq" : "⏸ o'chiq"}\n${groups.usageText() || "ro'yxat bo'sh"}\n\n/guruh on · /guruh off · /guruh yangila`);
       return true;
     }
     if (c === "/tiketlar") {
