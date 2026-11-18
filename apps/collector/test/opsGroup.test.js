@@ -15,6 +15,7 @@ test("namesPattern: ism/username bilan murojaatni taniydi, so'z ichidagini emas"
 test("groupPrompt: faqat internet qidiruv, jim belgisi", () => {
   const p = groupPrompt({ title: "Test", about: "PUBG", ownerId: "1" });
   assert.match(p, /faqat internet qidiruv/);
+  assert.match(p, /befarosat/);
   assert.match(p, /<<JIM>>/);
 });
 
