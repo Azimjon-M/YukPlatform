@@ -75,11 +75,11 @@ test("bosh sahifa: ko'rsatkichlar, jarayonlar, sozlamalar", async () => {
   assert.ok(!JSON.stringify(body).includes("maxfiy"));
 });
 
-test("yuklar va navbat: filtr, qayta urinish", async () => {
+test("yuklar va navbat: filtr, xatolarni o'chirish", async () => {
   assert.equal((await get("/api/loads?from=fargona")).body.total, 1);
   assert.equal((await get("/api/loads?from=toshkent_sh")).body.total, 0);
   assert.equal((await get("/api/posts?status=failed")).body.total, 1);
-  assert.deepEqual((await send("POST", "/api/posts/retry-failed")).body, { retried: 1 });
+  assert.deepEqual((await send("DELETE", "/api/posts/failed")).body, { deleted: 1, hidden: 0 });
   assert.equal((await get("/api/posts?status=failed")).body.total, 0);
 });
 

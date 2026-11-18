@@ -1,8 +1,7 @@
 // Bosh sahifa: navbat, oxirgi soat, kechikish, haydovchilar, xatolar, 24 soatlik grafik, jarayonlar, sozlamalar.
 // Ma'lumot: GET /api/overview (App har 10 s da yangilaydi).
-import { useState } from "react";
 import { aiTotals } from "../aiStatus.js";
-import { get, post } from "../api.js";
+import { get } from "../api.js";
 import { durationMin, formatNumber, formatTime } from "../format.js";
 import { useApi, useLiveStatus } from "../hooks.js";
 import { HourlyChart } from "../HourlyChart.jsx";
@@ -10,7 +9,7 @@ import { configChecklist, throughput } from "../metrics.js";
 import { Link } from "../navigation.jsx";
 import { useOverview } from "../overview.js";
 import { ProcessCard } from "../ProcessCard.jsx";
-import { Async, Badge, Button, Card, PageHeader, useTitle, useToast } from "../ui.jsx";
+import { Async, Badge, Button, Card, PageHeader, useTitle } from "../ui.jsx";
 
 const TONE_ICON = { good: "✓", warning: "!", serious: "!", critical: "✖", neutral: "•" };
 
@@ -28,31 +27,9 @@ function Tile({ label, value, unit, sub, children, tone }) {
   );
 }
 
-function FailedTile({ failed, onDone }) {
-  const notify = useToast();
-  const [busy, setBusy] = useState(false);
-  async function retryAll() {
-    setBusy(true);
-    try {
-      const { retried } = await post("/api/posts/retry-failed");
-      notify(`${formatNumber(retried)} ta e'lon navbatga qaytdi`);
-      onDone();
-    } catch (e) {
-      notify(e.message, "critical");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Tile label="Xato bo'lganlar" value={formatNumber(failed)} sub={failed ? "AI yoki tarmoq xatosi bilan tugagan" : "Xato yo'q"} tone={failed ? "critical" : null}>
-      <div className="tile-actions">
-        <Button onClick={retryAll} disabled={!failed} busy={busy}>
-          Qayta navbatga
-        </Button>
-        {failed > 0 && <Link to="/navbat">Ko'rish</Link>}
-      </div>
-    </Tile>
-  );
+// Xatolar soni — faqat ko'rsatkich (2026-11-18: «Qayta navbatga» olib tashlandi; o'chirish — Navbat → Xato)
+function FailedTile({ failed }) {
+  return <Tile label="Xato bo'lganlar" value={formatNumber(failed)} sub={failed ? "AI yoki tarmoq xatosi bilan tugagan" : "Xato yo'q"} tone={failed ? "critical" : null} />;
 }
 
 function Throughput({ metrics }) {
@@ -136,7 +113,7 @@ export function OverviewPage() {
                 value={formatNumber(metrics.loads.total)}
                 sub={`${formatNumber(metrics.loads.delivered)} tasi haydovchiga yetdi · ${formatNumber(metrics.loads.messages)} xabar`}
               />
-              <FailedTile failed={metrics.queue.failed} onDone={overview.reload} />
+              <FailedTile failed={metrics.queue.failed} />
             </div>
 
             <Card title="Oxirgi soat">

@@ -1,11 +1,13 @@
-// Navbat: GET /api/posts — collector yozgan e'lonlar va ularning holati. Xato bo'lganini qayta navbatga qo'yish mumkin.
+// Navbat: GET /api/posts — collector yozgan e'lonlar va ularning holati.
+// Xatolar: «🗑 Barcha xatolarni o'chirish» (DELETE /api/posts/failed). Qayta navbatga qo'yish 2026-11-18 da olib tashlandi —
+// vaqti o'tgan e'lonni qayta tahlil qilish kerak emas.
 import { useState } from "react";
-import { post as apiPost, get } from "../api.js";
+import { del, get } from "../api.js";
 import { formatNumber } from "../format.js";
 import { useApi, useDebounced, useNow } from "../hooks.js";
 import { useOverview } from "../overview.js";
 import { POST_TABS, postNote, postStatus, tabCounts } from "../status.js";
-import { Async, Badge, Button, Empty, ExpandRow, ExternalLink, PageHeader, Pager, TimeAgo, useTitle, useToast } from "../ui.jsx";
+import { Async, Badge, Button, ConfirmDialog, Empty, ExpandRow, ExternalLink, PageHeader, Pager, TimeAgo, useTitle, useToast } from "../ui.jsx";
 
 const LIMIT = 50;
 
@@ -21,25 +23,10 @@ const EMPTY_TEXT = {
 const TAG_TONE = { good: "is-good", critical: "is-critical", serious: "is-critical", info: "is-info" };
 
 // Yopiq: holat belgisi, e'lon matnining boshi, manba · #id, o'ngda — qachon. Ochiq: to'liq matn, izoh, havola
-function PostRow({ item, now, onChanged }) {
-  const notify = useToast();
-  const [busy, setBusy] = useState(false);
+function PostRow({ item, now }) {
   const meta = postStatus(item.status);
   const note = postNote(item);
   const source = item.fromShipper ? `📦 Yuk beruvchi · ${item.source.slice(8)}` : item.source;
-
-  async function retry() {
-    setBusy(true);
-    try {
-      const { retried } = await apiPost(`/api/posts/${item.id}/retry`);
-      notify(retried ? "Navbatga qaytdi" : "E'lon allaqachon navbatda yoki xato emas");
-      onChanged();
-    } catch (e) {
-      notify(e.message, "critical");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <ExpandRow
@@ -95,11 +82,6 @@ function PostRow({ item, now, onChanged }) {
             Tahlil: <TimeAgo ts={item.doneAt} now={now} />
           </span>
         )}
-        {item.status === "failed" && (
-          <Button onClick={retry} busy={busy} className="post-retry">
-            Qayta urinish
-          </Button>
-        )}
       </div>
     </ExpandRow>
   );
@@ -124,23 +106,26 @@ export function QueuePage() {
   const tabs = POST_TABS.map((t) => ({ ...t, count: overview.data ? counts[t.id] : null }));
 
   const notify = useToast();
-  const [retrying, setRetrying] = useState(false);
+  const [asking, setAsking] = useState(false); // «o'chirasizmi?» oynasi ochiqmi
+  const [clearing, setClearing] = useState(false);
 
   const refresh = () => {
     state.reload();
     overview.reload();
   };
 
-  async function retryAll() {
-    setRetrying(true);
+  async function clearAll() {
+    setClearing(true);
     try {
-      const { retried } = await apiPost("/api/posts/retry-failed");
-      notify(`${formatNumber(retried)} ta e'lon navbatga qaytdi`);
+      const { deleted, hidden } = await del("/api/posts/failed");
+      const total = deleted + hidden;
+      notify(total ? `${formatNumber(total)} ta xato o'chirildi` : "O'chiriladigan xato yo'q");
+      setAsking(false);
       refresh();
     } catch (e) {
       notify(e.message, "critical");
     } finally {
-      setRetrying(false);
+      setClearing(false);
     }
   }
 
@@ -174,8 +159,8 @@ export function QueuePage() {
           ))}
         </div>
         {status === "failed" && counts.failed > 0 && (
-          <Button className="filters-reset" onClick={retryAll} busy={retrying}>
-            Hammasini qayta navbatga
+          <Button className="filters-reset" variant="danger" onClick={() => setAsking(true)}>
+            🗑 Barcha xatolarni o'chirish
           </Button>
         )}
       </div>
@@ -189,7 +174,7 @@ export function QueuePage() {
               <p className="muted small list-count">{formatNumber(data.total)} ta e'lon</p>
               <ul className="rows">
                 {data.items.map((item) => (
-                  <PostRow key={item.id} item={item} now={now} onChanged={refresh} />
+                  <PostRow key={item.id} item={item} now={now} />
                 ))}
               </ul>
               <Pager offset={offset} limit={LIMIT} total={data.total} onChange={(o) => setPage({ key, offset: o })} />
@@ -197,6 +182,20 @@ export function QueuePage() {
           )
         }
       </Async>
+
+      <ConfirmDialog
+        open={asking}
+        busy={clearing}
+        title="Barcha xatolarni o'chirasizmi?"
+        confirmLabel="Ha, o'chirish"
+        onConfirm={clearAll}
+        onCancel={() => setAsking(false)}
+      >
+        <p>
+          Xato bilan tugagan {formatNumber(counts.failed)} ta e'lon ro'yxatdan o'chiriladi. Ular qayta tahlil qilinmaydi va buni ortga qaytarib
+          bo'lmaydi.
+        </p>
+      </ConfirmDialog>
     </>
   );
 }

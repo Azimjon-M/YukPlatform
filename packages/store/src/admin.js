@@ -105,11 +105,30 @@ export function createAdminQueries(db, now) {
       return { total, items: rows.map(postRow) };
     },
 
-    // Xato bilan tugagan e'lonni navbatga qaytaradi. id berilmasa — hamma xatolilarni. → nechtasi qaytdi
-    retryFailed(id = null) {
-      const sql = "UPDATE posts SET status = 'new', error = NULL, done_at = NULL WHERE status = 'failed'";
-      const result = id == null ? db.prepare(sql).run() : db.prepare(`${sql} AND id = ?`).run(id);
-      return Number(result.changes);
+    // «Barcha xatolarni o'chirish» (2026-11-18, Azimjon: «vaqti o'tgan xatolarga qayta ishlov kerak emas»).
+    // Avval «Qayta navbatga» bor edi — olib tashlandi: soatlab oldingi e'lon haydovchiga endi kerak emas.
+    // Xato bilan tugagan e'lonlar bazadan o'chiriladi. Istisno — haydovchiga allaqachon ketganlari:
+    //   • tezkor rejimda asl matn bilan yuborilgan (post_deliveries) — «📞 Telefon qilish» tugmasi raqamni
+    //     aynan shu e'lon matnidan oladi, o'chirsak haydovchidagi tugma ishlamay qoladi;
+    //   • yuk yozilgani bor (loads.post_id — FOREIGN KEY, o'chirib bo'lmaydi).
+    // Ular «o'tkazib yuborildi» bo'lib ro'yxatdan chiqadi, xato matni izoh sifatida qoladi.
+    // → { deleted, hidden } — nechtasi o'chdi, nechtasi faqat yashirildi
+    clearFailed() {
+      db.exec("BEGIN");
+      try {
+        const hidden = db
+          .prepare(
+            `UPDATE posts SET status = 'skipped', error = 'Xato (tozalangan): ' || COALESCE(error, '—')
+             WHERE status = 'failed' AND (id IN (SELECT post_id FROM post_deliveries) OR id IN (SELECT post_id FROM loads))`,
+          )
+          .run().changes;
+        const deleted = db.prepare("DELETE FROM posts WHERE status = 'failed'").run().changes;
+        db.exec("COMMIT");
+        return { deleted: Number(deleted), hidden: Number(hidden) };
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     },
 
     // --- Haydovchilar ---

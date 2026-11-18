@@ -32,14 +32,23 @@ test("yuklar ro'yxati: filtrlar, qidiruv, sahifalash", () => {
   assert.equal(store.listLoads().items[0].post.source, "@b", "eng yangisi birinchi");
 });
 
-test("navbat: holat bo'yicha, xatolini qayta navbatga qaytarish", () => {
+test("navbat: holat bo'yicha; barcha xatolarni o'chirish — haydovchiga ketganlari faqat yashiriladi", () => {
   const { store, b } = fixture();
   assert.equal(store.listPosts({ status: "duplicate" }).total, 1);
-  store.finishPost(b.id, "failed", "503");
+  const c = store.addPost({ source: "@c", messageId: 4, text: "Buxorodan Navoiyga 5 t isuzu", postedAt: 0 });
+  const d = store.addPost({ source: "@c", messageId: 5, text: "Xivadan Urganchga labo kerak +998901234567", postedAt: 0 });
+  store.addPostDelivery({ postId: d.id, chatId: 7, ok: true }); // tezkor rejimda asl matn bilan ketgan
+  for (const post of [b, c, d]) store.finishPost(post.id, "failed", "503");
   assert.equal(store.listPosts({ status: "failed" }).items[0].error, "503");
-  assert.equal(store.retryFailed(b.id), 1);
-  assert.equal(store.listPosts({ status: "new" }).items[0].id, b.id);
-  assert.equal(store.retryFailed(), 0);
+
+  assert.deepEqual(store.clearFailed(), { deleted: 1, hidden: 2 });
+  assert.equal(store.listPosts({ status: "failed" }).total, 0);
+  assert.equal(store.getPost(c.id), null, "hech kimga ketmagan xato — o'chdi");
+  assert.ok(store.getPost(d.id), "asl matni yuborilgan — qoldi («📞 Telefon qilish» raqamni matndan o'qiydi)");
+  const kept = store.listPosts({ status: "skipped" }).items;
+  assert.deepEqual(kept.map((p) => p.id).sort(), [b.id, d.id].sort(), "yuki bor (b) va yuborilgani (d) — o'tkazib yuborildi");
+  assert.equal(kept[0].error, "Xato (tozalangan): 503");
+  assert.deepEqual(store.clearFailed(), { deleted: 0, hidden: 0 });
 });
 
 test("manbalar: bir marta .env dan, qo'shish, o'chirish, statistika", () => {

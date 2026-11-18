@@ -148,9 +148,9 @@ test("Bearer token (curl/sinov) cookie o'rniga ishlaydi, noto'g'ri token 401", a
 test("o'zgartiruvchi so'rov sessiya BILAN ham x-yuk-admin'siz 403 (CSRF himoyasi ishlab turadi)", async () => {
   const ok = await ctx.call("POST", "/api/login", { body: { username: "admin", password: "parol-12345" }, ip: "9.9.9.8" });
   const cookie = ctx.cookieOf(ok);
-  const noHeader = await ctx.call("POST", "/api/posts/retry-failed", { body: {}, headers: { cookie, "x-yuk-admin": "" }, ip: "9.9.9.9" });
+  const noHeader = await ctx.call("DELETE", "/api/posts/failed", { body: {}, headers: { cookie, "x-yuk-admin": "" }, ip: "9.9.9.9" });
   assert.equal(noHeader.status, 403);
-  const withHeader = await ctx.call("POST", "/api/posts/retry-failed", { body: {}, headers: { cookie }, ip: "9.9.9.9" });
+  const withHeader = await ctx.call("DELETE", "/api/posts/failed", { body: {}, headers: { cookie }, ip: "9.9.9.9" });
   assert.equal(withHeader.status, 200);
 });
 

@@ -1486,10 +1486,6 @@ input[type="checkbox"] {
   color: var(--text-2);
 }
 
-.post-retry {
-  margin-left: auto;
-}
-
 /* --- Jadval (haydovchilar) --- */
 .table-card {
   background: var(--surface);

@@ -266,8 +266,8 @@ export function createApp({
     res.json(store.listPosts(pick(req.query, ["status", "q", "limit", "offset"])));
   });
 
-  api.post("/posts/retry-failed", (req, res) => res.json({ retried: store.retryFailed() }));
-  api.post("/posts/:id/retry", (req, res) => res.json({ retried: store.retryFailed(Number(req.params.id)) }));
+  // Xato bilan tugagan hamma e'lonlarni o'chirish (qayta navbatga qo'yish yo'q — vaqti o'tgan e'lon kerak emas)
+  api.delete("/posts/failed", (req, res) => res.json(store.clearFailed()));
 
   // --- Haydovchilar ---
   // idleSince — avtomatik pauza soati qachondan (bot idle.js birinchi tekshiruvi): sahifa «qachon pauza bo'ladi» ni
