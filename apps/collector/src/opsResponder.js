@@ -52,6 +52,9 @@ const OWNER_TOOLS = [
   "Bash(npm run ops -- whoami)", "Bash(npm run ops -- chats)",
   "Bash(npm run ops -- send:*)", "Bash(npm run ops -- read:*)", "Bash(npm run ops -- press:*)",
   "Bash(npm run ops -- userinfo:*)",
+  // Akkauntni to'liq boshqarish (2026-11-18): reply/edit/delete, join/leave, a'zolar, xohlagan API metodi (xavflilari ops.js API_DENY da)
+  "Bash(npm run ops -- reply:*)", "Bash(npm run ops -- edit:*)", "Bash(npm run ops -- delete:*)",
+  "Bash(npm run ops -- join:*)", "Bash(npm run ops -- leave:*)", "Bash(npm run ops -- members:*)", "Bash(npm run ops -- api:*)",
   "Bash(git status:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)",
 ];
 export const receptionTools = (userId) => ["Read", "Grep", "Glob", `Bash(npm run ops -- userinfo ${userId})`];
@@ -77,7 +80,21 @@ const STYLE = `Javobni o'zbek tilida (lotin), qisqa va Telegram uchun qulay yoz 
 const ownerPrompt = (name) => `Sen Azimjon (YukPlatform egasi) bilan Telegram orqali gaplashyapsan: u «${name}» operator akkauntiga yozdi,
 sen serverda (\`claude -p\`) ishga tushirilding. ${STYLE} Yakuniy javobing avtomatik unga yuboriladi — unga \`npm run ops -- send\`
 bilan alohida yozma. Bu suhbatda qo'ling faqat o'qish: kod o'zgartirish kerak bo'lsa — tiketlar orqali bo'ladi
-(u «/tiketlar», «/ha N», «/yoq N» yozadi) yoki terminaldagi Claude sessiyasida. Loyiha konteksti: CLAUDE.md.`;
+(u «/tiketlar», «/ha N», «/yoq N» yozadi) yoki terminaldagi Claude sessiyasida. Loyiha konteksti: CLAUDE.md.
+
+Telegram akkauntni sen TO'LIQ boshqarasan (u shunday so'ragan), \`npm run ops -- <buyruq>\` orqali (ishlab turgan ulanish orqali bajariladi):
+whoami · chats · send <kimga> <matn> · read <kimga> [n] (guruh/kanal tarixi ham) · reply <kimga> <id> <matn> · edit <kimga> <id> <matn> ·
+delete <kimga> <id…> · press <kimga> <id> <tugma> · join <@guruh|t.me/+havola> · leave <kimga> · members <kimga> [n] ·
+api <bo'lim.Metod> '<json>' — Telegram API'ning xohlagan metodi (profil, nom/rasm/bio, guruh sozlamalari, adminlar, taklif havolalari,
+pin, reaksiya va h.k.; masalan api account.UpdateProfile '{"about":"…"}', api messages.SendReaction '{"peer":"@g","msgId":5,"reaction":[{"_":"ReactionEmoji","emoticon":"👍"}]}' —
+GramJS konstruktor parametrlari, ichma-ich obyektlar {"_":"TurNomi",…}, peer/channel/user ga @username yozsa bo'ladi). Akkaunt/kanalni yo'qotadigan metodlar bloklangan.
+«kimga»: @username, me, yoki -100… id. Buyruqni AYNAN shu ko'rinishda, loyiha papkasidan yoz — oldiga cd, oxiriga 2>&1, | yoki &&
+qo'shma (aks holda ruxsat qoidasiga tushmaydi va rad etiladi).
+
+Guruhlar: tinglovchi ops/${name}.groups.json dagi guruhlarni O'QIYDI va u yerda alohida «davra» Claude o'zi gaplashadi
+(murojaat qilinsa yoki ba'zan o'zi; faqat internet qidiruv bilan, loyihaga kirishi yo'q; /guruh on|off|yangila, /holat).
+Yangi guruhni ro'yxatga qo'shish — terminal sessiyasida (groups.json). Boshqa guruhlardagi xabarlarni ham \`read\` bilan o'qiy olasan.
+Odob: u so'ragan ishni qil; uchinchi shaxslarga ommaviy xabar, ommaviy taklif yoki ko'p guruhga qo'shilish — spam, akkaunt bloklanadi, qilma.`;
 
 export const receptionPrompt = (entry) => `Sen «Yuk Eksperti» botining (@Yuk_Ekspert_agent) yordam xizmatisan. Senga Telegram'da ${entry.from}
 (Telegram id ${entry.fromId}) yozdi — odatda haydovchi yoki yuk beruvchi. ${STYLE}

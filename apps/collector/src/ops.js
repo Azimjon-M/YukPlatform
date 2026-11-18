@@ -187,6 +187,18 @@ function messageLine(m) {
   return `#${m.id} ${time} ${who}: ${(m.message ?? "").replace(/\s+/g, " ").slice(0, 300)}${media}${buttons ? `  ${buttons}` : ""}`;
 }
 
+// `api` orqali ham bajarilmaydigan metodlar: akkauntni, sessiyalarni, 2FA ni, raqamni yoki egalik qilinayotgan
+// kanal/guruhni yo'qotishga olib keladiganlar, pul to'lovlari
+const API_DENY = [
+  /^auth\./,
+  /^account\.(DeleteAccount|UpdatePasswordSettings|GetPasswordSettings|ResetAuthorization|ResetWebAuthorization|ResetWebAuthorizations|ChangePhone|SendChangePhoneCode|SetAccountTTL|ResetPassword|DeclinePasswordReset|ConfirmPhone|SendConfirmPhoneCode|ChangeAuthorizationSettings|InvalidateSignInCodes|UpdateDeviceLocked|AcceptAuthorization)$/,
+  /^channels\.(DeleteChannel|EditCreator|DeleteHistory)$/,
+  /^messages\.(DeleteChat|DeleteHistory|DeletePhoneCallHistory)$/,
+  /^payments\./,
+  /^stickers\./,
+  /^upload\./,
+];
+
 // Bitta buyruq (to'g'ridan-to'g'ri ulanishda ham, tinglovchi ichida ham) → chiqadigan matn
 async function runCommand(client, name, command, rest) {
   const out = [];
@@ -231,6 +243,71 @@ async function runCommand(client, name, command, rest) {
       out.push(`Yuborildi: «${button.text}»`);
     }
     await audit(`[${name}] press ${to} #${id} [${button.text}]`);
+  } else if (command === "reply" || command === "edit") {
+    // reply <kimga> <xabar id> <matn> · edit <kimga> <o'z xabarim id> <yangi matn>
+    const [to, id, ...words] = rest;
+    const text = words.join(" ").trim();
+    if (!text || !Number(id)) throw new Error(`${command} <kimga> <xabar id> <matn>`);
+    const peer = await peerOf(client, to);
+    if (command === "reply") {
+      const sent = await client.sendMessage(peer, { message: text, replyTo: Number(id) });
+      out.push(`Yuborildi: #${sent.id} (↪ #${id}) → ${to}`);
+    } else {
+      await client.editMessage(peer, { message: Number(id), text });
+      out.push(`Tahrirlandi: #${id}`);
+    }
+    await audit(`[${name}] ${command} ${to} #${id}: ${text.slice(0, 200).replace(/\s+/g, " ")}`);
+  } else if (command === "delete") {
+    const [to, ...ids] = rest;
+    const list = ids.map(Number).filter(Boolean);
+    if (!list.length) throw new Error("delete <kimga> <xabar id> [id …]");
+    await client.deleteMessages(await peerOf(client, to), list, { revoke: true });
+    out.push(`O'chirildi: ${list.map((i) => `#${i}`).join(" ")}`);
+    await audit(`[${name}] delete ${to} ${list.join(",")}`);
+  } else if (command === "join") {
+    // join @guruh | https://t.me/+HASH | https://t.me/joinchat/HASH
+    const target = String(rest[0] ?? "").trim();
+    const hash = target.match(/(?:t\.me\/(?:\+|joinchat\/))([\w-]+)/)?.[1];
+    if (hash) await client.invoke(new Api.messages.ImportChatInvite({ hash }));
+    else await client.invoke(new Api.channels.JoinChannel({ channel: await client.getEntity(target) }));
+    out.push(`Qo'shildi: ${target}`);
+    await audit(`[${name}] join ${target}`);
+  } else if (command === "leave") {
+    const entity = await peerOf(client, rest[0]);
+    if (entity.creator) throw new Error("Bu chatning egasi shu akkaunt — tashlab chiqilmaydi (egasiz qolib ketadi)");
+    if (entity.className === "Chat") await client.invoke(new Api.messages.DeleteChatUser({ chatId: entity.id, userId: "me" }));
+    else await client.invoke(new Api.channels.LeaveChannel({ channel: entity }));
+    out.push(`Chiqildi: ${rest[0]}`);
+    await audit(`[${name}] leave ${rest[0]}`);
+  } else if (command === "members") {
+    const [to, n = "50"] = rest;
+    const users = await client.getParticipants(await peerOf(client, to), { limit: Math.min(Number(n) || 50, 200) });
+    for (const u of users) out.push(`${u.id} ${titleOf(u)}${u.bot ? " [bot]" : ""}`);
+  } else if (command === "api") {
+    // Har qanday Telegram API metodi (2026-11-18, Azimjon: «Telegramni accountni to'laqonli boshqara olgin»):
+    //   api channels.EditTitle '{"channel":"@guruh","title":"Yangi nom"}'
+    // peer/channel/user maydonlariga @username yoki id yozsa bo'ladi — GramJS o'zi aylantiradi.
+    const [method, json = "{}"] = rest.length > 2 ? [rest[0], rest.slice(1).join(" ")] : rest;
+    if (!/^[a-z]+\.[A-Z]\w+$/.test(method ?? "")) throw new Error("api <bo'lim.Metod> [json], masalan: api account.UpdateProfile '{\"about\":\"…\"}'");
+    if (API_DENY.some((re) => re.test(method))) throw new Error(`${method} — taqiqlangan (akkaunt/kanalni yo'qotish xavfi). Buni faqat egasi o'zi qiladi.`);
+    const [ns, fn] = method.split(".");
+    const Ctor = Api[ns]?.[fn];
+    if (typeof Ctor !== "function") throw new Error(`Bunday metod yo'q: ${method}`);
+    // {"_":"ReactionEmoji","emoticon":"👍"} → new Api.ReactionEmoji(…) (ichma-ich TL obyektlar uchun)
+    const tl = (v) => {
+      if (Array.isArray(v)) return v.map(tl);
+      if (!v || typeof v !== "object") return v;
+      const fields = Object.fromEntries(Object.entries(v).filter(([k]) => k !== "_").map(([k, x]) => [k, tl(x)]));
+      if (!v._) return fields;
+      const [a, b] = String(v._).split(".");
+      const C = b ? Api[a]?.[b] : Api[a];
+      if (typeof C !== "function") throw new Error(`Bunday tip yo'q: ${v._}`);
+      return new C(fields);
+    };
+    const result = await client.invoke(new Ctor(tl(JSON.parse(json))));
+    const text = JSON.stringify(result, (k, v) => (typeof v === "bigint" ? String(v) : k === "originalArgs" || k === "fileReference" || k === "bytes" ? undefined : v));
+    out.push(text.length > 3500 ? `${text.slice(0, 3500)}… (${text.length} belgi)` : text);
+    await audit(`[${name}] api ${method} ${json.slice(0, 200).replace(/\s+/g, " ")}`);
   } else if (command === "logout") {
     await client.invoke(new Api.auth.LogOut());
     await unlink(opsSessionFile(name)).catch(() => {});
@@ -249,7 +326,7 @@ async function main() {
   const [command, ...rest] = positionals;
   if (command === "login") return withLock(name, () => cmdLogin(name));
   if (!command) {
-    console.log("Buyruqlar: login | listen | whoami | chats | send <kimga> <matn> | read <kimga> [n] | press <kimga> <xabar id> <tugma> | logout");
+    console.log("Buyruqlar: login | listen | whoami | chats | send <kimga> <matn> | read <kimga> [n] | press <kimga> <xabar id> <tugma> | reply|edit <kimga> <id> <matn> | delete <kimga> <id…> | join <@|havola> | leave <kimga> | members <kimga> [n] | api <bo'lim.Metod> [json] | logout");
     return;
   }
   if (command === "listen") return withLock(name, () => listen(name));
@@ -359,6 +436,19 @@ async function listen(name) {
     }
   }, new NewMessage({ incoming: true }));
   console.log(JSON.stringify({ listening: true, pid: process.pid, autoReplyTo: responder?.ownerId ?? null, groups: groupTitles }));
+  // Ulanish osilib qolsa (logda «Error: TIMEOUT», xabarlar kelmay qoladi) — 3 marta ketma-ket javob bo'lmasa jarayon
+  // chiqib ketadi, supervisor qayta ishga tushiradi (autorestart). Har 2 daqiqada tekshiradi.
+  let misses = 0;
+  setInterval(async () => {
+    try {
+      await Promise.race([client.invoke(new Api.updates.GetState()), pause(30_000).then(() => { throw new Error("30 s javob yo'q"); })]);
+      misses = 0;
+    } catch (error) {
+      misses += 1;
+      console.error(`Ulanish tekshiruvi (${misses}/3): ${error.message}`);
+      if (misses >= 3) { await audit(`[${name}] listen health-check failed — restart`); await stop(); }
+    }
+  }, 120_000).unref();
   await audit(`[${name}] listen start`);
   // Outbox: boshqa jarayon (npm run ops -- send …) yozgan buyruqlar
   await mkdir(outboxDir(name), { recursive: true, mode: 0o700 });
