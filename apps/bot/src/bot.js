@@ -775,7 +775,8 @@ export function createBot({
       await ctx.editMessageText("Bu tugma eskirgan.").catch(() => {});
       return showStart(ctx);
     }
-    await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[mode].icon} ${FEED_MODES[mode].name} ✅`).catch(() => {});
+    // Inline tugmadan kelgan bo'lsa — rejim oynasini yopamiz («⚡ Tezkorni o'chirish» menyu tugmasidan kelganda tahrirlanadigan xabar yo'q)
+    if (ctx.callbackQuery) await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[mode].icon} ${FEED_MODES[mode].name} ✅`).catch(() => {});
     if (FEED_MODES[mode].groups) {
       // Shu yoki boshqa guruh rejimida edi (guruhlarim ↔ + saralangan) — tanlovi qoladi; boshqa rejimdan — bo'sh
       const feed = feedOf(driver.profile);
@@ -793,6 +794,20 @@ export function createBot({
     // Tezkor — mashina kerak emas (bori saqlanadi: saralanganga qaytsa, qayta kiritmaydi)
     const updated = store.saveDriver(ctx.chat.id, { role: "haydovchi", profile: rawProfile(feed, driver.profile), draft: null, active: true });
     await feedSaved(ctx, updated);
+  }
+
+  // «⚡ Tezkorni o'chirish» (Azimjon, 2026-11-18: «Fast mode ni 1 ta yoqsa bo'ldi kegin o'chmaydigan bo'libdi»): tezkor →
+  // saralangan. Mashina va yo'nalish profilda qolgan (rawProfile saqlaydi) — qayta kiritish shart emas; mashinasi yo'q
+  // bo'lsa — saralanganning odatdagi yo'li (ro'yxatdan o'tish taklif qilinadi). Qayta yoqish — «🎛 Rejim» → «⚡ Tezkor»
+  async function turnFastOff(ctx) {
+    const driver = rememberUser(ctx);
+    if (roleOf(driver) !== "haydovchi") return showStart(ctx);
+    if (feedMode(driver.profile) !== "tezkor") {
+      await ctx.editMessageReplyMarkup().catch(() => {});
+      return ctx.reply(`⚡ Tezkor rejim yoqilmagan. Rejimlar — «${MENU.feed}».`, menu(driver));
+    }
+    await ctx.reply(`⚡ Tezkor o'chirildi. Qayta yoqish — «${MENU.feed}» → «⚡ Tezkor».`, html(driver));
+    return pickMode(ctx, "saralangan");
   }
 
   async function setActive(ctx, active) {
@@ -1181,14 +1196,17 @@ export function createBot({
   privateChat.hears(MENU.role, switchRolePrompt);
   privateChat.hears(MENU.help, showHelp);
   privateChat.hears(MENU.feed, openModes);
+  privateChat.hears(MENU.fastOff, turnFastOff);
   privateChat.command("rejim", openModes);
   privateChat.hears(MENU.groups, openGroups);
 
   // «🎛 Yuklarni qanday olasiz?» tugmalari
   bot.callbackQuery(FEED_CALLBACK, async (ctx) => {
     await ctx.answerCallbackQuery();
+    if (ctx.chat?.type !== "private") return;
+    if (ctx.match[1] === "off") return turnFastOff(ctx); // «🔴 Tezkorni o'chirish» (rejim oynasida, tezkor yoqiq bo'lsa)
     const mode = validFeedMode(ctx.match[1]);
-    if (!mode || ctx.chat?.type !== "private") return;
+    if (!mode) return;
     await pickMode(ctx, mode);
   });
 

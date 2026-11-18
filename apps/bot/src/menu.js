@@ -23,6 +23,7 @@ export const MENU = {
   apps: "📱 Ilovalar", // menyuda yo'q (eski menyular uchun ushlanadi) — /ilovalar
   role: "🔄 Rolni almashtirish",
   feed: "🎛 Rejim", // haydovchi: yuklarni olish rejimi (feed.js, 2026-11-14) — /rejim
+  fastOff: "⚡ Tezkorni o'chirish", // tezkor rejimda birinchi tugma → saralanganga qaytadi (Azimjon, 2026-11-18: «bir marta yoqsa, keyin o'chmaydigan bo'libdi»)
   groups: "📌 Guruhlarim", // «📌 Mening guruhlarim» rejimlarida — qaysi guruhlardan (feed.js groupStep)
   help: "❓ Yordam",
   admin: "🛠 Boshqaruv",
@@ -139,10 +140,12 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   // Haydovchi (Azimjon, 2026-11-10 tartibi — O'ZGARMAYDI; rejim tugmalari — oxirida, «keyin qolganlari»)
   // Pauza holati: profil to'ldirilganda pauza tugmasi ishlaydi; u pauzaga tushsa tugma «▶️ Davom ettirish» bo'ladi
   // Birinchi tugma rejimga qarab (2026-11-14): saralangan bor — «📋 Mos yuklar»; faqat guruhlarim — «📌 Guruhlarim»;
-  // tezkor — «🎛 Rejim» (ro'yxat kerak emas: hamma yuk o'zi keladi)
+  // tezkor — «⚡ Tezkorni o'chirish» (2026-11-18; avval «🎛 Rejim» edi — o'chirish yo'li ko'rinmasdi, odamlar pauza bilan
+  // to'xtatib yurgan). «🎛 Rejim» pastki qatorga tushadi
   const paused = driver.active === false;
-  const mode = FEED_MODES[feedMode(driver.profile)];
-  const first = mode.sorted ? matchesLabel(driver) : mode.groups ? MENU.groups : MENU.feed;
+  const modeId = feedMode(driver.profile);
+  const mode = FEED_MODES[modeId];
+  const first = mode.sorted ? matchesLabel(driver) : mode.groups ? MENU.groups : modeId === "tezkor" ? MENU.fastOff : MENU.feed;
   const keyboard = loadRow(new Keyboard()).text(first).text(paused ? MENU.resume : MENU.pause).row();
   // Rolni almashtirish (haydovchi ↔ yuk beruvchi) — /rol bilan bir xil. Odamda bugun yuk, ertaga bo'sh mashina bo'lishi
   // mumkin, /rol ni esa hamma ham topavermaydi. Rol tanlanmagan bo'lsa tugma yo'q

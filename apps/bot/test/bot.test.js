@@ -1661,7 +1661,7 @@ test("rejim: «⚡ Tezkor» — mashinasiz darhol saqlanadi, menyuda «🎛 Reji
   assert.ok(texts(calls).some((t) => /Rejim: <b>⚡ Tezkor<\/b>[\s\S]*darhol/.test(t)));
   assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi/, "raqam bir marta so'raladi");
   await message(PRIVATE, PHONE.later);
-  assert.deepEqual(menuRows(calls), [[MENU.feed, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings]]);
+  assert.deepEqual(menuRows(calls), [[MENU.fastOff, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings], [MENU.feed]]);
   assert.equal(store.activeUsers("haydovchi").length, 1, "mashinasiz ham faol");
   // Eski menyudagi «📋 Mos yuklar» — yo'nalish so'ralmaydi, rejim aytiladi
   await message(PRIVATE, MENU.loads);
@@ -1673,6 +1673,44 @@ test("rejim: «⚡ Tezkor» — mashinasiz darhol saqlanadi, menyuda «🎛 Reji
   assert.equal(store.getDriver(42).profile.feed.mode, "saralangan");
   assert.match(texts(calls).at(-1), /Ro'yxatdan o'tishning 2 yo'li/);
   assert.deepEqual(menuRows(calls), [[MENU.register], [MENU.writeHere], [MENU.role, MENU.help]]);
+});
+
+test("rejim: «⚡ Tezkorni o'chirish» — menyudan ham, rejim oynasidan ham; mashina va yo'nalish qoladi, qayta yoqiladi", async () => {
+  const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP } });
+  // Saralangan, mashina va yo'nalish bor haydovchi tezkorni yoqdi
+  const vehicle = { truckClass: "isuzu", bodyType: "tent", capacityKg: 5000 };
+  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", profile: { vehicle, fromAreas: ["toshkent"], toAreas: [], routeAt: 1, feed: { mode: "saralangan", sources: [] } } });
+  await press("fm:tezkor");
+  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
+  assert.equal(menuRows(calls)[0][0], MENU.fastOff, "tezkorda birinchi tugma — o'chirish");
+
+  // 1) Pastki menyudagi «⚡ Tezkorni o'chirish»
+  await message(PRIVATE, MENU.fastOff);
+  let driver = store.getDriver(42);
+  assert.equal(driver.profile.feed.mode, "saralangan");
+  assert.deepEqual(driver.profile.vehicle, vehicle, "mashina qayta kiritilmaydi");
+  assert.deepEqual(driver.profile.fromAreas, ["toshkent"], "yo'nalish qoladi");
+  assert.equal(driver.active, true);
+  assert.ok(texts(calls).some((t) => /Tezkor o'chirildi/.test(t)));
+  assert.equal(menuRows(calls)[0][0], MENU.loads, "endi «📋 Mos yuklar»");
+
+  // Qayta yoqish — «🎛 Rejim» → «⚡ Tezkor»; rejim oynasida «🔴 Tezkorni o'chirish» faqat tezkor yoqiqda
+  await message(PRIVATE, MENU.feed);
+  let picker = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.ok(!inlineButtons(picker).some((b) => b.callback_data === "fm:off"), "tezkor o'chiq — o'chirish tugmasi yo'q");
+  await press("fm:tezkor");
+  await message(PRIVATE, MENU.feed);
+  picker = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.match(picker.payload.text, /Tezkor hozir <b>yoqiq<\/b>/);
+  assert.ok(inlineButtons(picker).some((b) => b.callback_data === "fm:off"));
+
+  // 2) Rejim oynasidagi «🔴 Tezkorni o'chirish»
+  await press("fm:off");
+  assert.equal(store.getDriver(42).profile.feed.mode, "saralangan");
+  // Eski tugma yana bosilsa — o'zgarmaydi, tushuntiradi
+  await press("fm:off");
+  assert.match(texts(calls).at(-1), /Tezkor rejim yoqilmagan/);
+  assert.equal(store.getDriver(42).profile.feed.mode, "saralangan");
 });
 
 test("rejim: «📌 Mening guruhlarim» — ro'yxatdan tanlash, kamida bitta; saqlangach menyuda «📌 Guruhlarim»", async () => {

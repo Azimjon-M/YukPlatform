@@ -13,6 +13,7 @@ export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|k:(open|closed)|ok|back)$/;
 export const CLOSED_PRO_TEXT =
   "🔒 Yopiq guruhlardagi e'lonlar faqat Pro foydalanuvchilarga keladi. Pro avtomatik beriladi: raqamingizni ulashing va o'z Telegram akkauntingizni bog'lang (/account_qosh).";
 export const GROUPS_PAGE = 8;
+export const FAST_OFF_BUTTON = "🔴 Tezkorni o'chirish";
 
 const modeTitle = (id) => `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`;
 
@@ -28,6 +29,11 @@ export function modeStep({ profile = null, intro = null } = {}) {
     "Rejimni keyin istalgan payt almashtirasiz.",
   ];
   const keyboard = FEED_MODE_IDS.map((id) => [{ text: `${current === id ? "✅ " : ""}${modeTitle(id)}`, data: `fm:${id}` }]);
+  // Tezkor yoqiq — alohida «o'chirish» tugmasi (2026-11-18): boshqa rejimni tanlash ham uni o'chiradi, lekin buni topish qiyin edi
+  if (current === "tezkor") {
+    lines.push("", `⚡ Tezkor hozir <b>yoqiq</b>. O'chirsangiz — ${modeTitle("saralangan")} rejimiga qaytasiz.`);
+    keyboard.push([{ text: FAST_OFF_BUTTON, data: "fm:off" }]);
+  }
   return { text: lines.join("\n"), keyboard };
 }
 
