@@ -63,3 +63,11 @@ test("createGroupResponder: murojaatga javob, murojaatsiz — bufer, <<JIM>> —
   await g.handle(msg(32, "Claude?"));
   assert.equal(sent.length, 2);
 });
+
+test("namesPattern: persona ismi bilan murojaat", () => {
+  const re = namesPattern({ firstName: "Yuk Agenti" }, ["Sarvar", "Сарвар"]);
+  assert.ok(re.test("Sarvar qalaysiz"));
+  assert.ok(re.test("сарвар ука"));
+  assert.ok(!re.test("sarvarlar keldi"));
+  assert.match(groupPrompt({ title: "G", ownerId: "1", persona: "Isming Sarvar" }), /Isming Sarvar/);
+});
