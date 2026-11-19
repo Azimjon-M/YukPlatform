@@ -463,15 +463,33 @@ export function createReader(client) {
         }
       }
       const out = new Map();
+      // out.messages — Map(source.value → oxirgi xabar, plainMessage) (Map'ning o'z xossasi: eski chaqiruvlar o'zgarmaydi)
+      const messages = new Map();
+      out.messages = messages;
       for (let i = 0; i < items.length; i += 50) {
         const chunk = items.slice(i, i + 50);
         const result = await client.invoke(
           new Api.messages.GetPeerDialogs({ peers: chunk.map(([, entity]) => new Api.InputDialogPeer({ peer: utils.getInputPeer(entity) })) }),
         );
         const top = new Map(result.dialogs.filter((d) => d.peer).map((d) => [utils.getPeerId(d.peer), d.topMessage]));
+        // Javobda har guruhning OXIRGI XABARINING O'ZI ham bor (2026-11-19, Azimjon: e'lon botga ~2 daqiqada keladi) —
+        // live.js uni alohida so'rovsiz darhol navbatga qo'yadi. Yozgan odam (sender) javobdagi users'dan
+        const known = new Map([...(result.users ?? []), ...(result.chats ?? [])].map((e) => [utils.getPeerId(e), e]));
+        const last = new Map();
+        for (const m of result.messages ?? []) {
+          if (!(m instanceof Api.Message) || !m.peerId) continue;
+          try {
+            m._finishInit?.(client, known, undefined);
+            last.set(`${utils.getPeerId(m.peerId)}:${m.id}`, plainMessage(m));
+          } catch {}
+        }
         for (const [source, entity] of chunk) {
-          const value = top.get(utils.getPeerId(entity));
-          if (value != null) out.set(source.value, value);
+          const peer = utils.getPeerId(entity);
+          const value = top.get(peer);
+          if (value == null) continue;
+          out.set(source.value, value);
+          const message = last.get(`${peer}:${value}`);
+          if (message) messages.set(source.value, message);
         }
       }
       return out;

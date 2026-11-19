@@ -175,7 +175,9 @@ export async function runLive({
   budgetPerMin = 20,
   minMs = 20_000,
   maxMs = 10 * MINUTE,
-  topsMs = 15_000,
+  // 2026-11-19: 15 s → 5 s («Bizga tezlik kerak»): javobda oxirgi xabarning o'zi ham keladi (checkTops), FLOOD_WAIT
+  // bo'lsa handleFlood o'zi sekinlashtiradi. .env TOPS_SECONDS bilan o'zgartirsa bo'ladi
+  topsMs = (Number(process.env.TOPS_SECONDS) || 5) * 1000,
   safetyMs = 10 * MINUTE,
   membershipMs = 10 * MINUTE,
   ratesMs = 5 * MINUTE,
@@ -610,6 +612,19 @@ export async function runLive({
       for (const source of candidates) {
         const top = answer.get(source.value);
         if (top != null) tops.set(sourceLabel(source), { top, at: now() });
+        // Oxirgi xabar javobning o'zida keldi — so'rov navbatini kutmasdan darhol bazaga (2026-11-19: tezlik).
+        // Orada boshqa xabar ham bo'lsa (top > kursor + 1) — kursor joyida qoladi, ularni so'rab turish o'qiydi
+        // (bir xabar ikki yo'ldan kelsa ham UNIQUE source+message_id bitta qoldiradi)
+        const message = answer.messages?.get(source.value);
+        const label = sourceLabel(source);
+        const cursor = store.getCursor(label);
+        if (!message || cursor == null || message.id <= cursor) continue;
+        try {
+          addMessage(source, message, store, { via: "tops", media: reader.media });
+          if (message.id === cursor + 1) store.setCursor(label, message.id);
+        } catch (error) {
+          log(`${label}: oxirgi xabarni yozib bo'lmadi — ${errorText(error)}`);
+        }
       }
     } catch (error) {
       if (handleFlood(error)) return;

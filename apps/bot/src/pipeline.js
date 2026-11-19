@@ -58,6 +58,10 @@ const NO_CONTACT_SKIPPED = `${NO_CONTACT} — AI'ga yuborilmadi`;
 // unga shu yerda, saralangan ko'rinishda, mashina va yo'nalishsiz yetkaziladi: rejimi «shu guruhdagi hamma yuk» degani
 // Yuk beruvchining o'z yuki (post.shipper, result.by === "shipper") ham shu yo'ldan o'tadi: takror bo'lsa — yuborilmaydi,
 // mos haydovchilarga — darhol. Natijani yuk beruvchiga createWorker yozdiradi (deps.onDirect)
+// Saralash o'chiq paytida kimga qaysi guruhdan asl matn ketadi: «📌 Mening guruhlarim» — faqat tanlaganlaridan,
+// qolgan hamma (saralangan, tezkor, guruhlarim + saralangan) — hamma guruhdan
+export const fastWanted = (profile, source) => (feedMode(profile) === "guruhlarim" ? rawWanted(profile, source) : true);
+
 export async function handleParsed(post, result, deps) {
   const { store, windowMs = DEFAULT_DEDUPE_WINDOW_MS, routeScope = DEFAULT_ROUTE_SCOPE } = deps;
   if (!result.ok) {
@@ -106,12 +110,16 @@ export async function handleParsed(post, result, deps) {
   const closed = post.shipper == null && isClosedSource(post.source);
   const plan = { kind, source: closed ? post.source : null, owner: closed ? (store.sourceOwner?.(post.source) ?? null) : null };
   let sent = 0;
+  // Saralash o'chiq (deps.sortingOff, 2026-11-19): guruh e'loni haydovchilarga faqat tezkor yo'l bilan (asl matn) boradi —
+  // AI/qoidalar natijasi hech kimga yuborilmaydi (kech keladi). Yuk beruvchining o'z yuki — hammaga, saralanmasdan
+  const rawFor = deps.sortingOff ? fastWanted : rawWanted;
   for (const { id, load } of fresh) {
     // Kanal faqat yuklar uchun (va faqat CHANNEL_LOADS=1 bo'lsa — bot.js publish)
     const channelMessageId = kind === "yuk" && !closed ? ((await deps.publish?.(load, post)) ?? null) : null;
     let count = 0;
     for (const user of users) {
-      if (kind === "yuk" && rawWanted(user.profile, post.source)) {
+      if (kind === "yuk" && deps.sortingOff && post.shipper == null) break;
+      if (kind === "yuk" && rawFor(user.profile, post.source)) {
         // Shu guruhdagi hamma yuk unga kerak (tezkor / guruhlarim): asl matn bilan olgan bo'lsa — bo'ldi,
         // olmagan bo'lsa (AI'siz tekshiruv o'tkazib yuborgan, yuk beruvchining o'z yuki) — mashina va yo'nalishsiz, shu yerda
         if (rawSent.has(user.chatId)) continue;
@@ -275,21 +283,29 @@ export function createWorker(
   const scope = deps.routeScope ?? DEFAULT_ROUTE_SCOPE;
 
   // Tezkor yo'ldan nimadir oladigan faol haydovchilar (quick() da yangi e'lon bo'lsagina so'raladi)
-  const rawUsers = () => (deps.deliverRaw ? store.activeUsers("haydovchi").filter((u) => usesRawFeed(u.profile)) : []);
+  // Saralash o'chiq (deps.sortingOff; Azimjon 2026-11-19: «algoritmni noaktiv qil. Bizga tezlik kerak sifat emas!
+  // … bot chati yonib ketsa ham e'lonlarni uchirib tashlaydigan qil») — hamma faol haydovchi tezkor yo'lda, filtrsiz:
+  // «yuk e'lonimi» (quickLook), chet el yo'nalishi va aloqa tekshiruvi yo'q. Qoladi: 30 daqiqadan eski emas, takror emas
+  // (collector dedupe), yopiq guruh — faqat Pro, kanal/guruhga a'zolik (canReceive)
+  const fastAll = Boolean(deps.sortingOff);
+  const wantedFn = fastAll ? fastWanted : rawWanted;
+  const rawUsers = () => (deps.deliverRaw ? store.activeUsers("haydovchi").filter((u) => fastAll || usesRawFeed(u.profile)) : []);
 
   // Bitta e'lon: kimga kerak (rejim + guruh) → yuk e'lonimi (AI'siz) → tezkor rejimda chet el emasmi → yuborish navbatiga
   function fast(post, users) {
-    if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || !contactOf(post)) return;
-    const wanted = users.filter((u) => rawWanted(u.profile, post.source));
+    if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || (!fastAll && !contactOf(post))) return;
+    const wanted = users.filter((u) => wantedFn(u.profile, post.source));
     if (!wanted.length) return;
-    let look;
-    try {
-      look = quickLook(post.text, { scope });
-    } catch (error) {
-      log(`#${post.id}: tezkor tekshiruv xatosi — ${error.message}`);
-      return;
+    let look = { load: true, outOfScope: false };
+    if (!fastAll) {
+      try {
+        look = quickLook(post.text, { scope });
+      } catch (error) {
+        log(`#${post.id}: tezkor tekshiruv xatosi — ${error.message}`);
+        return;
+      }
+      if (!look.load) return;
     }
-    if (!look.load) return;
     // «⚡ Tezkor» (hamma guruh) — chet el (Rossiya, Yevropa…) yo'nalishi tashlanadi; o'zi tanlagan guruhdan esa hammasi.
     // Bot qayta yoqilgan bo'lsa — bazada «yuborilgan» deb turganlarga ikkinchi marta emas
     const already = new Set(store.postDeliveredTo?.(post.id) ?? []);
@@ -345,9 +361,11 @@ export function createWorker(
           continue;
         }
         if (maxAgeMs > 0 && post.postedAt < now() - maxAgeMs) continue; // eskirgan — expire() yopadi
+        // Saralash o'chiq — aloqasiz e'lon ham haydovchiga ketadi (keyin AI'ga bormasdan yopiladi)
+        if (fastAll) fast(post, users);
         if (contactless(post)) continue;
         // Tezkor rejimdagilarga asl matn — AI'ni ham, qoidaviy parserni ham kutmasdan (e'lon o'zi navbatda qoladi)
-        fast(post, users);
+        if (!fastAll) fast(post, users);
         if (!deps.rules) continue; // aloqasi bor — AI kutadi
         let result = null;
         try {
@@ -378,7 +396,7 @@ export function createWorker(
     if (posts.length === 0) return [];
     if (posts.length < n && fill > 0) {
       // Eng erta tugaydigan muddat: jonli e'lon — navbatga tushganidan live ms, qolganlari — fill ms
-      const due = Math.min(...posts.map((p) => (p.queuedAt ?? p.postedAt) + (p.via === "live" ? Math.min(live, fill) : fill)));
+      const due = Math.min(...posts.map((p) => (p.queuedAt ?? p.postedAt) + (p.via === "live" || p.via === "tops" ? Math.min(live, fill) : fill)));
       if (now() < due) return [];
     }
     for (const post of posts) claimed.add(post.id);

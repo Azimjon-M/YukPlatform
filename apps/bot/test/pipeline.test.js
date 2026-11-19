@@ -939,3 +939,36 @@ test("«📌 Mening guruhlarim»da yopiq guruh: Pro haydovchiga asl matn keladi;
   await createWorker(deps, { log: () => {} }).runOnce();
   assert.ok(!raw.some(([chatId, id]) => chatId === 8 && id === 2), "Pro emas — yopiq guruhdan yo'q");
 });
+
+// --- Saralash o'chiq (deps.sortingOff, 2026-11-19: «algoritmni noaktiv qil, bizga tezlik kerak sifat emas») ---
+test("sortingOff: hamma haydovchiga filtrsiz asl matn (chet el, salomlashish, aloqasiz ham); guruhlarim — faqat tanlaganidan", async () => {
+  const yuk = { ok: true, postType: "yuk_bor", loads: [LOAD] };
+  const { store, deps, raw, delivered, post } = rawSetup({ [LOAD_TEXT]: yuk });
+  deps.sortingOff = true;
+  deps.requireContact = true;
+  deps.rules = (text) => (text === LOAD_TEXT ? yuk : null);
+  post("@g", 1, LOAD_TEXT);
+  post("@g", 2, FAR_TEXT);
+  post("@g", 3, CHAT_TEXT);
+  post("@g", 4, "Toshkentdan Buxoroga yuk bor, isuzu kerak, lichkaga yozing");
+  post("@yuk_guruh2", 5, LOAD_TEXT.replace("0001", "0009"));
+  post("@g", 6, LOAD_TEXT.replace("0001", "0008"), Date.now() - 40 * 60_000); // eski — yo'q
+  await createWorker(deps, { log: () => {} }).runOnce();
+  const got = raw.map(([chatId, id]) => `${id}→${chatId}`).sort();
+  // 1, 2 — saralangan rejimdagilar ham hamma guruhdan oladi (3 — faol emas); 7 tezkor, 9 «+saralangan» — hamma guruhdan; 8 guruhlarim — faqat @yuk_guruh2
+  const want = [];
+  for (const id of [1, 2, 3, 4]) for (const c of [1, 2, 7, 9]) want.push(`${id}→${c}`);
+  for (const c of [1, 2, 7, 8, 9]) want.push(`5→${c}`);
+  assert.deepEqual(got, want.sort());
+  assert.deepEqual(delivered, [], "saralangan (AI / qoidalar) nusxasi hech kimga ketmaydi");
+  assert.ok(store.takeNewPosts().every((p) => p.messageId !== 4), "aloqasiz e'lon yuborilgach AI'ga bormasdan yopildi");
+});
+
+test("sortingOff: yuk beruvchining o'z yuki — hammaga saralanmasdan («📌 Mening guruhlarim» dan tashqari, avvalgidek)", async () => {
+  const { store, deps, delivered } = rawSetup();
+  deps.sortingOff = true;
+  deps.pool = noAi;
+  store.addDirectPost({ chatId: 500, text: "Toshkent → Samarqand, un 20 t +998900000001", loads: [{ ...LOAD, phones: ["+998900000001"] }], via: "bot" });
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual([...new Set(delivered)].sort(), [1, 2, 7, 9]);
+});

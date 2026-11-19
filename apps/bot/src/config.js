@@ -89,6 +89,13 @@ export function requireContactOn(env = process.env) {
   return !/^(0|yo'q|yoq|no|false|off)$/i.test(env.REQUIRE_CONTACT?.trim() ?? "");
 }
 
+// Saralash algoritmi (AI / qoidalar → mashina va yo'nalish bo'yicha). Standart — O'CHIQ (Azimjon, 2026-11-19: «ushbu
+// algoritmimizni hozir noaktiv qil. Bizga tezlik kerak sifat emas!»): hamma haydovchiga guruh e'loni asl matn bilan,
+// filtrsiz, darhol (pipeline.js deps.sortingOff). FEED_SORTING=1 (ha / on / true) — avvalgi tartib qaytadi
+export function sortingOffOn(env = process.env) {
+  return !/^(1|ha|yes|true|on)$/i.test(env.FEED_SORTING?.trim() ?? "");
+}
+
 // "1", "ha", "true", "on" — yoqilgan; bo'sh va boshqa hamma narsa — o'chiq
 export function readFlag(value) {
   return /^(1|ha|yes|true|on)$/i.test(value?.trim() ?? "");
