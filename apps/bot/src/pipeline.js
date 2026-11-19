@@ -4,15 +4,16 @@
 // Bir nechta AI ulanishi (kalit + model) bo'lsa, guruhlar parallel tahlil qilinadi.
 // Telegram va AI tashqaridan beriladi (deps), shuning uchun testda soxtasi qo'yiladi.
 import { setTimeout as wait } from "node:timers/promises";
-import { extractPhones, hasContact, parseByRules, poolFromParser, quickLook } from "@yuk/parser";
+import { extractPhones, fastLook, hasContact, parseByRules, poolFromParser, quickLook } from "@yuk/parser";
 import {
   DEFAULT_DEDUPE_WINDOW_MS,
   DEFAULT_ROUTE_SCOPE,
   KIND_MATCHERS,
   KIND_ROLE,
-  FEED_MODES,
   feedMode,
+  filtersWanted,
   regionWanted,
+  truckWanted,
   loadKeys,
   isClosedSource,
   planAllows,
@@ -24,12 +25,12 @@ import {
   usesRawFeed,
 } from "@yuk/shared";
 
-// E'londan «qayerdan» viloyatlari (qoidaviy parser, AI'siz) — «📍 Mening hududimdan» uchun. Topilmasa — []
-export function originRegions(text) {
+// Tezkor yo'l filtri (@yuk/parser fastLook): «quruq gap»mi, «qayerdan» viloyatlari, transport turlari. Xato — filtrsiz o'tadi
+export function lookOf(text) {
   try {
-    return [...new Set((parseByRules(String(text ?? "")).loads ?? []).map((l) => l.fromRegion).filter(Boolean))];
+    return fastLook(text);
   } catch {
-    return [];
+    return { chatter: false, origins: [], trucks: [] };
   }
 }
 
@@ -130,8 +131,9 @@ export async function handleParsed(post, result, deps) {
     let count = 0;
     for (const user of users) {
       if (kind === "yuk" && deps.sortingOff && post.shipper == null) break;
-      // «📍 Mening hududimdan» — yuk beruvchining o'z yukida ham viloyat tekshiriladi
+      // «📍 Qayerdan» va «🚚 Transport» filtrlari — yuk beruvchining o'z yukida ham
       if (kind === "yuk" && !regionWanted(user.profile, load.fromRegion ? [load.fromRegion] : [])) continue;
+      if (kind === "yuk" && !truckWanted(user.profile, load.truckClass ? [load.truckClass] : [])) continue;
       if (kind === "yuk" && rawFor(user.profile, post.source)) {
         // Shu guruhdagi hamma yuk unga kerak (tezkor / guruhlarim): asl matn bilan olgan bo'lsa — bo'ldi,
         // olmagan bo'lsa (AI'siz tekshiruv o'tkazib yuborgan, yuk beruvchining o'z yuki) — mashina va yo'nalishsiz, shu yerda
@@ -311,26 +313,26 @@ export function createWorker(
   // Bitta e'lon: kimga kerak (rejim + guruh) → yuk e'lonimi (AI'siz) → tezkor rejimda chet el emasmi → yuborish navbatiga
   function fast(post, users) {
     if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || (!fastAll && !contactOf(post))) return;
-    // «📍 Mening hududimdan» (2026-11-19): e'londan «qayerdan» viloyatlari — AI'siz (qoidaviy parser, ~1 ms), faqat kerak bo'lsa;
-    // topilmasa — bo'sh ro'yxat, regionWanted baribir yuboradi
-    let origins = null;
-    const originsOf = () => (origins ??= originRegions(post.text));
-    const wanted = users.filter((u) => wantedFn(u.profile, post.source) && (!FEED_MODES[feedMode(u.profile)].regions || regionWanted(u.profile, originsOf())));
+    // Filtr (2026-11-19, Azimjon): «quruq gap» — hech kimga (shart); «🚚 Transport» va «📍 Qayerdan» — haydovchi tanlagan
+    // bo'lsa. Bitta qoidaviy tahlil (~3 ms, AI'siz); e'londa transport yoki joy topilmasa — o'sha filtrdan o'tadi
+    const look = lookOf(post.text);
+    if (look.chatter) return;
+    const wanted = users.filter((u) => wantedFn(u.profile, post.source) && filtersWanted(u.profile, look));
     if (!wanted.length) return;
-    let look = { load: true, outOfScope: false };
+    let quick = { load: true, outOfScope: false };
     if (!fastAll) {
       try {
-        look = quickLook(post.text, { scope });
+        quick = quickLook(post.text, { scope });
       } catch (error) {
         log(`#${post.id}: tezkor tekshiruv xatosi — ${error.message}`);
         return;
       }
-      if (!look.load) return;
+      if (!quick.load) return;
     }
     // «⚡ Tezkor» (hamma guruh) — chet el (Rossiya, Yevropa…) yo'nalishi tashlanadi; o'zi tanlagan guruhdan esa hammasi.
     // Bot qayta yoqilgan bo'lsa — bazada «yuborilgan» deb turganlarga ikkinchi marta emas
     const already = new Set(store.postDeliveredTo?.(post.id) ?? []);
-    const targets = wanted.filter((u) => !already.has(u.chatId) && !(look.outOfScope && feedMode(u.profile) === "tezkor"));
+    const targets = wanted.filter((u) => !already.has(u.chatId) && !(quick.outOfScope && feedMode(u.profile) === "tezkor"));
     if (!targets.length) return;
     rawPending.set(post.id, new Set(targets.map((u) => u.chatId)));
     const phones = extractPhones(post.text);
@@ -350,7 +352,7 @@ export function createWorker(
         const fresh = store.getDriver?.(user.chatId) ?? user;
         if (!fresh || fresh.active === false || fresh.deletedAt != null || fresh.role !== "haydovchi") return;
         if (!wantedFn(fresh.profile, post.source)) return;
-        if (FEED_MODES[feedMode(fresh.profile)].regions && !regionWanted(fresh.profile, originsOf())) return;
+        if (!filtersWanted(fresh.profile, look)) return;
         if (deps.canReceive && !(await deps.canReceive(fresh))) return;
         const outcome = await deps.deliverRaw(user.chatId, post, { phones });
         const ok = outcome === true || outcome?.ok === true;

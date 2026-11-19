@@ -211,4 +211,12 @@ export const SERVICE_PATTERNS = [
   /#pravila/,
   // Targo.uz boti: "<ism>, кечирасиз, бу гуруҳда ёзиш учун Targo.uz канали ва гуруҳига обуна бўлинг" (2026-11-09: 6 soatda 260+)
   /bu guruhda yozish uchun .{0,60}obuna bo'ling/s,
+  // 2026-11-19 (tezkor oqimdagi «quruq gap»): «yozish uchun guruhga 5 ta odam qo'shing 📊 Qo'shdingiz: 0/5», «haqoratli so'z yubormang»
+  /yozish uchun guruhga \d+ ta (?:odam|kishi)/,
+  /qo'shdingiz: \d+ ?\/ ?\d+/,
+  /haqoratli so'z/,
 ];
+
+// Bo'sh mashina e'loni — haydovchiga kerak emas (u yuk qidiryapti). Faqat aniq andozalar: parserning «bo'sh mashina» belgisi
+// ko'p haqiqiy yukni ham ushlaydi (2026-11-19: 415 tadan yarmiga yaqini yuk e'loni edi), shuning uchun u ishlatilmaydi
+export const FREE_TRUCK_PATTERNS = [/targo\.uz'da yangi transport/, /yangi bo'sh transport/, /hozir bo'sh/];

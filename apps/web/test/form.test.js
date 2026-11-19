@@ -13,6 +13,8 @@ import {
   formUsesGroups,
   selectFeed,
   toggleFeedRegion,
+  toggleFeedTruck,
+  formUsesFilters,
   toggleFeedSource,
   shipperFormFromProfile,
   shipperProfileFromForm,
@@ -226,10 +228,15 @@ test("rejim (2026-11-19): yangi va eski saralangan profil formada ⚡ Tezkor; te
   assert.deepEqual(result.profile.feed, { mode: "tezkor", sources: [] });
 });
 
-test("hududim (2026-11-19): viloyat belgilanadi, kamida bitta; profilga feed.regions", () => {
-  let form = selectFeed(formFromProfile(null), "hududim");
-  assert.equal(profileFromForm(form).field, "regions");
+test("filtrlar (2026-11-19): qayerdan va transport turi ixtiyoriy; profilga feed.regions / feed.trucks; eski hududim — tezkor", () => {
+  let form = formFromProfile(null);
+  assert.equal(form.feed, "tezkor");
+  assert.equal(formUsesFilters(form), true, "tezkorda filtr qadami bor");
+  assert.deepEqual(profileFromForm(form).profile.feed, { mode: "tezkor", sources: [] }, "filtrsiz ham saqlanadi");
   form = toggleFeedRegion(toggleFeedRegion(toggleFeedRegion(form, "samarqand"), "buxoro"), "buxoro");
-  assert.deepEqual(profileFromForm(form).profile.feed, { mode: "hududim", sources: [], regions: ["samarqand"] });
-  assert.deepEqual(formFromProfile({ feed: { mode: "hududim", sources: [], regions: ["andijon"] } }).feedRegions, ["andijon"]);
+  form = toggleFeedTruck(toggleFeedTruck(form, "labo"), "fura");
+  assert.deepEqual(profileFromForm(form).profile.feed, { mode: "tezkor", sources: [], regions: ["samarqand"], trucks: ["fura", "labo"] });
+  const old = formFromProfile({ feed: { mode: "hududim", sources: [], regions: ["andijon"] } });
+  assert.equal(old.feed, "tezkor");
+  assert.deepEqual(old.feedRegions, ["andijon"]);
 });

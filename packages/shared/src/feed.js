@@ -15,13 +15,18 @@
 // asosiy tavsiya «guruhlarim» (haydovchi o'zi biladigan 3–5 guruh).
 
 import { REGIONS, REGION_IDS } from "./regions.js";
+import { truckFamily } from "./vehicles.js";
 
 export const FEED_MODE_IDS = ["saralangan", "tezkor", "hududim", "guruhlarim", "guruhlarim_plus"];
 // Tanlab bo'ladigan rejimlar (2026-11-19, Azimjon: «hamma tezkor rejimda! saralashni olib tashlamoqdamiz!») — bot va ilova
 // faqat shularni ko'rsatadi; yangi haydovchi darhol tezkorda. Saralangan / «+ saralangan» — faqat eski profillar uchun ichkarida
 // 2026-11-19 (keyinroq, Azimjon: «Rejimda Hamma e'lonlar, Men turgan joydan ketadigan e'lonlar, faqat mening guruhlarimdan
 // e'lonlar kelsin»): tezkor — ekranda «🌐 Hamma e'lonlar» (ichki nomi o'zgarmadi), yangi «📍 Mening hududimdan»
-export const FEED_MODE_CHOICES = ["tezkor", "hududim", "guruhlarim"];
+// 2026-11-19 (yana keyinroq, Azimjon: «* asosiy yuk yoki quruq gap — shart; ^ transport turi; ^ yuk qayerdan ketishi —
+// foydalanuvchi tanlay olsin, tanlamasa filtrsiz; transporti yoki joyi yo'q e'lon hammasiga tushadi»): rejim endi faqat
+// MANBA (hamma guruhlar / faqat mening guruhlarim). «Qayerdan» (regions) va «transport» (trucks) — har ikki rejimda ishlaydigan
+// ixtiyoriy filtr. Eski «hududim» profil — tezkor + o'sha viloyatlar (feedOf shunday o'qiydi)
+export const FEED_MODE_CHOICES = ["tezkor", "guruhlarim"];
 export const NEW_DRIVER_FEED_MODE = "tezkor";
 // Eski rejim (saralangan / + saralangan) tanlov ro'yxatida yo'q — ekranda tezkor deb ko'rsatiladi
 export const choiceMode = (mode) => (FEED_MODE_CHOICES.includes(mode) ? mode : NEW_DRIVER_FEED_MODE);
@@ -39,14 +44,13 @@ export const FEED_MODES = {
   },
   tezkor: {
     icon: "🌐",
-    name: "Hamma e'lonlar",
-    about: "Hamma guruhlardagi e'lonlar — darhol (kuniga minglab xabar)",
+    name: "Hamma guruhlar",
+    about: "Hamma guruhlardagi yuk e'lonlari — darhol",
     vehicle: false,
     groups: false,
     sorted: false,
   },
-  // Siz tanlagan viloyat(lar)dan ketadigan e'lonlar: «qayerdan» AI'siz (qoidaviy parser, ~1 ms) topiladi; topilmasa — baribir
-  // yuboriladi (Azimjon tanlovi: yuk yo'qolmasin; 2026-11-19 o'lchovi: e'lonlarning ~72% ida joy topiladi)
+  // Eski (2026-11-19 kunduzi) rejim — endi tezkor + «📍 Qayerdan» filtri; tanlovda yo'q, feedOf tezkorga aylantiradi
   hududim: {
     icon: "📍",
     name: "Mening hududimdan",
@@ -85,27 +89,58 @@ const SOURCE_RE = /^(@[A-Za-z][A-Za-z0-9_]{3,31}|-\d{5,20})$/;
 export const sourceKey = (name) => String(name ?? "").trim().toLowerCase();
 export const validSourceName = (name) => typeof name === "string" && SOURCE_RE.test(name.trim());
 
-// Profildagi rejim → { mode, sources }. feed yo'q yoki buzilgan — saralangan (eski profillar shunday ishlaydi)
+// Profildagi rejim → { mode, sources, regions, trucks }. feed yo'q yoki buzilgan — saralangan (eski profillar shunday ishlaydi).
+// regions / trucks — filtr (bo'sh = hammasi); eski «hududim» — tezkor + o'sha viloyatlar
 export function feedOf(profile) {
   const feed = profile?.feed;
-  const mode = validFeedMode(feed?.mode) ?? DEFAULT_FEED_MODE;
+  let mode = validFeedMode(feed?.mode) ?? DEFAULT_FEED_MODE;
+  if (mode === "hududim") mode = "tezkor";
   const sources = FEED_MODES[mode].groups && Array.isArray(feed?.sources) ? feed.sources.filter(validSourceName) : [];
-  if (!FEED_MODES[mode].regions) return { mode, sources };
-  return { mode, sources, regions: validRegions(feed?.regions) };
+  return { mode, sources, regions: validRegions(feed?.regions), trucks: validTrucks(feed?.trucks) };
 }
 
 // Viloyat kodlari (regions.js) — takrorsiz, ro'yxat tartibida
 const validRegions = (list) => (Array.isArray(list) ? REGION_IDS.filter((id) => list.includes(id)) : []);
 export const regionTitle = (id) => REGIONS.find((r) => r.id === id)?.name ?? id;
 
-// «📍 Mening hududimdan»: e'lon shu haydovchiga mosmi. origins — e'londan topilgan «qayerdan» viloyatlari (bo'sh — topilmadi:
-// baribir yuboriladi). Boshqa rejimlarda — har doim true
-export function regionWanted(profile, origins) {
-  const feed = feedOf(profile);
-  if (!FEED_MODES[feed.mode].regions) return true;
-  if (!origins?.length || !feed.regions.length) return true;
-  return origins.some((id) => feed.regions.includes(id));
+// «🚚 Transport» filtri — Azimjon aytgan to'rt tur (kuzovsiz: tent/ref farqi yo'q). families — vehicles.js TRUCK_CLASSES oilalari:
+// e'londa shu oiladagi mashina tilga olingan bo'lsa (yoki 15 t dan og'ir — fura), e'lon shu turga tegishli
+export const TRUCK_FILTERS = [
+  { id: "fura", icon: "🚛", name: "Fura", families: ["fura", "mini_fura", "kamaz"] },
+  { id: "isuzu", icon: "🚚", name: "Isuzu", families: ["isuzu"] },
+  { id: "bongo", icon: "🛻", name: "Bongo / Porter", families: ["kichik"] },
+  { id: "labo", icon: "🚐", name: "Labo / Damas", families: ["labo", "yengil_avto"] },
+];
+export const TRUCK_FILTER_IDS = TRUCK_FILTERS.map((t) => t.id);
+const validTrucks = (list) => (Array.isArray(list) ? TRUCK_FILTER_IDS.filter((id) => list.includes(id)) : []);
+export const truckFilterTitle = (id) => TRUCK_FILTERS.find((t) => t.id === id)?.name ?? id;
+// Transport sinfi (katta_fura, isuzu…) → filtr kodi (fura, isuzu, bongo, labo) yoki null
+export function truckFilterOf(truckClass) {
+  if (!truckClass) return null;
+  const family = truckFamily(truckClass);
+  return TRUCK_FILTERS.find((t) => t.families.includes(family))?.id ?? null;
 }
+
+// «📍 Qayerdan» filtri: e'lon shu haydovchiga mosmi. origins — e'londan topilgan «qayerdan» viloyatlari.
+// Viloyat tanlamagan yoki e'londa joy topilmagan — har doim true (yuk yo'qolmasin)
+export function regionWanted(profile, origins) {
+  const { regions } = feedOf(profile);
+  if (!origins?.length || !regions.length) return true;
+  return origins.some((id) => regions.includes(id));
+}
+
+// «🚚 Transport» filtri. truckClasses — e'londan topilgan transport sinflari (vehicles.js). Tur tanlamagan yoki e'londa
+// mashina aytilmagan (yoki to'rt turdan biriga tushmaydi) — har doim true
+export function truckWanted(profile, truckClasses) {
+  const { trucks } = feedOf(profile);
+  if (!trucks.length) return true;
+  const kinds = (truckClasses ?? []).map(truckFilterOf).filter(Boolean);
+  if (!kinds.length) return true;
+  return kinds.some((id) => trucks.includes(id));
+}
+
+// Ikkala filtr birga (tezkor yo'l: fastLook natijasi { origins, trucks })
+export const filtersWanted = (profile, look) => regionWanted(profile, look?.origins) && truckWanted(profile, look?.trucks);
 
 export const feedMode = (profile) => feedOf(profile).mode;
 // Rejim uchun mashina formasi kerakmi (tezkor va guruhlarimda — yo'q)
@@ -118,14 +153,15 @@ export const feedUsesGroups = (modeOrProfile) => FEED_MODES[typeof modeOrProfile
 export function sanitizeFeed(input) {
   if (input == null) return { feed: { mode: DEFAULT_FEED_MODE, sources: [] } };
   if (typeof input !== "object") return { error: "Rejim noto'g'ri", field: "feed" };
-  const mode = validFeedMode(input.mode);
+  let mode = validFeedMode(input.mode);
   if (!mode) return { error: "Rejimni tanlang", field: "feed" };
-  if (FEED_MODES[mode].regions) {
-    const regions = validRegions(input.regions);
-    if (regions.length === 0) return { error: "Kamida bitta viloyatni tanlang", field: "regions" };
-    return { feed: { mode, sources: [], regions } };
-  }
-  if (!FEED_MODES[mode].groups) return { feed: { mode, sources: [] } };
+  if (mode === "hududim") mode = "tezkor"; // eski ilova / tugma
+  // Filtrlar ixtiyoriy: bo'sh — hammasi keladi
+  // (bo'sh filtr profilga yozilmaydi — feedOf baribir [] qaytaradi)
+  const regions = validRegions(input.regions);
+  const trucks = validTrucks(input.trucks);
+  const filters = { ...(regions.length ? { regions } : {}), ...(trucks.length ? { trucks } : {}) };
+  if (!FEED_MODES[mode].groups) return { feed: { mode, sources: [], ...filters } };
   const seen = new Set();
   const sources = [];
   for (const name of Array.isArray(input.sources) ? input.sources : []) {
@@ -135,14 +171,14 @@ export function sanitizeFeed(input) {
   }
   if (sources.length === 0) return { error: "Kamida bitta guruh yoki kanalni tanlang", field: "groups" };
   if (sources.length > FEED_SOURCES_MAX) return { error: `Ko'pi bilan ${FEED_SOURCES_MAX} ta guruh tanlash mumkin`, field: "groups" };
-  return { feed: { mode, sources } };
+  return { feed: { mode, sources, ...filters } };
 }
 
 // Shu manbadagi e'lon haydovchiga AI'siz, asl matn bilan (darhol) ketadimi: tezkor — har qanday guruhdan,
 // guruhlarim / guruhlarim_plus — faqat tanlaganlaridan
 export function rawWanted(profile, source) {
   const { mode, sources } = feedOf(profile);
-  if (mode === "tezkor" || FEED_MODES[mode].regions) return true; // hududim — manba bo'yicha hammasi, viloyat — regionWanted
+  if (mode === "tezkor") return true; // filtrlar (qayerdan, transport) — filtersWanted
   if (!FEED_MODES[mode].groups) return false;
   const key = sourceKey(source);
   return sources.some((name) => sourceKey(name) === key);
@@ -182,12 +218,18 @@ export function rawProfile(feed, prev = null) {
   };
 }
 
-// "⚡ Tezkor" / "📌 Mening guruhlarim (3 ta)"
+// Filtrlar matni: «Hammasi» / «Fura, Isuzu»; «Hamma joy» / «Toshkent shahri, Farg'ona viloyati»
+export const trucksText = (trucks) => (trucks?.length ? trucks.map(truckFilterTitle).join(", ") : "Hammasi");
+export const regionsText = (regions) => (regions?.length ? regions.map(regionTitle).join(", ") : "Hamma joy");
+
+// "🌐 Hamma guruhlar" / "📌 Faqat mening guruhlarim (3 ta guruh) · 🚚 Fura · 📍 Toshkent shahri"
 export function feedLabel(profile) {
-  const { mode, sources, regions = [] } = feedOf(profile);
+  const { mode, sources, regions, trucks } = feedOf(profile);
   const m = FEED_MODES[mode];
-  if (m.regions) return `${m.icon} ${m.name}${regions.length ? ` (${regions.map(regionTitle).join(", ")})` : ""}`;
-  return `${m.icon} ${m.name}${m.groups ? ` (${sources.length} ta guruh)` : ""}`;
+  const parts = [`${m.icon} ${m.name}${m.groups ? ` (${sources.length} ta guruh)` : ""}`];
+  if (trucks.length) parts.push(`🚚 ${trucksText(trucks)}`);
+  if (regions.length) parts.push(`📍 ${regionsText(regions)}`);
+  return parts.join(" · ");
 }
 
 // Forma (eski Mini App yoki bot savol-javobi) rejimni yubormasa — oldingi profildagi rejim qoladi

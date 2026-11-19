@@ -6,7 +6,7 @@ import { vehiclePallets, vehicleVolumeM3 } from "./match.js";
 import { SIDE_LABELS, intlChoices, intlLabel, regionLabel, routeChosen } from "./profile.js";
 import { weightText } from "./loadText.js";
 import { DEFAULT_ROUTE_SCOPE } from "./scope.js";
-import { FEED_MODES, feedOf, regionTitle } from "./feed.js";
+import { FEED_MODES, feedOf, regionsText, trucksText } from "./feed.js";
 
 const formatT = (t) => String(t).replace(".", ",");
 const className = (id) => TRUCK_CLASSES.find((t) => t.id === id)?.name ?? id;
@@ -45,9 +45,9 @@ export function driverProfileRows(profile, scope = DEFAULT_ROUTE_SCOPE, { route 
     const shown = names.length > 5 ? `${names.slice(0, 5).join(", ")} va yana ${names.length - 5} ta` : names.join(", ");
     feedRows.push({ id: "groups", icon: "📌", label: "Guruhlar", value: shown || "tanlanmagan" });
   }
-  if (mode.regions) {
-    feedRows.push({ id: "regions", icon: "📍", label: "Viloyatlar", value: feed.regions.map(regionTitle).join(", ") || "tanlanmagan" });
-  }
+  // Filtrlar (2026-11-19) — faqat tanlangan bo'lsa (bo'sh — hammasi keladi)
+  if (feed.trucks.length) feedRows.push({ id: "trucks", icon: "🚚", label: "Transport turi", value: trucksText(feed.trucks) });
+  if (feed.regions.length) feedRows.push({ id: "regions", icon: "📍", label: "Qayerdan", value: regionsText(feed.regions) });
   if (!mode.vehicle) return feedRows;
   // Rejimga mashina kerak, lekin hali kiritilmagan (tezkordan o'tgan yoki «+ saralangan» ni yangi tanlagan)
   if (!profile?.vehicle) return [...feedRows, { id: "vehicle", icon: "🚚", label: "Transport", value: "kiritilmagan" }];

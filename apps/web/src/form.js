@@ -85,7 +85,9 @@ export function formFromProfile(profile) {
     // 2026-11-19: faqat tezkor va guruhlarim tanlanadi — eski saralangan (va yangi foydalanuvchi) — tezkor
     feed: choiceMode(feed.mode),
     feedSources: [...feed.sources],
-    feedRegions: [...(feed.regions ?? [])], // «📍 Mening hududimdan» (2026-11-19)
+    // Filtrlar (2026-11-19): «📍 Qayerdan» va «🚚 Transport turi» — ixtiyoriy, bo'sh — hammasi
+    feedRegions: [...(feed.regions ?? [])],
+    feedTrucks: [...(feed.trucks ?? [])],
   };
 }
 
@@ -104,12 +106,13 @@ export function toggleFeedSource(form, name) {
 // Rejimga mashina kerakmi (saralangan va «+ saralangan» — ha; tezkor va guruhlarim — yo'q)
 export const formNeedsVehicle = (form) => FEED_MODES[form.feed]?.vehicle ?? true;
 export const formUsesGroups = (form) => Boolean(FEED_MODES[form.feed]?.groups);
-export const formUsesRegions = (form) => Boolean(FEED_MODES[form.feed]?.regions);
-// Viloyatni belgilash / olib tashlash
-export const toggleFeedRegion = (form, id) => {
-  const list = form.feedRegions ?? [];
-  return { ...form, feedRegions: list.includes(id) ? list.filter((r) => r !== id) : [...list, id] };
-};
+// Filtrlar (qayerdan, transport turi) — mashinasiz (tezkor) rejimlarda
+export const formUsesFilters = (form) => !formNeedsVehicle(form);
+export const formUsesRegions = formUsesFilters;
+const toggled = (list = [], id) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+// Viloyat / transport turini belgilash / olib tashlash
+export const toggleFeedRegion = (form, id) => ({ ...form, feedRegions: toggled(form.feedRegions, id) });
+export const toggleFeedTruck = (form, id) => ({ ...form, feedTrucks: toggled(form.feedTrucks, id) });
 
 // Faqat shu transport turi. Turi o'zgarsa, sig'im va o'lcham qaytadan tanlanadi (Isuzu sig'imi furaga to'g'ri kelmaydi);
 // yengil mashinada kuzov yo'q
@@ -180,7 +183,7 @@ function intlFor(id, scope) {
 export function profileFromForm(form, scope) {
   const { intl } = intlFor(form.intl, scope);
   // Rejim birinchi tekshiriladi: ro'yxatdan o'tishda u birinchi qadam (guruhsiz «Mening guruhlarim» — o'sha qadamga qaytadi)
-  const feedPart = sanitizeFeed({ mode: form.feed ?? NEW_DRIVER_FEED_MODE, sources: form.feedSources ?? [], regions: form.feedRegions ?? [] });
+  const feedPart = sanitizeFeed({ mode: form.feed ?? NEW_DRIVER_FEED_MODE, sources: form.feedSources ?? [], regions: form.feedRegions ?? [], trucks: form.feedTrucks ?? [] });
   if (feedPart.error) return feedPart;
   const common = { fromAreas: [], toAreas: [], domestic: intl.domestic, international: intl.international, feed: feedPart.feed };
   const result = vehicleProfile(form, scope, common);

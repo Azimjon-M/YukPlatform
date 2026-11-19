@@ -143,13 +143,13 @@ test("haydovchi profili qisqa ko'rinishda", () => {
 
 test("haydovchi rejimi (2026-11-14): tezkor — mashina shart emas; guruhlarim — ro'yxat; «+ saralangan» mashinasiz", () => {
   const fast = profileSummary({ vehicle: null, domestic: true, feed: { mode: "tezkor", sources: [] } });
-  assert.equal(fast.mode, "🌐 Hamma e'lonlar");
+  assert.equal(fast.mode, "🌐 Hamma guruhlar");
   assert.equal(fast.vehicle, "shart emas");
   assert.equal(fast.from, "hamma guruhlardan");
   assert.match(fast.to, /saralanmaydi/);
   assert.equal(fast.groups, null);
   assert.equal(fast.intl, "uzoq xorij yuklarisiz");
-  assert.equal(registrationText({ role: "haydovchi", active: true, profile: { vehicle: null, feed: { mode: "tezkor" } } }), "Ro'yxatdan o'tgan, 🌐 Hamma e'lonlar — e'lonlar asl matn bilan darhol boradi");
+  assert.equal(registrationText({ role: "haydovchi", active: true, profile: { vehicle: null, feed: { mode: "tezkor" } } }), "Ro'yxatdan o'tgan, 🌐 Hamma guruhlar — e'lonlar asl matn bilan darhol boradi");
   assert.equal(
     registrationText({ role: "haydovchi", active: true, profile: { vehicle: null, feed: { mode: "guruhlarim_plus", sources: ["@a_guruh"] } } }),
     "Ro'yxatdan o'tgan, mashina kiritmagan — faqat tanlagan guruhlaridan oladi",

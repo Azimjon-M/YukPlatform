@@ -973,7 +973,7 @@ test("sortingOff: yuk beruvchining o'z yuki — hammaga saralanmasdan («📌 Me
   assert.deepEqual([...new Set(delivered)].sort(), [1, 2, 7, 9]);
 });
 
-test("sortingOff + «📍 Mening hududimdan»: tanlagan viloyatidan ketadigan va joyi aniqlanmagan e'lonlar keladi, boshqasi yo'q", async () => {
+test("sortingOff + eski «hududim» profil (endi «📍 Qayerdan» filtri): tanlagan viloyatidan ketadigan va joyi aniqlanmagan e'lonlar keladi, boshqasi yo'q", async () => {
   const { store, deps, raw, post } = rawSetup();
   deps.sortingOff = true;
   deps.pool = noAi;
@@ -983,7 +983,25 @@ test("sortingOff + «📍 Mening hududimdan»: tanlagan viloyatidan ketadigan va
   post("@g", 3, CHAT_TEXT);
   await createWorker(deps, { log: () => {} }).runOnce();
   assert.deepEqual(raw.filter(([c]) => c === 10).map(([, id]) => id).sort(), [1, 3]);
-  assert.equal(raw.filter(([c]) => c === 7).length, 3, "hamma e'lonlar rejimi — hammasi");
+  assert.equal(raw.filter(([c]) => c === 7).length, 3, "filtrsiz — hammasi");
+});
+
+test("sortingOff + filtrlar (2026-11-19): quruq gap hech kimga; «🚚 Transport» — tanlagan turi va mashinasi yozilmagan e'lon", async () => {
+  const { store, deps, raw, post } = rawSetup();
+  deps.sortingOff = true;
+  deps.pool = noAi;
+  store.saveDriver(10, { role: "haydovchi", active: true, profile: { ...RAW_BASE, feed: { mode: "tezkor", sources: [], trucks: ["isuzu"] } } });
+  store.saveDriver(11, { role: "haydovchi", active: true, profile: { ...RAW_BASE, feed: { mode: "tezkor", sources: [], trucks: ["fura"], regions: ["andijon"] } } });
+  post("@g", 1, "Samarqanddan Toshkentga 20 tonna un bor, tent fura kerak +998900000011");
+  post("@g", 2, "Andijondan Buxoroga 5 tonna yuk bor, isuzu kerak +998900000012");
+  post("@g", 3, "Andijondan Toshkentga yuk bor +998900000013"); // mashina yozilmagan
+  post("@g", 4, "Clik borlar lichga💋"); // quruq gap: na telefon, na joy
+  post("@g", 5, "Ali, kechirasiz, bu guruhda yozish uchun Targo.uz kanali va guruhiga obuna bo'ling");
+  await createWorker(deps, { log: () => {} }).runOnce();
+  const got = (chat) => raw.filter(([c]) => c === chat).map(([, id]) => id).sort();
+  assert.deepEqual(got(10), [2, 3]);
+  assert.deepEqual(got(11), [3], "fura + Andijon: 1 — Samarqanddan, 2 — isuzu");
+  assert.deepEqual(got(7), [1, 2, 3], "filtrsiz — quruq gapdan boshqa hammasi");
 });
 
 test("deps.held: sozlash oynasi ochiq haydovchiga tezkor e'lon yuborilmaydi, boshqalarga — ha", async () => {

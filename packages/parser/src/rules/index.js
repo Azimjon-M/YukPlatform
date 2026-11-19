@@ -22,6 +22,7 @@ import {
   CARGO_BEFORE,
   CARGO_WORDS,
   FILLER,
+  FREE_TRUCK_PATTERNS,
   PARTIAL_WORDS,
   PLACE_DETAILS,
   PLACE_NOUNS,
@@ -639,6 +640,7 @@ export function parseByRules(text, { maxUnknown = 2, allowAlternatives = true } 
   // ishonamiz (bunda e'lon baribir hech kimga ketmaydi)
   if (ready.length > 1 && ready.some((load) => routeInScope(load))) reasons.push("bir nechta yuk");
   return result(reasons.length === 0, distinct(reasons), "yuk_bor", ready, {
+    truckClasses: distinct([...read.flatMap((s) => s.trucks), ...ready.map((l) => l.truckClass).filter(Boolean)]),
     unknown: others.map((t) => t.text),
     suspects: suspects.map((t) => t.text),
     numbers: numberContext,
@@ -674,4 +676,23 @@ export function quickLook(text, { scope } = {}) {
   const placed = parsed.loads.filter(hasPlace);
   const outOfScope = placed.length > 0 && placed.every((l) => !routeInScope(l, scope));
   return { load, outOfScope };
+}
+
+// Tezkor oqim filtri (apps/bot pipeline.js, 2026-11-19, Azimjon: «eng tez filter qiladigan yo'nalishlar kerak»). Bitta qoidaviy
+// tahlil (~3 ms), AI yo'q. → { chatter, origins, trucks }
+//   chatter — «quruq gap»: guruh botlarining xabari (obuna bo'ling, odam qo'shing, reklama tarqatmang), bo'sh mashina e'loni
+//     (aniq andoza bilan) yoki na telefon, na joy bor matn («Clik borlar lichga», salom-alik). Haydovchiga hech qachon ketmaydi.
+//     Ataylab yumshoq: shubhali bo'lsa — yuk deb o'tkaziladi (yuk yo'qolmasin). 2026-11-19 o'lchovi (5 000 e'lon):
+//     ~22% tashlanadi; looksLikeLoad'dan farqi — joyi topilmagan, lekin telefonli yuklar o'tadi
+//   origins — «qayerdan» viloyat kodlari (regions.js), trucks — transport turi kodlari (vehicles.js TRUCK_CLASSES).
+//     Bo'sh — e'londa topilmadi (bunday e'lon har qanday filtrdan o'tadi)
+export function fastLook(text) {
+  const raw = String(text ?? "");
+  const parsed = parseByRules(raw);
+  const origins = distinct(parsed.loads.map((l) => l.fromRegion).filter(Boolean));
+  const trucks = parsed.truckClasses ?? [];
+  if (parsed.service) return { chatter: true, origins, trucks };
+  const latin = toLatin(raw);
+  const chatter = FREE_TRUCK_PATTERNS.some((re) => re.test(latin)) || (!parsed.loads.some(hasPlace) && extractPhones(raw).length === 0);
+  return { chatter, origins, trucks };
 }

@@ -2,7 +2,7 @@
 // Telefon raqamlari soxta (+998 90 000 00 0X).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { looksLikeLoad, parseByRules, quickLook } from "../src/index.js";
+import { fastLook, looksLikeLoad, parseByRules, quickLook } from "../src/index.js";
 import { readNumbers } from "../src/rules/numbers.js";
 import { findPlace } from "../src/rules/places.js";
 import { editDistance, toLatin, wordKey } from "../src/rules/text.js";
@@ -235,4 +235,22 @@ test("quickLook (tezkor rejim): yuk e'lonimi va faqat chet el yo'nalishimi — b
   assert.equal(quickLook("Toshkent Olmaota 20 tonna tent kerak +998 90 000 00 01", { scope: "qoshni" }).outOfScope, false);
   // Joy topilmasa — «tashqarida» emas (bilmaymiz)
   assert.deepEqual(quickLook("Assalomu alaykum hammaga", { scope: "qoshni" }), { load: false, outOfScope: false });
+});
+
+test("fastLook (2026-11-19): quruq gap — bot xabari, bo'sh mashina andozasi, telefonsiz va joysiz matn; qolgani — yuk (yumshoq)", () => {
+  // Joyi topilmagan, lekin telefonli yuk — o'tadi (looksLikeLoad buni tashlardi)
+  assert.equal(fastLook("Isuzu kerak srochno +998901234567").chatter, false);
+  assert.equal(fastLook("Clik borlar lichga💋").chatter, true);
+  assert.equal(fastLook("Assalomu alaykum").chatter, true);
+  assert.equal(fastLook("⚠️ Gulasal, yozish uchun guruhga 5 ta odam qo'shing 📊 Qo'shdingiz: 0/5").chatter, true);
+  assert.equal(fastLook("❗️ Fernando reklama tarqatmang!").chatter, true);
+  assert.equal(fastLook("❗️ KWG40 haqoratli so'z yubormang!").chatter, true);
+  assert.equal(fastLook("🔥 Targo.uz’да янги транспорт! 🇺🇿 Бухара вилояти → 🇺🇿 Ташкент 📅 Ҳозир бўш ⚖️ 24 тонна").chatter, true);
+  // Yuk: qayerdan va transport
+  const look = fastLook("Samarqanddan Toshkentga 20 tonna un bor, tent fura kerak +998900000011");
+  assert.equal(look.chatter, false);
+  assert.deepEqual(look.origins, ["samarqand"]);
+  assert.deepEqual(look.trucks, ["fura"]);
+  assert.deepEqual(fastLook("Andijondan Toshkentga yuk bor +998900000013").trucks, [], "mashina yozilmagan");
+  assert.deepEqual(fastLook("Toshkentdan Qo'qonga 30 tonna sement bor +998900000014").trucks, ["fura"], "15 t dan og'ir — fura");
 });

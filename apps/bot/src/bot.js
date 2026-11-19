@@ -20,6 +20,8 @@ import {
   formatContactPhone,
   isAdmin,
   feedMode,
+  choiceMode,
+  feedLabel,
   feedOf,
   isOwnContact,
   isPro,
@@ -44,7 +46,7 @@ import {
 } from "@yuk/shared";
 import { createCommandSync } from "./commands.js";
 import { profileFromText } from "./driverText.js";
-import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, REGION_CALLBACK, feedSavedText, groupStep, modeStep, regionStep, toggleSource } from "./feed.js";
+import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, REGION_CALLBACK, TRUCK_CALLBACK, feedSavedText, groupStep, modeStep, regionStep, toggleSource, truckStep } from "./feed.js";
 import { SENDER_TEXT, escapeHtml, formatLoad, formatRaw, formatTruck } from "./format.js";
 import { IDLE_BUTTONS } from "./idle.js";
 import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
@@ -202,7 +204,7 @@ function helpText(driver) {
     ? []
     : [
         ...(mode.groups ? [`${MENU.groups} — qaysi guruh va kanallardan yuk e'lonlari darhol kelishi`] : []),
-        `${MENU.feed} — qaysi e'lonlar kelsin: 🌐 hammasi, 📍 o'z viloyatingizdan yoki 📌 o'zingiz tanlagan guruhlardan (hozir: ${mode.icon} ${mode.name})`,
+        `${MENU.feed} — qaysi e'lonlar kelsin: 🚚 transport turi, 📍 qayerdan, 📌 qaysi guruhlardan (hozir: ${feedLabel(driver?.profile)})`,
       ];
   const menuLines = driver?.profile || isShipper
     ? [
@@ -765,6 +767,47 @@ export function createBot({
     await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
 
+  async function showTrucks(ctx, draft, { edit = false } = {}) {
+    hold(ctx.chat.id);
+    const { text, keyboard } = truckStep({ chosen: draft.trucks });
+    await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
+  }
+
+  // Rejim oynasidagi o'zgarishni saqlash (filtr yoki manba): qolgani o'zgarmaydi. patch — { mode?, sources?, regions?, trucks? }.
+  // Pauza holati tegilmaydi (filtrni o'zgartirish pauzani yechmaydi). → { driver } yoki { error }
+  function saveFeedPatch(ctx, driver, patch) {
+    const cur = feedOf(driver.profile);
+    const mode = patch.mode ?? (cur.mode === "guruhlarim_plus" ? "guruhlarim" : choiceMode(cur.mode));
+    const checked = sanitizeFeed({
+      mode,
+      sources: patch.sources ?? cur.sources,
+      regions: patch.regions ?? cur.regions,
+      trucks: patch.trucks ?? cur.trucks,
+    });
+    if (checked.error) return checked;
+    const profile = driver.profile?.vehicle && mode === "guruhlarim_plus" ? { ...driver.profile, feed: checked.feed } : rawProfile(checked.feed, driver.profile);
+    return { driver: store.saveDriver(ctx.chat.id, { role: "haydovchi", profile, draft: null }) };
+  }
+
+  // Ro'yxatdan (viloyat / transport / guruh) «✅ Saqlash» → saqlab, rejim oynasiga qaytish (o'sha xabarning o'zida)
+  async function saveAndBack(ctx, driver, patch) {
+    const saved = saveFeedPatch(ctx, driver, patch);
+    if (saved.error) return ctx.answerCallbackQuery({ text: saved.error, show_alert: true });
+    await ctx.answerCallbackQuery({ text: "✅ Saqlandi" });
+    feedDrafts.delete(ctx.chat.id);
+    return showModes(ctx, saved.driver, { edit: true });
+  }
+
+  // «✅ Tayyor» — rejim oynasi yopiladi: o'rniga nima kelishi yoziladi (bitta xabar, yangisi yuborilmaydi)
+  async function closeModes(ctx, driver) {
+    release(ctx.chat.id);
+    feedDrafts.delete(ctx.chat.id);
+    const feed = feedOf(driver.profile);
+    const text = feedSavedText(feed, { needsVehicle: FEED_MODES[feed.mode].vehicle && !driver.profile?.vehicle });
+    await render(ctx, text, { parse_mode: "HTML" }, true);
+    if (shouldAskPhone(driver)) await askPhone(ctx, driver);
+  }
+
   // «🎛 Rejim» / /rejim (faqat haydovchi)
   async function openModes(ctx) {
     const driver = rememberUser(ctx);
@@ -780,7 +823,7 @@ export function createBot({
     if (roleOf(driver) !== "haydovchi") return openModes(ctx);
     const feed = feedOf(driver.profile);
     if (!FEED_MODES[feed.mode].groups) return showModes(ctx, driver, { intro: `${MENU.groups} — «📌 Mening guruhlarim» rejimida. Avval rejimni tanlang:` });
-    const draft = { mode: feed.mode, sources: [...feed.sources], page: 0, at: Date.now() };
+    const draft = { step: "groups", mode: feed.mode, sources: [...feed.sources], page: 0, at: Date.now() };
     feedDrafts.set(ctx.chat.id, draft);
     await showGroups(ctx, draft);
   }
@@ -811,23 +854,26 @@ export function createBot({
     // Viloyat / guruh tanlovi rejim oynasining O'ZIDA ochiladi (2026-11-19: avval oyna «🎛 Rejim: … ✅» ga aylanib, ro'yxat
     // yangi xabar bo'lib kelardi, «✅ Tayyor» dan keyin yana «🎛 Rejim: … ✅» — chatda ikki marta). «✅» — faqat saqlanganda
     const inPlace = Boolean(ctx.callbackQuery) && !auto;
-    if (FEED_MODES[mode].regions) {
-      // «📍 Mening hududimdan» — viloyatlar tanlovi (oldin tanlagani bo'lsa — o'sha holatda)
+    if (mode === "hududim") {
+      // «📍 Qayerdan» filtri — viloyatlar tanlovi (oldin tanlagani bo'lsa — o'sha holatda)
       const feed = feedOf(driver.profile);
-      const draft = { mode, regions: [...(feed.regions ?? [])], at: Date.now() };
+      const draft = { step: "regions", regions: [...feed.regions], at: Date.now() };
       feedDrafts.set(ctx.chat.id, draft);
       return showRegions(ctx, draft, { edit: inPlace });
     }
     if (FEED_MODES[mode].groups) {
       // Shu yoki boshqa guruh rejimida edi (guruhlarim ↔ + saralangan) — tanlovi qoladi; boshqa rejimdan — bo'sh
       const feed = feedOf(driver.profile);
-      const draft = { mode, sources: FEED_MODES[feed.mode].groups ? [...feed.sources] : [], page: 0, at: Date.now() };
+      const draft = { step: "groups", mode, sources: FEED_MODES[feed.mode].groups ? [...feed.sources] : [], page: 0, at: Date.now() };
       feedDrafts.set(ctx.chat.id, draft);
       return showGroups(ctx, draft, { edit: inPlace });
     }
+    // «🌐 Hamma guruhlardan olish» rejim oynasidan — saqlab, oynada qolamiz (filtrlar o'zgarmaydi)
+    if (inPlace && mode === "tezkor" && driver.profile) return saveAndBack(ctx, driver, { mode });
     // Inline tugmadan kelgan bo'lsa — rejim oynasini yopamiz (menyu tugmasidan kelganda tahrirlanadigan xabar yo'q)
     if (inPlace) await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[mode].icon} ${FEED_MODES[mode].name} ✅`).catch(() => {});
-    const feed = { mode, sources: [] };
+    const prev = feedOf(driver.profile);
+    const feed = { mode, sources: [], ...(prev.regions.length ? { regions: prev.regions } : {}), ...(prev.trucks.length ? { trucks: prev.trucks } : {}) };
     if (mode === "saralangan") {
       // Profili yo'q yangi haydovchi — rejim standart saralangan, profil forma bilan yaratiladi
       if (!driver.profile) return registerPaths(ctx, driver, "🎯 Saralangan: mashinangiz va yo'nalishingizga mos yuklar keladi.");
@@ -847,7 +893,7 @@ export function createBot({
     const driver = rememberUser(ctx);
     if (roleOf(driver) !== "haydovchi") return showStart(ctx);
     if (ctx.callbackQuery) await ctx.editMessageReplyMarkup().catch(() => {});
-    await ctx.reply("Tezkorlik endi hamma rejimda bor. Kamroq e'lon kerak bo'lsa — 📍 faqat o'z viloyatingizdan yoki 📌 faqat o'z guruhlaringizdan; vaqtincha to'xtatish — «⏸ Pauza».", menu(driver));
+    await ctx.reply("Tezkorlik endi hamma rejimda bor. Kamroq e'lon kerak bo'lsa — «🎛 Rejim»: 🚚 transport turi, 📍 qayerdan yoki 📌 faqat o'z guruhlaringiz; vaqtincha to'xtatish — «⏸ Pauza».", menu(driver));
     return showModes(ctx, driver);
   }
 
@@ -1247,8 +1293,15 @@ export function createBot({
 
   // «🎛 Yuklarni qanday olasiz?» tugmalari
   bot.callbackQuery(FEED_CALLBACK, async (ctx) => {
-    await ctx.answerCallbackQuery();
-    if (ctx.chat?.type !== "private") return;
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    if (ctx.match[1] === "done") {
+      await ctx.answerCallbackQuery();
+      const driver = rememberUser(ctx);
+      if (roleOf(driver) !== "haydovchi") return showStart(ctx);
+      return closeModes(ctx, driver);
+    }
+    // «🌐 Hamma guruhlardan olish» (profili bor haydovchi) — saveAndBack o'zi javob beradi («✅ Saqlandi»)
+    if (!(ctx.match[1] === "tezkor" && store.getDriver(ctx.chat.id)?.profile)) await ctx.answerCallbackQuery();
     if (ctx.match[1] === "off") return turnFastOff(ctx); // eski «🔴 Tezkorni o'chirish» tugmasi
     const mode = validFeedMode(ctx.match[1]);
     if (!mode) return;
@@ -1256,36 +1309,62 @@ export function createBot({
     await pickMode(ctx, mode);
   });
 
-  // «📍 Qaysi viloyatlardan?»: ✅ qo'yish/olish, «✅ Tayyor» (kamida bitta), «⬅️ Rejimlarga qaytish»
+  // Ro'yxat xabari eskirgan (bot qayta yoqilgan yoki 30 daqiqa o'tgan) — rejim oynasini qaytadan ochamiz
+  async function staleList(ctx, driver) {
+    await ctx.answerCallbackQuery({ text: "Bu ro'yxat eskirgan — qaytadan oching", show_alert: true });
+    await ctx.editMessageReplyMarkup().catch(() => {});
+    return roleOf(driver) === "haydovchi" ? showModes(ctx, driver) : showStart(ctx);
+  }
+
+  // «📍 Qayerdan?»: ✅ qo'yish/olish, «Hamma joy» (tozalash), «✅ Saqlash» (bo'sh — filtrsiz), «⬅️ Orqaga»
   bot.callbackQuery(REGION_CALLBACK, async (ctx) => {
     if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
     const driver = rememberUser(ctx);
     const draft = feedDraft(ctx.chat.id);
-    if (roleOf(driver) !== "haydovchi" || !draft || !FEED_MODES[draft.mode]?.regions) {
-      await ctx.answerCallbackQuery({ text: "Bu ro'yxat eskirgan — qaytadan oching", show_alert: true });
-      await ctx.editMessageReplyMarkup().catch(() => {});
-      return roleOf(driver) === "haydovchi" ? showModes(ctx, driver) : showStart(ctx);
-    }
+    if (roleOf(driver) !== "haydovchi" || draft?.step !== "regions") return staleList(ctx, driver);
     draft.at = Date.now();
     const data = ctx.callbackQuery.data;
+    if (data === "fr:ok") return saveAndBack(ctx, driver, { regions: draft.regions });
+    await ctx.answerCallbackQuery();
     if (data === "fr:back") {
-      await ctx.answerCallbackQuery();
       feedDrafts.delete(ctx.chat.id);
       return showModes(ctx, driver, { edit: true });
     }
-    if (data === "fr:ok") {
-      const checked = sanitizeFeed({ mode: draft.mode, regions: draft.regions });
-      if (checked.error) return ctx.answerCallbackQuery({ text: checked.error, show_alert: true });
-      await ctx.answerCallbackQuery();
-      feedDrafts.delete(ctx.chat.id);
-      await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[draft.mode].icon} ${FEED_MODES[draft.mode].name} ✅`).catch(() => {});
-      const updated = store.saveDriver(ctx.chat.id, { role: "haydovchi", profile: rawProfile(checked.feed, driver.profile), draft: null, active: true });
-      return feedSaved(ctx, updated);
+    if (data === "fr:all") draft.regions = [];
+    else {
+      const id = ctx.match[1];
+      draft.regions = draft.regions.includes(id) ? draft.regions.filter((r) => r !== id) : [...draft.regions, id];
     }
-    const id = ctx.match[1];
-    await ctx.answerCallbackQuery();
-    draft.regions = draft.regions.includes(id) ? draft.regions.filter((r) => r !== id) : [...draft.regions, id];
     return showRegions(ctx, draft, { edit: true });
+  });
+
+  // «🚚 Qaysi transport?»: ochish, ✅ qo'yish/olish, «Hammasi», «✅ Saqlash», «⬅️ Orqaga»
+  bot.callbackQuery(TRUCK_CALLBACK, async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    const driver = rememberUser(ctx);
+    const data = ctx.callbackQuery.data;
+    if (roleOf(driver) !== "haydovchi") return staleList(ctx, driver);
+    if (data === "ft:open") {
+      await ctx.answerCallbackQuery();
+      const draft = { step: "trucks", trucks: [...feedOf(driver.profile).trucks], at: Date.now() };
+      feedDrafts.set(ctx.chat.id, draft);
+      return showTrucks(ctx, draft, { edit: true });
+    }
+    const draft = feedDraft(ctx.chat.id);
+    if (draft?.step !== "trucks") return staleList(ctx, driver);
+    draft.at = Date.now();
+    if (data === "ft:ok") return saveAndBack(ctx, driver, { trucks: draft.trucks });
+    await ctx.answerCallbackQuery();
+    if (data === "ft:back") {
+      feedDrafts.delete(ctx.chat.id);
+      return showModes(ctx, driver, { edit: true });
+    }
+    if (data === "ft:all") draft.trucks = [];
+    else {
+      const id = ctx.match[1];
+      draft.trucks = draft.trucks.includes(id) ? draft.trucks.filter((t) => t !== id) : [...draft.trucks, id];
+    }
+    return showTrucks(ctx, draft, { edit: true });
   });
 
   // «📌 Qaysi guruhlardan?»: ✅ qo'yish/olish, sahifa, «✅ Tayyor», «⬅️ Rejimlarga qaytish»
@@ -1293,11 +1372,7 @@ export function createBot({
     if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
     const driver = rememberUser(ctx);
     const draft = feedDraft(ctx.chat.id);
-    if (roleOf(driver) !== "haydovchi" || !draft) {
-      await ctx.answerCallbackQuery({ text: "Bu ro'yxat eskirgan — qaytadan oching", show_alert: true });
-      await ctx.editMessageReplyMarkup().catch(() => {});
-      return roleOf(driver) === "haydovchi" ? showModes(ctx, driver) : showStart(ctx);
-    }
+    if (roleOf(driver) !== "haydovchi" || draft?.step !== "groups") return staleList(ctx, driver);
     const [, name, page, kind] = ctx.match;
     const data = ctx.callbackQuery.data;
     draft.at = Date.now();
@@ -1336,14 +1411,8 @@ export function createBot({
     // fg:ok
     const sources = store.allowedFeedSources(ctx.chat.id, draft.sources, { pro: isPro(driver) });
     if (!sources.length) return ctx.answerCallbackQuery({ text: "Kamida bitta guruh yoki kanalni tanlang", show_alert: true });
-    await ctx.answerCallbackQuery({ text: "✅ Saqlandi" });
-    feedDrafts.delete(ctx.chat.id);
-    await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[draft.mode].icon} ${FEED_MODES[draft.mode].name} ✅`).catch(() => {});
-    const feed = { mode: draft.mode, sources };
-    // «+ saralangan» va mashinasi bor — butun profil qoladi; aks holda mashinasiz profil (mashinasi bo'lsa — saqlanadi)
-    const profile = driver.profile?.vehicle && draft.mode === "guruhlarim_plus" ? { ...driver.profile, feed } : rawProfile(feed, driver.profile);
-    const updated = store.saveDriver(ctx.chat.id, { role: "haydovchi", profile, draft: null, active: true });
-    await feedSaved(ctx, updated);
+    // Saqlab, rejim oynasiga qaytamiz (filtrlar o'zgarmaydi; «+ saralangan» va mashinasi bor — butun profil qoladi)
+    return saveAndBack(ctx, driver, { mode: draft.mode, sources });
   });
 
   // --- «📦 Yuk berish» (yuk beruvchi; shipperLoads.js, 2026-11-10) ---
