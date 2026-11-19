@@ -13,6 +13,7 @@ import { extractPhones, maskPhones } from "../phones.js";
 export { hasContact } from "../phones.js";
 import { conformLoad } from "../schema.js";
 import { readNumbers } from "./numbers.js";
+import { LOAD_THRESHOLD, loadScore } from "./loadlike.js";
 import { findPlace, isCommonWordPlace } from "./places.js";
 import { cleanTemplates } from "./templates.js";
 import { editDistance, toLatin, tokenizeLine, wordKey } from "./text.js";
@@ -797,24 +798,38 @@ export function quickLook(text, { scope } = {}) {
 //     ~22% tashlanadi; looksLikeLoad'dan farqi — joyi topilmagan, lekin telefonli yuklar o'tadi
 //   origins — «qayerdan» viloyat kodlari (regions.js), trucks — transport turi kodlari (vehicles.js TRUCK_CLASSES).
 //     Bo'sh — e'londa topilmadi (bunday e'lon har qanday filtrdan o'tadi)
-export function fastLook(text) {
+// fastLook uchun hamma hisob bir joyda (scripts/train-loadlike.mjs ham shuni ishlatadi — o'rgatish va ishlatish bir xil belgilar bilan)
+export function fastFacts(text) {
   const raw = String(text ?? "");
   const parsed = parseByRules(raw);
   const { origins, unknown: originUnknown } = parsed.lines ? originsOf(parsed.lines) : { origins: [], unknown: false };
   const trucks = parsed.truckClasses ?? [];
-  if (parsed.service) return { chatter: true, origins, originUnknown, trucks };
   const latin = toLatin(raw);
+  const lines = parsed.lines ?? [];
   // Joy bormi: yuk tuzilishi tushunilmagan bo'lsa ham, matnda biror joy nomi tanilgan bo'lsa — bor
-  const placed = parsed.loads.some(hasPlace) || (parsed.lines ?? []).some((l) => l.mentions.some((m) => m.entry));
+  const placed = parsed.loads.some(hasPlace) || lines.some((l) => l.mentions.some((m) => m.entry));
   const phone = extractPhones(raw).length > 0;
-  // Telefonsiz matn: joy ham bo'lmasa yoki yuk belgisi (yuk bor, kerak, tonna narxi…) bo'lmasa — suhbat (ovozli xabar matni:
-  // «Angrenda metan qalay ekan, ochered kattami?»)
-  const noSignal = parsed.reasons.includes(NO_LOAD_SIGNAL);
-  // Joy nomi yo'q matn (telefoni bo'lsa ham) faqat aniq yuk belgisi bilan o'tadi: «yuk bor», «fura kerak», mashina turi yoki
-  // og'irlik. Aks holda — reklama («…зарабатывать … пиши мне»), «<tel> shu nomerda ekan», ehtiyot qism savdosi
-  const sure = LOAD_SURE.test(latin) || trucks.length > 0 || (parsed.lines ?? []).some((l) => l.facts.some((f) => f.weightT != null));
-  const idle = placed ? !phone && noSignal : !sure || (!phone && noSignal);
-  const freeTruck = !LOAD_SURE.test(latin) && FREE_TRUCK_PATTERNS.some((re) => re.test(latin));
-  const chatter = freeTruck || CHATTER_PATTERNS.some((re) => re.test(latin)) || idle;
-  return { chatter, origins, originUnknown, trucks };
+  const sure = LOAD_SURE.test(latin);
+  const free = !sure && FREE_TRUCK_PATTERNS.some((re) => re.test(latin));
+  const junk = CHATTER_PATTERNS.some((re) => re.test(latin));
+  const weight = lines.some((l) => l.facts.some((f) => f.weightT != null));
+  const signal = !parsed.service && !parsed.reasons.includes(NO_LOAD_SIGNAL);
+  const flags = { place: placed, from: origins.length > 0 || originUnknown, phone, weight, sure, free, junk, signal, truck: trucks.length > 0, service: Boolean(parsed.service) };
+  return { parsed, origins, originUnknown, trucks, flags, masked: maskPhones(raw) };
+}
+
+// Qoidalar bo'yicha «quruq gap» (model yo'q bo'lsa yoki ishonchi o'rtacha bo'lsa ishlatiladi)
+function chatterByRules({ place, phone, weight, sure, free, junk, signal, truck, service }) {
+  if (service || free || junk) return true;
+  // Joy nomi yo'q matn (telefoni bo'lsa ham) faqat aniq yuk belgisi bilan o'tadi; telefonsiz matnga yuk belgisi kerak
+  return place ? !phone && !signal : !(sure || truck || weight) || (!phone && !signal);
+}
+
+export function fastLook(text) {
+  const { origins, originUnknown, trucks, flags, masked } = fastFacts(text);
+  if (flags.service) return { chatter: true, origins, originUnknown, trucks };
+  // O'rgatilgan model (loadlike.js): yuk e'loni ehtimoli. Model bo'lmasa — qoidalar
+  const score = loadScore(masked, flags);
+  const chatter = score == null ? chatterByRules(flags) : score < LOAD_THRESHOLD;
+  return { chatter, origins, originUnknown, trucks, score };
 }

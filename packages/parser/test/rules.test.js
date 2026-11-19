@@ -298,3 +298,25 @@ test("fastLook: «qayerdan» bir qatorda, «qayerga» keyingi qatorda — ikkinc
   assert.deepEqual(fastLook("Toshkent Oʻrtasaroydan\nBuxoro Qorakoʻlga 10 tonna yuk bor Mineral oʻgʻit 90 000 00 01").origins, ["toshkent_sh"]);
   assert.equal(fastLook("Fargonaga yengil pochta bolsa olamiz 90 000 00 02").chatter, true);
 });
+
+// O'rgatilgan model (loadlike.js, scripts/train-loadlike.mjs): yuk haqida GAP — e'lon emas
+test("fastLook: o'rgatilgan model — yuk haqidagi suhbat, ijara, ish e'loni «quruq gap»; qisqa yuk e'lonlari esa yuk", async () => {
+  const { fastLook } = await import("../src/rules/index.js");
+  const look = (text) => fastLook(text);
+  for (const text of [
+    "🤌🤌🤌 sabir qilib turish kerak yum 10 mingta shafyorga kerak yuk bölsa yozadi shu guruppaga hechkimni lechkasiga yuk bor deb yozmaydi",
+    "Assalomu aleykum akalar damasga bagaj kere edi arendaga 1 kunga",
+    "Завтра в 4 часа нужен будет человек на подмогу,принеси подай ,беру и студентов Напиши 90 000 00 01",
+  ]) {
+    assert.equal(look(text).chatter, true, text);
+  }
+  for (const text of [
+    "Farg'onadan Dexqonobotga Yem 5 tonna kichkina esuzi kerak 90 000 00 02",
+    "Qo'qon Zangota Beton Plita 4 ta plashatka kerak 90 000 00 03",
+    "Quvadan Qarshiga yuk bor 20 pachka kochat srochniga",
+  ]) {
+    assert.equal(look(text).chatter, false, text);
+  }
+  const { score } = look("Farg'onadan Dexqonobotga Yem 5 tonna kichkina esuzi kerak 90 000 00 02");
+  assert.ok(score > 0.9, `ehtimol 0…1 (${score})`);
+});
