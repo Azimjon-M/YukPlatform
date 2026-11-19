@@ -16,7 +16,7 @@ const CHANNEL = { id: -1009876543210, type: "channel", title: "Yuk Ekspert", use
 
 // fail(method, payload) → true (403 «bloklagan») yoki Telegram javobi obyekti (masalan 400) — shu so'rov xato bilan qaytadi
 // answer(method, payload) → Telegram javobidagi result (masalan getChatMember uchun { status }) yoki undefined — standart
-function setup({ fail, answer, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued } = {}) {
+function setup({ fail, answer, slow, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued } = {}) {
   const store = openStore({ file: ":memory:" });
   const config = { channel: "@Yuk_Ekspert", channelId: CHANNEL.id, admins: [], miniappUrl: null, ...extra };
   const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources } = createBot({
@@ -36,6 +36,7 @@ function setup({ fail, answer, config: extra = {}, appUrl, linkToken, callLink, 
   let messageId = 100;
   bot.api.config.use(async (_prev, method, payload) => {
     calls.push({ method, payload });
+    if (slow) await slow(method, payload); // Telegram sekin javob bergandek (so'rov «yo'lda»)
     const failed = fail?.(method, payload);
     if (failed) return typeof failed === "object" ? failed : { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" };
     const result = answer?.(method, payload);
@@ -1837,6 +1838,51 @@ test("tezkor xabar: 3 s kutish paytida «🎛 Filtr» ochilsa yoki pauza bosilsa
   await message(PRIVATE, "/start"); // band holatini bo'shatmaydi, lekin pauza baribir to'xtatadi
   assert.equal((await deliverRaw(42, { ...post, id: 80 }, { phones: [] })).ok, false);
   assert.equal(sentCount(), 1, "Filtr oynasidan keyin e'lon kelmadi");
+});
+
+test("charxpalak: e'lon yo'lda turganda «⏸ Pauza» — «To'xtatildi» oxirgi xabar, keyingi e'lonlar kelmaydi; boshqalarga ketaveradi", async () => {
+  const arrived = []; // Telegram'ga YETIB BORGAN tartib
+  const { store, deliverRaw, deliver, message } = setup({
+    slow: async (method, payload) => {
+      if (method !== "sendMessage") return;
+      if (/un bor/.test(payload.text)) await new Promise((r) => setTimeout(r, 150)); // e'lon so'rovi sekin
+      arrived.push(`${payload.chat_id}:${/un bor/.test(payload.text) ? "e'lon" : payload.text.split("\n")[0]}`);
+    },
+  });
+  for (const id of [42, 43]) store.saveDriver(id, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true });
+  const post = { id: 90, source: "@TutGruz", link: "https://t.me/TutGruz/9", text: "Toshkentdan Samarqandga 20 t un bor\n90 000 00 01", postedAt: Date.now() };
+  const flying = deliverRaw(42, post, { phones: [] }); // yo'lga chiqdi
+  await new Promise((r) => setTimeout(r, 20));
+  await message(PRIVATE, MENU.pause);
+  assert.equal((await flying).ok, true);
+  const mine = arrived.filter((a) => a.startsWith("42:"));
+  assert.deepEqual(mine, ["42:e'lon", "42:⏸ To'xtatildi — yuk kelmaydi."], "To'xtatildi — oxirgi");
+  // uzildi: na tezkor, na yuk beruvchi yuki ketmaydi
+  assert.equal((await deliverRaw(42, { ...post, id: 91 }, { phones: [] })).ok, false);
+  assert.equal((await deliver(42, { fromRegion: "toshkent", phones: [] }, { ...post, id: 92 })).ok, false);
+  // charxpalak aylanaveradi: boshqa haydovchiga ketadi
+  assert.equal((await deliverRaw(43, { ...post, id: 93 }, { phones: [] })).ok, true);
+  assert.equal(arrived.filter((a) => a.startsWith("42:")).length, 2);
+});
+
+test("charxpalak: e'lon yo'lda turganda «🎛 Filtr» — oyna e'londan keyin chiqadi", async () => {
+  const arrived = [];
+  const { store, deliverRaw, message } = setup({
+    slow: async (method, payload) => {
+      if (method !== "sendMessage") return;
+      if (/un bor/.test(payload.text)) await new Promise((r) => setTimeout(r, 150));
+      arrived.push(/un bor/.test(payload.text) ? "e'lon" : payload.text.split("\n")[0]);
+    },
+  });
+  store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true });
+  const post = { id: 95, source: "@TutGruz", link: "https://t.me/TutGruz/9", text: "Toshkentdan Samarqandga 20 t un bor", postedAt: Date.now() };
+  const flying = deliverRaw(42, post, { phones: [] });
+  await new Promise((r) => setTimeout(r, 20));
+  await message(PRIVATE, MENU.feed);
+  await flying;
+  assert.equal(arrived[0], "e'lon");
+  assert.match(arrived.at(-1), /Qaysi yuklar kelsin/);
+  assert.equal((await deliverRaw(42, { ...post, id: 96 }, { phones: [] })).ok, false);
 });
 
 test("«💬 Lichkasi» tugmasi: username'i yo'q, bot taniydigan odamga — ID bo'yicha; begonaga va username bo'lsa — tugma yo'q", async () => {

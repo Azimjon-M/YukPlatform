@@ -578,7 +578,9 @@ export function createBot({
   // saqlash/bekor qilish bilan tugaydi, tashlab ketilsa — oxirgi bosishdan BUSY_IDLE_MS keyin o'zi tugaydi
   const BUSY_IDLE_MS = 3 * 60_000;
   const busy = new Map(); // chatId → qachongacha
-  const hold = (chatId) => busy.set(chatId, Date.now() + BUSY_IDLE_MS);
+  // hold — chatni charxpalakdan uzadi va hozir YO'LDA turgan xabar(lar) yetib borishini kutadigan promise qaytaradi:
+  // oyna shundan keyin chiqadi, demak undan keyin hech qanday e'lon kelmaydi
+  const hold = (chatId) => (busy.set(chatId, Date.now() + BUSY_IDLE_MS), drain(chatId));
   const release = (chatId) => busy.delete(chatId);
   function isBusy(chatId) {
     const until = busy.get(chatId);
@@ -588,8 +590,38 @@ export function createBot({
     return false;
   }
 
+  // «Charxpalak» (2026-11-19, Azimjon: «pauza — charxpalakni to'xtatish emas, uzib qo'yish; charxpalak aylanaverishi kerak»):
+  // e'lon yuborish hammaga davom etadi, lekin pauza/sozlash oynasi bosilgan chat o'sha zahoti uziladi. Har bir yuk xabari
+  // (tezkor, yuk beruvchining o'zi yuborgani) shaxsiy chatga faqat guarded() orqali ketadi: tekshiruv — so'rov jo'natilishidan
+  // bir zum oldin (oraliqda await yo'q), jo'natilayotgan so'rov inflight'da turadi. Pauza / oyna handleri avval holatni
+  // yozadi, keyin drain() bilan yo'ldagi so'rov tugashini kutib, shundan keyingina javob beradi — «⏸ To'xtatildi» doim oxirgi
+  const inflight = new Map(); // chatId → Set<Promise> — hozir Telegram'ga ketayotgan yuk xabarlari
+  function gateReason(chatId) {
+    if (isBusy(chatId)) return "band: sozlash oynasi ochiq";
+    if (store.getDriver(chatId)?.active === false) return "pauza";
+    return null;
+  }
+  function guarded(chatId, send) {
+    const why = gateReason(chatId);
+    if (why) return Promise.resolve({ ok: false, error: why });
+    const job = (async () => send())();
+    const set = inflight.get(chatId) ?? new Set();
+    set.add(job);
+    inflight.set(chatId, set);
+    const done = () => {
+      set.delete(job);
+      if (!set.size && inflight.get(chatId) === set) inflight.delete(chatId);
+    };
+    job.then(done, done);
+    return job;
+  }
+  function drain(chatId) {
+    const set = inflight.get(chatId);
+    return set ? Promise.allSettled([...set]).then(() => {}) : Promise.resolve();
+  }
+
   async function startWizard(ctx, profile = null, role = "haydovchi") {
-    hold(ctx.chat.id);
+    await hold(ctx.chat.id);
     const draft = newDraft(profile, scope, role);
     store.saveDriver(ctx.chat.id, { draft });
     await showStep(ctx, draft);
@@ -739,13 +771,13 @@ export function createBot({
   };
 
   async function showModes(ctx, driver, { edit = false, intro = null } = {}) {
-    hold(ctx.chat.id);
+    await hold(ctx.chat.id);
     const { text, keyboard } = modeStep({ profile: driver.profile, intro });
     await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
 
   async function showGroups(ctx, draft, { edit = false } = {}) {
-    hold(ctx.chat.id);
+    await hold(ctx.chat.id);
     const pro = isPro(store.getDriver(ctx.chat.id));
     const list = store.feedSources(ctx.chat.id, { pro });
     const { text, keyboard, page } = groupStep({ list, chosen: draft.sources, page: draft.page, mode: draft.mode, kind: draft.kind, pro });
@@ -754,13 +786,13 @@ export function createBot({
   }
 
   async function showRegions(ctx, draft, { edit = false } = {}) {
-    hold(ctx.chat.id);
+    await hold(ctx.chat.id);
     const { text, keyboard } = regionStep({ chosen: draft.regions });
     await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
 
   async function showTrucks(ctx, draft, { edit = false } = {}) {
-    hold(ctx.chat.id);
+    await hold(ctx.chat.id);
     const { text, keyboard } = truckStep({ chosen: draft.trucks });
     await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
@@ -897,6 +929,7 @@ export function createBot({
     // shuning uchun yuk beruvchida ham pauza profilsiz qabul qilinadi (profil faqat shaxsiy avtomatik xabarlar uchun)
     if (!driver.profile && roleOf(driver) !== "yuk_beruvchi") return openSettings(ctx);
     const updated = store.saveDriver(ctx.chat.id, { active });
+    if (!active) await drain(ctx.chat.id); // yo'ldagi e'lon yetib borsin — «⏸ To'xtatildi» undan keyin, oxirgi xabar bo'ladi
     await ctx.reply(active ? "▶️ Yoqildi — yuklar yana keladi." : `⏸ To'xtatildi — yuk kelmaydi.\nQayta yoqish — «${MENU.resume}».`, menu(updated));
   }
 
@@ -1175,9 +1208,10 @@ export function createBot({
   // Havola (t.me/…, @nomi) chatga qachon yozilsa ham shu yerga keladi (tugmani bosish shart emas)
   const sourceIntake = createSourceIntake({ api: bot.api, store, log, ours: [config.channel, ...(config.requiredChats ?? [])] });
   // Raqam so'raladi va niyat eslab qolinadi (yuqorida groupIntents): username — havola yuborgan bo'lsa, o'sha guruh
-  function needPhone(ctx, username = null) {
-    hold(ctx.chat.id);
+  async function needPhone(ctx, username = null) {
+    const settled = hold(ctx.chat.id);
     groupIntents.set(ctx.chat.id, { username, at: Date.now() });
+    await settled;
     return ctx.reply(INTAKE.needPhone(Boolean(username)), { reply_markup: phoneKeyboard(false) });
   }
   // Raqam guruh uchun ulashilgach: havolasi bor edi — o'sha darhol tekshiriladi, yo'q edi — «havolani yuboring» xabari
@@ -1189,7 +1223,7 @@ export function createBot({
     const driver = rememberUser(ctx);
     if (!roleOf(driver)) return showStart(ctx);
     if (!driver.phone) return needPhone(ctx);
-    hold(ctx.chat.id); // havola kutilyapti — shu orada e'lon chalg'itmasin
+    await hold(ctx.chat.id); // havola kutilyapti — shu orada e'lon chalg'itmasin
     await ctx.reply(sourceIntake.intro(ctx.chat.id), html(driver));
   }
   // /account_qosh (Azimjon, 2026-11-13): o'z Telegram akkauntini collector'ga ulash — Mini App Sozlamalardagi
@@ -1790,7 +1824,7 @@ export function createBot({
   async function deliver(chatId, load, rawPost, kind = "yuk", loadId = null) {
     const post = withSender(rawPost);
     const url = callUrl(chatId, loadId);
-    return sendDirect(chatId, directText(load, post, kind), loadButtons(load, post, url), () => loadButtons(load, post, url, { lichka: false }));
+    return guarded(chatId, () => sendDirect(chatId, directText(load, post, kind), loadButtons(load, post, url), () => loadButtons(load, post, url, { lichka: false })));
   }
 
   // «⚡ Tezkor» / «📌 Mening guruhlarim» (pipeline.js createWorker deps.deliverRaw): e'lonning ASL matni, AI'siz.
@@ -1809,12 +1843,11 @@ export function createBot({
     if (Date.now() < blocked) return { ok: false, error: `429: ${Math.ceil((blocked - Date.now()) / 1000)} s kutish` };
     const waitMs = (rawLastAt.get(chatId) ?? 0) + RAW_CHAT_GAP_MS - Date.now();
     if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
-    // Kutish paytida (≤ 3 s) odam «🎛 Filtr» ni ochgan yoki pauza bosgan bo'lishi mumkin (2026-11-19 tiket: Filtr oynasidan
-    // keyin e'lon keldi) — shuning uchun yuborishning o'zidan oldin yana tekshiramiz
-    if (isBusy(chatId)) return { ok: false, error: "band: sozlash oynasi ochiq" };
-    if (store.getDriver(chatId)?.active === false) return { ok: false, error: "pauza" };
+    // Kutish paytida (≤ 3 s) odam «🎛 Filtr» ni ochgan yoki pauza bosgan bo'lishi mumkin (2026-11-19 tiket) — guarded()
+    // yuborishning o'zidan bir zum oldin tekshiradi va so'rovni inflight'ga qo'yadi (pauza handleri uni kutadi)
+    if (gateReason(chatId)) return { ok: false, error: gateReason(chatId) };
     rawLastAt.set(chatId, Date.now());
-    const outcome = await deliverRawNow(chatId, rawPost, opts);
+    const outcome = await guarded(chatId, () => deliverRawNow(chatId, rawPost, opts));
     const retry = Number(/retry after (\d+)/i.exec(outcome?.error ?? "")?.[1]);
     if (retry > 0) {
       rawBlockedUntil.set(chatId, Date.now() + retry * 1000);
