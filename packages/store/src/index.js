@@ -338,6 +338,12 @@ function migrate(db) {
   if (!users.includes("sub_missing")) db.exec("ALTER TABLE drivers ADD COLUMN sub_missing TEXT");
   if (!users.includes("sub_checked_at")) db.exec("ALTER TABLE drivers ADD COLUMN sub_checked_at INTEGER");
   if (!users.includes("sub_reminded_at")) db.exec("ALTER TABLE drivers ADD COLUMN sub_reminded_at INTEGER");
+  // Ochiq amal (2026-11-19, Azimjon: «amal yakunlab olmagunga qadar e'lonlar bot chatiga kelishi xato»): hold_kind —
+  // qaysi oyna ochiq (filtr | wizard | guruh | raqam), hold_at — oxirgi bosish, hold_reminded_at — «tugallanmagan» eslatmasi.
+  // Bazada — bot qayta ishga tushsa ham amal ochiq qoladi va e'lonlar kelmaydi
+  if (!users.includes("hold_kind")) db.exec("ALTER TABLE drivers ADD COLUMN hold_kind TEXT");
+  if (!users.includes("hold_at")) db.exec("ALTER TABLE drivers ADD COLUMN hold_at INTEGER");
+  if (!users.includes("hold_reminded_at")) db.exec("ALTER TABLE drivers ADD COLUMN hold_reminded_at INTEGER");
   // commands_on — shu chatda Telegram'ning «Menu» tugmasi (buyruqlar ro'yxati) o'rnatilganmi (2026-11-10, Azimjon: rol
   // tanlanmaguncha ko'rinmasin). Bot apps/bot commands.js: rol bor — qo'yadi, yo'q — olib tashlaydi va shu yerga yozadi
   if (!users.includes("commands_on")) db.exec("ALTER TABLE drivers ADD COLUMN commands_on INTEGER NOT NULL DEFAULT 0");
@@ -423,6 +429,8 @@ function driverRow(row) {
     subMissing: parse(row.sub_missing) ?? [],
     subCheckedAt: row.sub_checked_at ?? null,
     subRemindedAt: row.sub_reminded_at ?? null,
+    // Ochiq amal: { kind, at, remindedAt } yoki null — shu paytda e'lonlar bu chatga yuborilmaydi
+    hold: row.hold_kind ? { kind: row.hold_kind, at: row.hold_at ?? null, remindedAt: row.hold_reminded_at ?? null } : null,
     // Yuk beruvchi oxirgi yukida yozgan raqamlar (["+998..."]) — keyingi yuk formasi shu bilan ochiladi
     loadPhones: parse(row.load_phones) ?? [],
     createdAt: row.created_at,
@@ -978,6 +986,24 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       for (const row of rows) drop.run(row.id);
       const since = now() - maxAgeMs;
       return rows.filter((row) => row.created_at >= since).map((row) => ({ id: row.id, chatId: row.chat_id, kind: row.kind, createdAt: row.created_at }));
+    },
+
+    // Ochiq amal (bot.js holdWindow / release): har bosishda vaqt yangilanadi, eslatma qayta qurollanadi
+    setHold(chatId, kind) {
+      db.prepare("UPDATE drivers SET hold_kind = ?, hold_at = ?, hold_reminded_at = NULL WHERE chat_id = ?").run(kind, now(), chatId);
+    },
+    clearHold(chatId) {
+      db.prepare("UPDATE drivers SET hold_kind = NULL, hold_at = NULL, hold_reminded_at = NULL WHERE chat_id = ? AND hold_kind IS NOT NULL").run(chatId);
+    },
+    // before dan oldin oxirgi marta bosilgan, hali eslatilmagan ochiq amallar → [{ chatId, kind, at }]
+    holdsToRemind(before) {
+      return db
+        .prepare("SELECT chat_id, hold_kind, hold_at FROM drivers WHERE hold_kind IS NOT NULL AND hold_reminded_at IS NULL AND hold_at < ?")
+        .all(before)
+        .map((row) => ({ chatId: row.chat_id, kind: row.hold_kind, at: row.hold_at }));
+    },
+    markHoldReminded(chatId) {
+      db.prepare("UPDATE drivers SET hold_reminded_at = ? WHERE chat_id = ?").run(now(), chatId);
     },
 
     // «A'zo bo'ling — yuk yuborilmadi» eslatmasi yuborildi (bot members.js, kuniga ko'pi bilan bir marta)

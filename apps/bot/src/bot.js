@@ -397,10 +397,16 @@ export function createBot({
   // vahokazo btn yoki /... qilinganida»): shaxsiy chatdagi har xabar, tugma yoki buyruq kelishi bilan e'lonlar shu chatga
   // ACTION_HOLD_MS uziladi va yo'ldagi e'lon yetib borguncha kutiladi — botning javobi doim e'londan keyin chiqadi, javobni
   // o'qiyotganda e'lon aralashmaydi. Oxirgi amaldan ACTION_HOLD_MS o'tgach o'zi ulanadi. Sozlash oynalari (Filtr, guruhlar…)
-  // o'zi uzoqroq (BUSY_IDLE_MS) ushlaydi; «✅ Tayyor», saqlash, «⏸ Pauza / ▶️ Davom ettirish» — darhol ulaydi (release)
+  // esa amal tugaguncha ushlaydi (holdWindow, bazada); «✅ Tayyor», saqlash, «⏸ Pauza / ▶️ Davom ettirish» — darhol ulaydi.
+  // Ochiq amal bor bo'lsa, har bosish uning vaqtini yangilaydi (eslatma oxirgi bosishdan HOLD_REMIND_MS keyin)
   const ACTION_HOLD_MS = actionHoldMs;
+  const HOLD_END = "hold:end"; // eslatmadagi «✅ Tugatish» tugmasi
   bot.use(async (ctx, next) => {
-    if (ctx.chat?.type === "private" && ctx.from && (ctx.message || ctx.callbackQuery)) await (ACTION_HOLD_MS > 0 ? hold(ctx.chat.id, ACTION_HOLD_MS) : drain(ctx.chat.id));
+    if (ctx.chat?.type === "private" && ctx.from && (ctx.message || ctx.callbackQuery)) {
+      const open = store.getDriver(ctx.chat.id)?.hold;
+      if (open && ctx.callbackQuery?.data !== HOLD_END) store.setHold?.(ctx.chat.id, open.kind);
+      await (ACTION_HOLD_MS > 0 ? hold(ctx.chat.id, ACTION_HOLD_MS) : drain(ctx.chat.id));
+    }
     return next();
   });
 
@@ -584,18 +590,25 @@ export function createBot({
     await ctx.reply(text, options);
   }
 
-  // «Band» holati (2026-11-19, Azimjon: «rejim yoki guruh qo'shish ish bajarayotganimda ham e'lonlar to'xtamay kelmoqda …
-  // ish yakunlanmaguncha e'lonlar kelmay tursin»): sozlash oynasi (rejim, viloyat/guruh tanlovi, «➕ Guruh qo'shish»,
-  // savol-javob) ochiq turganda tezkor e'lonlar shu odamga yuborilmaydi (pipeline.js deps.held). Pauza emas — saqlanmaydi:
-  // saqlash/bekor qilish bilan tugaydi, tashlab ketilsa — oxirgi bosishdan BUSY_IDLE_MS keyin o'zi tugaydi
-  const BUSY_IDLE_MS = 3 * 60_000;
-  const busy = new Map(); // chatId → qachongacha
-  // hold — chatni charxpalakdan uzadi va hozir YO'LDA turgan xabar(lar) yetib borishini kutadigan promise qaytaradi:
-  // oyna shundan keyin chiqadi, demak undan keyin hech qanday e'lon kelmaydi
+  // Chatni e'lonlardan uzish — ikki xil (2026-11-19, Azimjon):
+  // 1) Ochiq amal (holdWindow): sozlash oynasi (🎛 Filtr va uning ro'yxatlari, savol-javob, «➕ Guruh qo'shish», raqam so'rovi)
+  //    ochilgan — e'lonlar shu chatga AMAL TUGAGUNCHA umuman kelmaydi («3 daqiqada o'zi tugasin — xato! amal yakunlanmaguncha
+  //    e'lon kelishi xato»). Bazada (drivers.hold_kind) — bot qayta yoqilsa ham saqlanadi. Tugaydi: «✅ Tayyor», saqlash,
+  //    havola qabul qilindi, raqam ulashildi / «Keyinroq», ⏸/▶️ yoki eslatmadagi «✅ Tugatish» (release). Odam tashlab ketsa —
+  //    HOLD_REMIND_MS dan keyin BIR marta eslatma (holdReminder), e'lonlar baribir kelmaydi.
+  // 2) Har qanday amal (hold, xotirada): tugma/buyruq/xabar — ACTION_HOLD_MS (60 s) uziladi, javobni o'qib olsin.
+  // Ikkalasi ham yo'ldagi e'lon yetib borishini kutadi (drain) — botning javobi doim e'londan keyin.
+  const HOLD_REMIND_MS = 3 * 60_000;
+  const busy = new Map(); // chatId → qachongacha (faqat 2-tur)
   // ms — qancha vaqt uzilib turadi (oldingi uzunroq muddat qisqartirilmaydi)
-  const hold = (chatId, ms = BUSY_IDLE_MS) => (busy.set(chatId, Math.max(busy.get(chatId) ?? 0, Date.now() + ms)), drain(chatId));
-  const release = (chatId) => busy.delete(chatId);
+  const hold = (chatId, ms) => (busy.set(chatId, Math.max(busy.get(chatId) ?? 0, Date.now() + ms)), drain(chatId));
+  const holdWindow = (chatId, kind) => (store.setHold?.(chatId, kind), drain(chatId));
+  const release = (chatId) => {
+    busy.delete(chatId);
+    store.clearHold?.(chatId);
+  };
   function isBusy(chatId) {
+    if (store.getDriver(chatId)?.hold) return true;
     const until = busy.get(chatId);
     if (until == null) return false;
     if (Date.now() <= until) return true;
@@ -634,7 +647,7 @@ export function createBot({
   }
 
   async function startWizard(ctx, profile = null, role = "haydovchi") {
-    await hold(ctx.chat.id);
+    await holdWindow(ctx.chat.id, "wizard");
     const draft = newDraft(profile, scope, role);
     store.saveDriver(ctx.chat.id, { draft });
     await showStep(ctx, draft);
@@ -784,13 +797,13 @@ export function createBot({
   };
 
   async function showModes(ctx, driver, { edit = false, intro = null } = {}) {
-    await hold(ctx.chat.id);
+    await holdWindow(ctx.chat.id, "filtr");
     const { text, keyboard } = modeStep({ profile: driver.profile, intro });
     await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
 
   async function showGroups(ctx, draft, { edit = false } = {}) {
-    await hold(ctx.chat.id);
+    await holdWindow(ctx.chat.id, "filtr");
     const pro = isPro(store.getDriver(ctx.chat.id));
     const list = store.feedSources(ctx.chat.id, { pro });
     const { text, keyboard, page } = groupStep({ list, chosen: draft.sources, page: draft.page, mode: draft.mode, kind: draft.kind, pro });
@@ -799,13 +812,13 @@ export function createBot({
   }
 
   async function showRegions(ctx, draft, { edit = false } = {}) {
-    await hold(ctx.chat.id);
+    await holdWindow(ctx.chat.id, "filtr");
     const { text, keyboard } = regionStep({ chosen: draft.regions });
     await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
 
   async function showTrucks(ctx, draft, { edit = false } = {}) {
-    await hold(ctx.chat.id);
+    await holdWindow(ctx.chat.id, "filtr");
     const { text, keyboard } = truckStep({ chosen: draft.trucks });
     await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
@@ -1167,6 +1180,7 @@ export function createBot({
       return;
     }
     const updated = store.saveDriver(ctx.chat.id, { phone, phoneAskedAt: driver.phoneAskedAt ?? Date.now() });
+    if (driver.hold?.kind === "raqam") release(ctx.chat.id); // raqam so'rovi tugadi
     // Raqam «➕ Guruh qo'shish» uchun ulashildi — yo'nalish savoli o'rniga guruh qo'shishga qaytamiz
     const intent = takeGroupIntent(ctx.chat.id);
     if (intent && roleOf(updated)) return groupAfterPhone(ctx, updated, intent);
@@ -1177,6 +1191,7 @@ export function createBot({
   // «⏭ Keyinroq» / «↩️ O'zgartirmaslik» — asosiy menyu qaytadi, bot boshqa so'ramaydi
   privateChat.hears([PHONE.later, PHONE.keep], async (ctx) => {
     const driver = rememberUser(ctx);
+    if (driver.hold?.kind === "raqam") release(ctx.chat.id); // raqam so'rovi tugadi
     const text = driver.phone ? "Raqamingiz o'zgarmadi." : `Mayli 👍 Keyin xohlasangiz — «${MENU.phone}».`;
     // Guruh qo'shish uchun so'ralgan edi — faqat menyu (yo'nalish savolisiz)
     if (takeGroupIntent(ctx.chat.id)) return ctx.reply(text, menu(driver));
@@ -1222,13 +1237,14 @@ export function createBot({
   const sourceIntake = createSourceIntake({ api: bot.api, store, log, ours: [config.channel, ...(config.requiredChats ?? [])] });
   // Raqam so'raladi va niyat eslab qolinadi (yuqorida groupIntents): username — havola yuborgan bo'lsa, o'sha guruh
   async function needPhone(ctx, username = null) {
-    const settled = hold(ctx.chat.id);
+    const settled = holdWindow(ctx.chat.id, "raqam");
     groupIntents.set(ctx.chat.id, { username, at: Date.now() });
     await settled;
     return ctx.reply(INTAKE.needPhone(Boolean(username)), { reply_markup: phoneKeyboard(false) });
   }
   // Raqam guruh uchun ulashilgach: havolasi bor edi — o'sha darhol tekshiriladi, yo'q edi — «havolani yuboring» xabari
   async function groupAfterPhone(ctx, driver, { username }) {
+    if (!username) await holdWindow(ctx.chat.id, "guruh"); // endi havola kutilyapti
     const text = username ? await sourceIntake.submit(ctx.chat.id, username) : sourceIntake.intro(ctx.chat.id);
     await ctx.reply(`Raqamingiz saqlandi! ✅\n\n${text}`, html(driver));
   }
@@ -1236,7 +1252,7 @@ export function createBot({
     const driver = rememberUser(ctx);
     if (!roleOf(driver)) return showStart(ctx);
     if (!driver.phone) return needPhone(ctx);
-    await hold(ctx.chat.id); // havola kutilyapti — shu orada e'lon chalg'itmasin
+    await holdWindow(ctx.chat.id, "guruh"); // havola kutilyapti — shu orada e'lon chalg'itmasin
     await ctx.reply(sourceIntake.intro(ctx.chat.id), html(driver));
   }
   // /account_qosh (Azimjon, 2026-11-13): o'z Telegram akkauntini collector'ga ulash — Mini App Sozlamalardagi
@@ -1688,12 +1704,50 @@ export function createBot({
 
   // Avtomatik pauza xabarlaridagi tugmalar (idle.js). Bosishning o'zi — faollik (yuqoridagi middleware touchDriver):
   // «✅ Ha, davom etsin» — 48 soatlik soat qaytadan boshlanadi; «▶️ Davom ettirish» — pauzadan chiqaradi
+  // Ochiq amal tashlab ketildi — bir marta eslatma (e'lonlar baribir kelmaydi, amal tugaguncha) va «✅ Tugatish» tugmasi
+  const HOLD_NAMES = { filtr: "🎛 Filtr", wizard: "Ro'yxatdan o'tish", guruh: "➕ Guruh qo'shish", raqam: "📱 Raqam ulashish" };
+  async function remindHolds() {
+    for (const { chatId, kind } of store.holdsToRemind?.(Date.now() - HOLD_REMIND_MS) ?? []) {
+      store.markHoldReminded(chatId);
+      const driver = store.getDriver(chatId);
+      if (!driver || driver.active === false || driver.deletedAt != null) continue; // pauzada — e'lon baribir kelmaydi
+      const name = HOLD_NAMES[kind] ?? "Sozlash";
+      const text = `⏳ <b>${name}</b> hali tugamadi — shuning uchun e'lonlar kelmayapti.\nTugatsangiz, e'lonlar yana keladi 👇`;
+      await bot.api
+        .sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("✅ Tugatish — e'lonlar kelsin", HOLD_END) })
+        .catch((error) => log(`Ochiq amal eslatmasi yuborilmadi (${chatId}): ${error.description ?? error.message}`));
+    }
+  }
+  let holdTimer = null;
+  const holdReminder = {
+    start(everyMs = 30_000) {
+      holdTimer ??= setInterval(() => remindHolds().catch((error) => log(`Ochiq amal eslatmasida xato: ${error.message}`)), everyMs);
+      holdTimer.unref?.();
+    },
+    stop() {
+      clearInterval(holdTimer);
+      holdTimer = null;
+    },
+    run: remindHolds,
+  };
+  bot.callbackQuery(HOLD_END, async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    const driver = rememberUser(ctx);
+    release(ctx.chat.id);
+    feedDrafts.delete(ctx.chat.id);
+    groupIntents.delete(ctx.chat.id);
+    await ctx.answerCallbackQuery({ text: "✅ Tugadi" });
+    await ctx.editMessageText("▶️ Tugadi — e'lonlar yana keladi.").catch(() => {});
+    if (driver.active === false) await ctx.reply(`⏸ Siz pauzadasiz. Yoqish — «${MENU.resume}».`, menu(driver));
+  });
+
   bot.callbackQuery([IDLE_BUTTONS.ok, IDLE_BUTTONS.resume], async (ctx) => {
     if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
     const driver = rememberUser(ctx);
     await ctx.answerCallbackQuery(ctx.callbackQuery.data === IDLE_BUTTONS.ok ? { text: "✅ Rahmat!" } : undefined);
     await ctx.editMessageReplyMarkup().catch(() => {}); // tugma qayta bosilmasin
     if (driver.profile && driver.active === false) return setActive(ctx, true);
+    release(ctx.chat.id); // «kelaversin» dedi — ochiq qolgan amal bo'lsa ham tugadi
     const t = ROLE_TEXT[roleOf(driver)] ?? ROLE_TEXT.haydovchi;
     await ctx.reply(`✅ Yaxshi, ${t.many} kelishda davom etadi.`, menu(driver));
   });
@@ -1733,7 +1787,7 @@ export function createBot({
 
   // Chatdagi savol-javob (Mini App bo'lmasa)
   bot.callbackQuery(/^w:(\w+):(.+)$/, async (ctx) => {
-    if (ctx.chat) hold(ctx.chat.id); // savol-javob davom etyapti
+    if (ctx.chat) await holdWindow(ctx.chat.id, "wizard"); // savol-javob davom etyapti
     const [, step, value] = ctx.match;
     const driver = store.getDriver(ctx.chat.id);
     const role = roleOf(driver);
@@ -1945,5 +1999,5 @@ export function createBot({
   // notices — server (apps/api) qo'ygan topshiriqlar (xaritada yo'nalish tanlandi): main.js notices.start()
   // sources — foydalanuvchi qo'shgan guruhlar kuzatuvchisi: main.js sources.start()
   // directDone — yuk beruvchiga natija (main.js worker deps.onDirect)
-  return { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, members, commands, notices, sources, group };
+  return { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, members, commands, notices, sources, group, holdReminder };
 }

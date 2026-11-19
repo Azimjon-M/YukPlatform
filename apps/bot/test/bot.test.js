@@ -19,7 +19,7 @@ const CHANNEL = { id: -1009876543210, type: "channel", title: "Yuk Ekspert", use
 function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued } = {}) {
   const store = openStore({ file: ":memory:" });
   const config = { channel: "@Yuk_Ekspert", channelId: CHANNEL.id, admins: [], miniappUrl: null, ...extra };
-  const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources } = createBot({
+  const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources, holdReminder } = createBot({
     actionHoldMs,
     token: `123456:${"x".repeat(35)}`,
     store,
@@ -54,7 +54,7 @@ function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUr
   const press = (data) =>
     send({ callback_query: { id: String(++updateId), from: USER, chat_instance: "x", data, message: { message_id: 101, date: 0, chat: PRIVATE, text: "..." } } });
   const webAppData = (data) => message(PRIVATE, undefined, { web_app_data: { data, button_text: MENU.settings } });
-  return { store, calls, send, message, command, press, webAppData, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources };
+  return { store, calls, send, message, command, press, webAppData, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources, holdReminder };
 }
 
 const ROLE_QUESTION = /^Iltimos, tanlang/;
@@ -1902,6 +1902,57 @@ test("har qanday amal (/start, ❓ Yordam, tugma) chatni 60 s uzadi; «✅ Tayyo
   assert.equal(isBusy(42), false, "«✅ Tayyor» — darhol ulanadi");
   await press("fm:tezkor");
   assert.equal(isBusy(42), true, "tugma bosildi — yana uzildi");
+});
+
+test("ochiq amal: 🎛 Filtr ochilsa — «✅ Tayyor» bosilmaguncha e'lon kelmaydi (3 daqiqadan keyin ham), bot qayta yoqilsa ham", async () => {
+  const { store, deliverRaw, message, press, isBusy } = setup({});
+  store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
+  const post = { id: 101, source: "@TutGruz", link: "https://t.me/TutGruz/9", text: "Toshkentdan Samarqandga 20 t un bor", postedAt: Date.now() };
+  await message(PRIVATE, MENU.feed);
+  assert.equal(store.getDriver(42).hold.kind, "filtr", "bazaga yozildi");
+  // 10 daqiqa o'tdi (oxirgi bosish eskirdi) — baribir uzilgan
+  store.setHold(42, "filtr");
+  assert.equal(isBusy(42), true);
+  assert.equal((await deliverRaw(42, post, { phones: [] })).ok, false);
+  // bot qayta yoqildi — yangi createBot, o'sha baza
+  const again = setup({});
+  again.store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true });
+  again.store.setHold(42, "filtr");
+  assert.equal(again.isBusy(42), true, "yangi bot ham bazadan ko'radi");
+  // ❓ Yordam bosildi — amal hali tugamagan
+  await message(PRIVATE, MENU.help);
+  assert.equal(isBusy(42), true);
+  await press("fm:done");
+  assert.equal(store.getDriver(42).hold, null);
+  assert.equal(isBusy(42), false);
+  assert.equal((await deliverRaw(42, { ...post, id: 102 }, { phones: [] })).ok, true);
+});
+
+test("ochiq amal tashlab ketildi — 3 daqiqadan keyin BIR marta eslatma; «✅ Tugatish» — e'lonlar yana keladi", async () => {
+  const { store, calls, press, message, isBusy, holdReminder } = setup({});
+  store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
+  await message(PRIVATE, MENU.feed);
+  await holdReminder.run();
+  const reminders = () => calls.filter((c) => c.method === "sendMessage" && /hali tugamadi/.test(c.payload.text));
+  assert.equal(reminders().length, 0, "hali erta");
+  store.db.exec("UPDATE drivers SET hold_at = 0 WHERE chat_id = 42"); // oxirgi bosish ancha oldin
+  await holdReminder.run();
+  await holdReminder.run();
+  assert.equal(reminders().length, 1, "bir marta");
+  assert.match(reminders()[0].payload.text, /🎛 Filtr/);
+  assert.equal(reminders()[0].payload.reply_markup.inline_keyboard[0][0].callback_data, "hold:end");
+  assert.equal(isBusy(42), true, "eslatmadan keyin ham e'lon kelmaydi");
+  await press("hold:end");
+  assert.equal(isBusy(42), false);
+});
+
+test("ochiq amal: «➕ Guruh qo'shish» → raqam so'rovi — «Keyinroq» bilan tugaydi", async () => {
+  const { store, message, isBusy } = setup({});
+  store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
+  await message(PRIVATE, MENU.addGroup); // raqami yo'q → raqam so'raladi
+  assert.equal(store.getDriver(42).hold.kind, "raqam");
+  await message(PRIVATE, PHONE.later);
+  assert.equal(isBusy(42), false);
 });
 
 test("«💬 Lichkasi» tugmasi: username'i yo'q, bot taniydigan odamga — ID bo'yicha; begonaga va username bo'lsa — tugma yo'q", async () => {

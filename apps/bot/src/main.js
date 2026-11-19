@@ -218,7 +218,7 @@ async function main() {
   };
   // Ishchi pastda yaratiladi, bot esa undan oldin: «navbatga tushdi — darhol ko'r» keyin ulanadi
   let worker = null;
-  const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, commands, notices, sources, group } = createBot({
+  const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, commands, notices, sources, group, holdReminder } = createBot({
     token: config.token,
     store,
     config,
@@ -251,6 +251,7 @@ async function main() {
     idle.stop();
     commands.stop();
     notices.stop();
+    holdReminder.stop();
     sources.stop();
     group?.stop();
     await bot.stop();
@@ -286,6 +287,7 @@ async function main() {
   commands.start();
   // Server topshiriqlari (haydovchi web xaritasida yo'nalish tanladi → chatda javob): har 2 soniyada (notices.js)
   notices.start();
+  holdReminder.start(); // tashlab ketilgan ochiq amal — bir marta eslatma (bot.js)
   // Foydalanuvchi qo'shgan guruhlar: natijani qo'shgan odamga yozish va 24 soatlik sinov (userSources.js)
   sources.start();
   // chat_member — kanal/guruhga kimdir qo'shilsa yoki chiqsa (bot u yerda admin bo'lsa keladi; a'zolik uchun)
