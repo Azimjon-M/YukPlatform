@@ -34,7 +34,7 @@ test("post_deliveries: kimga asl matn bilan ketgani, qo'ng'iroq belgisi, butunla
   assert.deepEqual(store.postDeliveredTo(id), []);
 });
 
-test("feedSources: ochiq va yopiq guruhlar; yopig'ini Pro yoki o'zi qo'shgan tanlaydi, boshqaga — locked; o'chirilgan va tekshiruvdan o'tmaganlar yo'q", () => {
+test("feedSources: ochiq va yopiq guruhlar; yopig'ini Pro yoki o'zi qo'shgan ko'radi, boshqaga ko'rinmaydi; o'chirilgan va tekshiruvdan o'tmaganlar yo'q", () => {
   const { store } = setup();
   store.addSource("@TutGruz");
   store.addSource("@Sokin_guruh");
@@ -46,13 +46,16 @@ test("feedSources: ochiq va yopiq guruhlar; yopig'ini Pro yoki o'zi qo'shgan tan
   store.finishProbe("@Rad_etilgan", { ok: false, note: "kam", stats: {} });
   for (let i = 1; i <= 3; i++) store.addPost(post("@tutgruz", i)); // harfi boshqacha (bot o'zi admin bo'lgan guruh)
   const list = store.feedSources(10);
-  assert.deepEqual(list.map((s) => s.name), ["-1002222222", "@TutGruz", "-1001111111", "@Sokin_guruh"]);
+  // 2026-11-19: begona yopiq guruh (-1001111111) oddiy foydalanuvchiga umuman ko'rinmaydi
+  assert.deepEqual(list.map((s) => s.name), ["-1002222222", "@TutGruz", "@Sokin_guruh"]);
   assert.equal(list[1].perDay, 3);
   assert.deepEqual([list[0].mine, list[0].closed, list[0].locked], [true, true, false], "o'zi qo'shgan yopiq — tanlay oladi");
-  assert.deepEqual([list[2].closed, list[2].locked], [true, true], "begona yopiq, Pro emas — locked");
   assert.equal(list[1].locked, false);
-  // Pro — hamma yopiq guruhni tanlaydi
-  assert.ok(store.feedSources(20, { pro: true }).every((s) => !s.locked));
+  assert.deepEqual(store.feedSources(20).map((s) => s.name), ["@TutGruz", "@Sokin_guruh"], "begona — faqat ochiqlar");
+  // Pro — hamma yopiq guruhni ko'radi va tanlaydi
+  const pro = store.feedSources(20, { pro: true });
+  assert.deepEqual(pro.map((s) => s.name).sort(), ["-1001111111", "-1002222222", "@Sokin_guruh", "@TutGruz"]);
+  assert.ok(pro.every((s) => !s.locked));
   assert.deepEqual(store.allowedFeedSources(20, ["@tutgruz", "-1002222222", "@Ochiq_emas", "@TutGruz"]), ["@TutGruz"], "Pro emas — yopiq tashlanadi");
   assert.deepEqual(store.allowedFeedSources(20, ["@tutgruz", "-1001111111"], { pro: true }), ["@TutGruz", "-1001111111"]);
   assert.deepEqual(store.allowedFeedSources(10, ["-1002222222", "-1001111111"]), ["-1002222222"], "o'zi qo'shgani — Pro'siz ham");

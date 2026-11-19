@@ -30,8 +30,11 @@ const PROFILE = {
   mode: "own",
 };
 
+// 2026-11-19: yangi forma standart ⚡ Tezkor (mashina ixtiyoriy). Mashina tekshiruvlari — ichki «saralangan» rejimida
+const sortedForm = (profile) => ({ ...formFromProfile(profile), feed: "saralangan" });
+
 test("botdan kelgan sozlamalar formaga va qaytib profilga aylanadi (yo'nalish formada yo'q)", () => {
-  const form = formFromProfile(PROFILE);
+  const form = sortedForm(PROFILE);
   assert.equal(form.sizeMode, "std");
   assert.equal(form.capacity, "22");
   assert.equal(form.intl, "ham");
@@ -48,7 +51,7 @@ test("botdan kelgan sozlamalar formaga va qaytib profilga aylanadi (yo'nalish fo
 });
 
 test("yangi haydovchi: bo'sh forma, xatolar kerakli bo'limni ko'rsatadi", () => {
-  let form = formFromProfile(null);
+  let form = sortedForm(null);
   assert.equal(profileFromForm(form).field, "class");
   form = selectClass(form, "isuzu");
   assert.equal(form.sizeMode, "std");
@@ -65,26 +68,26 @@ test("yangi haydovchi: bo'sh forma, xatolar kerakli bo'limni ko'rsatadi", () => 
 });
 
 test("transport turi o'zgarsa sig'im tozalanadi; yengil mashinada kuzov va o'lcham yo'q", () => {
-  const mini = selectClass(formFromProfile(PROFILE), "mini_fura");
+  const mini = selectClass(sortedForm(PROFILE), "mini_fura");
   assert.equal(mini.capacity, "");
   assert.equal(mini.sizeMode, "std", "Mini furaning ham odatdagi o'lchami bor");
-  const car = selectClass(formFromProfile(PROFILE), "yengil_avto");
+  const car = selectClass(sortedForm(PROFILE), "yengil_avto");
   assert.deepEqual([car.bodyType, car.sizeMode, showSize(car), showSides(car), sizeSummary(car)], [null, "none", false, false, null]);
-  assert.deepEqual(sizeSummary(formFromProfile(PROFILE)), { volumeM3: 90, pallets: 33 });
-  assert.equal(sizeSummary({ ...formFromProfile(PROFILE), bodyType: "samosval" }).pallets, null, "samosvalga palet qo'yilmaydi");
-  const tractor = { ...formFromProfile(PROFILE), bodyType: "tyagach" };
+  assert.deepEqual(sizeSummary(sortedForm(PROFILE)), { volumeM3: 90, pallets: 33 });
+  assert.equal(sizeSummary({ ...sortedForm(PROFILE), bodyType: "samosval" }).pallets, null, "samosvalga palet qo'yilmaydi");
+  const tractor = { ...sortedForm(PROFILE), bodyType: "tyagach" };
   assert.deepEqual([showSize(tractor), showSides(tractor)], [false, false]);
 });
 
 test("bir nechta transport belgilansa — kuzov, sig'im, o'lcham so'ralmaydi; bittasi qolsa — yana so'raladi", () => {
-  let form = formFromProfile(PROFILE); // fura, tent, 22 t
+  let form = sortedForm(PROFILE); // fura, tent, 22 t
   form = toggleClass(toggleClass(toggleClass(form, "labo"), "isuzu"), "fura");
   assert.deepEqual(form.truckClasses, ["isuzu", "labo"], "ro'yxat tartibida");
   assert.equal(manyClassesPicked(form), true);
   assert.deepEqual([showSize(form), showSides(form)], [false, false]);
   const { profile } = profileFromForm({ ...form, capacity: "" });
   assert.deepEqual(profile.vehicle, { truckClass: "isuzu", truckClasses: ["isuzu", "labo"], bodyType: null, capacityKg: null, body: null, bodyGuess: false, loadingSides: [] });
-  const again = formFromProfile(profile);
+  const again = sortedForm(profile);
   assert.deepEqual([again.truckClasses, again.truckClass], [["isuzu", "labo"], null], "qayta ochilganda belgilar joyida");
   const one = toggleClass(again, "labo");
   assert.deepEqual([one.truckClass, one.capacity], ["isuzu", ""]);
@@ -101,7 +104,7 @@ test("yuk ko'tarish: Labo va yengil mashinada kg, qolganida tonna; birlik adashs
   assert.ok(Number.isNaN(capacityKgOf("ko'p", "tonna")));
   assert.deepEqual([capacityChoice(0.3, "kg"), capacityChoice(40, "tonna")], ["300", "40"]);
 
-  const car = { ...selectClass(formFromProfile(null), "yengil_avto"), capacity: "400" };
+  const car = { ...selectClass(sortedForm(null), "yengil_avto"), capacity: "400" };
   const { profile } = profileFromForm(car);
   assert.deepEqual(profile.vehicle, { truckClass: "yengil_avto", bodyType: null, capacityKg: 400, body: null, bodyGuess: false, loadingSides: [] });
   assert.match(profileFromForm({ ...car, capacity: "" }).error, /400 kg/);
@@ -212,4 +215,12 @@ test("«📌 Mening guruhlarim» qidiruvi kirill/lotin farqisiz", async () => {
   const [o] = groupOptions([{ name: "-1001", title: "Кукон ISUZU юк", perDay: 1, closed: true, locked: false }], []);
   assert.ok(o.search.includes(foldText("kukon")));
   assert.ok(o.search.includes(foldText("ЮК")));
+});
+
+test("rejim (2026-11-19): yangi va eski saralangan profil formada ⚡ Tezkor; tezkor profil mashinasiz saqlanadi", () => {
+  assert.equal(formFromProfile(null).feed, "tezkor");
+  assert.equal(formFromProfile(PROFILE).feed, "tezkor", "rejimsiz eski profil — tezkor deb ko'rinadi");
+  const result = profileFromForm(formFromProfile(null));
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.profile.feed, { mode: "tezkor", sources: [] });
 });

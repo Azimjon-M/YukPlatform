@@ -36,6 +36,7 @@ import {
   sortedReady,
   telegramUsername,
   validFeedMode,
+  NEW_DRIVER_FEED_MODE,
   validRole,
   withPrevFeed,
   withRoute,
@@ -147,7 +148,7 @@ const ROLE_QUESTION = "Iltimos, rolingizni tanlang 👇";
 // (Azimjon: ro'yxatdan o'tish shart emas). chosen — rol tanlangach birinchi qator, ostida loadIntro (shipperLoads.js)
 const ROLE_TEXT = {
   haydovchi: {
-    chosen: "🚚 Haydovchisiz. Sizga to'g'ri keladigan yuk e'lonlarini (transportingiz va yo'nalishingizga mos) yo'naltiramiz.",
+    chosen: "🚚 Haydovchisiz. Guruhlardagi yuk e'lonlarini darhol shu yerga yo'naltiramiz.", // 2026-11-19: saralash yo'q — tezkor
     one: "yuk",
     many: "yuklar",
     matches: "qayerdan qayerga — tanlaysiz: oxirgi 24 soatdagi mos yuklar chiqadi, yangilari ham shu yo'nalishda keladi",
@@ -200,7 +201,7 @@ function helpText(driver) {
     ? []
     : [
         ...(mode.groups ? [`${MENU.groups} — qaysi guruh va kanallardan yuk e'lonlari darhol kelishi`] : []),
-        `${MENU.feed} — yuklarni olish usuli: 🎯 saralangan, ⚡ tezkor yoki 📌 o'zingiz tanlagan guruhlardan (hozir: ${mode.icon} ${mode.name})`,
+        `${MENU.feed} — yuklarni olish usuli: ⚡ tezkor (hamma guruh) yoki 📌 o'zingiz tanlagan guruhlardan (hozir: ${mode.icon} ${mode.name})`,
       ];
   const menuLines = driver?.profile || isShipper
     ? [
@@ -690,8 +691,9 @@ export function createBot({
     }
     // Haydovchi, sozlamalar hali yo'q (2026-11-14): avval rejim — «mana shunaqa rejimlar bor» (feed.js). Saralangan
     // tanlansa — ro'yxatdan o'tishning 2 yo'li (registerPaths), tezkor/guruhlarim — mashinasiz, darhol
+    // 2026-11-19 (Azimjon: «oddiy haydovchiga default tezkor rejimi, hamma tezkor rejimda!»): rejim so'ralmaydi — darhol tezkor
     await ctx.reply(ROLE_TEXT[role].chosen, html(driver));
-    await showModes(ctx, driver);
+    await pickMode(ctx, NEW_DRIVER_FEED_MODE, { auto: true });
   }
 
   // Saralangan rejim tanlandi, mashina hali yo'q: ro'yxatdan o'tishning 2 yo'li — forma yoki shu chatga yozish (driverText.js)
@@ -771,14 +773,15 @@ export function createBot({
   }
 
   // Rejim tanlandi (fm:<rejim>)
-  async function pickMode(ctx, mode) {
+  // auto — rejim so'ralmasdan qo'yildi (yangi haydovchi, 2026-11-19): bosilgan tugma xabari (rol tanlash) tahrirlanmaydi
+  async function pickMode(ctx, mode, { auto = false } = {}) {
     const driver = rememberUser(ctx);
     if (roleOf(driver) !== "haydovchi") {
       await ctx.editMessageText("Bu tugma eskirgan.").catch(() => {});
       return showStart(ctx);
     }
     // Inline tugmadan kelgan bo'lsa — rejim oynasini yopamiz («⚡ Tezkorni o'chirish» menyu tugmasidan kelganda tahrirlanadigan xabar yo'q)
-    if (ctx.callbackQuery) await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[mode].icon} ${FEED_MODES[mode].name} ✅`).catch(() => {});
+    if (ctx.callbackQuery && !auto) await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[mode].icon} ${FEED_MODES[mode].name} ✅`).catch(() => {});
     if (FEED_MODES[mode].groups) {
       // Shu yoki boshqa guruh rejimida edi (guruhlarim ↔ + saralangan) — tanlovi qoladi; boshqa rejimdan — bo'sh
       const feed = feedOf(driver.profile);
@@ -801,15 +804,13 @@ export function createBot({
   // «⚡ Tezkorni o'chirish» (Azimjon, 2026-11-18: «Fast mode ni 1 ta yoqsa bo'ldi kegin o'chmaydigan bo'libdi»): tezkor →
   // saralangan. Mashina va yo'nalish profilda qolgan (rawProfile saqlaydi) — qayta kiritish shart emas; mashinasi yo'q
   // bo'lsa — saralanganning odatdagi yo'li (ro'yxatdan o'tish taklif qilinadi). Qayta yoqish — «🎛 Rejim» → «⚡ Tezkor»
+  // 2026-11-19: saralash olib tashlandi — eski menyu/tugmadan kelsa, rejimlar ko'rsatiladi (tezkor yoki o'z guruhlari)
   async function turnFastOff(ctx) {
     const driver = rememberUser(ctx);
     if (roleOf(driver) !== "haydovchi") return showStart(ctx);
-    if (feedMode(driver.profile) !== "tezkor") {
-      await ctx.editMessageReplyMarkup().catch(() => {});
-      return ctx.reply(`⚡ Tezkor rejim yoqilmagan. Rejimlar — «${MENU.feed}».`, menu(driver));
-    }
-    await ctx.reply(`⚡ Tezkor o'chirildi. Qayta yoqish — «${MENU.feed}» → «⚡ Tezkor».`, html(driver));
-    return pickMode(ctx, "saralangan");
+    if (ctx.callbackQuery) await ctx.editMessageReplyMarkup().catch(() => {});
+    await ctx.reply("Endi hamma haydovchi ⚡ Tezkor rejimida. Faqat o'zingiz tanlagan guruhlardan olish uchun — «📌 Mening guruhlarim»; vaqtincha to'xtatish — «⏸ Pauza».", menu(driver));
+    return showModes(ctx, driver);
   }
 
   async function setActive(ctx, active) {
@@ -995,7 +996,7 @@ export function createBot({
     }
     // Haydovchi, hali ro'yxatdan o'tmagan (2026-11-14): salom + rejim tanlash (feed.js). Saralangan → forma / yozish
     await ctx.reply(hello, html(driver));
-    await showModes(ctx, driver);
+    await pickMode(ctx, NEW_DRIVER_FEED_MODE, { auto: true });
   }
   privateChat.command("start", showStart);
 
@@ -1206,9 +1207,10 @@ export function createBot({
   bot.callbackQuery(FEED_CALLBACK, async (ctx) => {
     await ctx.answerCallbackQuery();
     if (ctx.chat?.type !== "private") return;
-    if (ctx.match[1] === "off") return turnFastOff(ctx); // «🔴 Tezkorni o'chirish» (rejim oynasida, tezkor yoqiq bo'lsa)
+    if (ctx.match[1] === "off") return turnFastOff(ctx); // eski «🔴 Tezkorni o'chirish» tugmasi
     const mode = validFeedMode(ctx.match[1]);
     if (!mode) return;
+    // Eski xabardagi «🎯 Saralangan» / «+ saralangan» tugmasi ichkarida ishlayveradi (saralash o'chiq — baribir hamma e'lon keladi)
     await pickMode(ctx, mode);
   });
 

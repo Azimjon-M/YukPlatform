@@ -145,7 +145,8 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   const paused = driver.active === false;
   const modeId = feedMode(driver.profile);
   const mode = FEED_MODES[modeId];
-  const first = mode.sorted ? matchesLabel(driver) : mode.groups ? MENU.groups : modeId === "tezkor" ? MENU.fastOff : MENU.feed;
+  // 2026-11-19: saralash olib tashlandi, hamma tezkor — «⚡ Tezkorni o'chirish» yo'q (o'chirsa qaytadigan rejim qolmadi)
+  const first = mode.sorted ? matchesLabel(driver) : mode.groups ? MENU.groups : MENU.feed;
   const keyboard = loadRow(new Keyboard()).text(first).text(paused ? MENU.resume : MENU.pause).row();
   // Rolni almashtirish (haydovchi ↔ yuk beruvchi) — /rol bilan bir xil. Odamda bugun yuk, ertaga bo'sh mashina bo'lishi
   // mumkin, /rol ni esa hamma ham topavermaydi. Rol tanlanmagan bo'lsa tugma yo'q

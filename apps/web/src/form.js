@@ -10,6 +10,8 @@ import {
   TRUCK_CLASSES,
   bodyId,
   bodyTypeOf,
+  choiceMode,
+  NEW_DRIVER_FEED_MODE,
   countsPallets,
   emptyProfile,
   emptyShipperProfile,
@@ -80,7 +82,8 @@ export function formFromProfile(profile) {
     loadingSides: [...new Set(sides)],
     intl: intlOption(p),
     // Yetkazish rejimi (@yuk/shared feed.js): saralangan | tezkor | guruhlarim | guruhlarim_plus va tanlangan guruhlar
-    feed: feed.mode,
+    // 2026-11-19: faqat tezkor va guruhlarim tanlanadi — eski saralangan (va yangi foydalanuvchi) — tezkor
+    feed: choiceMode(feed.mode),
     feedSources: [...feed.sources],
   };
 }
@@ -170,7 +173,7 @@ function intlFor(id, scope) {
 export function profileFromForm(form, scope) {
   const { intl } = intlFor(form.intl, scope);
   // Rejim birinchi tekshiriladi: ro'yxatdan o'tishda u birinchi qadam (guruhsiz «Mening guruhlarim» — o'sha qadamga qaytadi)
-  const feedPart = sanitizeFeed({ mode: form.feed ?? "saralangan", sources: form.feedSources ?? [] });
+  const feedPart = sanitizeFeed({ mode: form.feed ?? NEW_DRIVER_FEED_MODE, sources: form.feedSources ?? [] });
   if (feedPart.error) return feedPart;
   const common = { fromAreas: [], toAreas: [], domestic: intl.domestic, international: intl.international, feed: feedPart.feed };
   const result = vehicleProfile(form, scope, common);

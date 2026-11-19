@@ -90,7 +90,10 @@ export function createFeedQueries(db, now) {
           .all(now() - 24 * HOUR)
           .map((r) => [r.source, r.n]),
       );
+      // Oddiy (Pro emas) foydalanuvchiga yopiq guruhlar umuman ko'rinmaydi (2026-11-19, Azimjon: «oddiy foydalanuvchilarda
+      // yopiq guruhlar ko'rinmasin! ammo public guruhlarni tanlay olsin») — faqat o'zi qo'shgani qoladi
       return rows
+        .filter((r) => canPick(r, chatId, pro))
         .map((r) => ({
           name: r.name,
           title: r.title ?? null,

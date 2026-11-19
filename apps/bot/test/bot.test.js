@@ -77,17 +77,11 @@ test("/start: avval «Iltimos, rolingizni tanlang», keyin haydovchiga birinchi 
   await press("r:haydovchi");
   assert.equal(texts(calls, "editMessageText").at(-1), "🚚 Haydovchiman — yuk qidiraman ✅", "belgi oxirida");
   assert.equal(store.getDriver(42).role, "haydovchi");
-  // Rol tanlangach — rejimlar (2026-11-14): «🎛 Yuklarni qanday olasiz?» va 4 tugma
-  assert.match(texts(calls).at(-1), /Yuklarni qanday olasiz\?/);
-  assert.deepEqual(inlineButtons(calls.filter((c) => c.method === "sendMessage").at(-1)).map((b) => b.callback_data), [
-    "fm:saralangan",
-    "fm:tezkor",
-    "fm:guruhlarim",
-    "fm:guruhlarim_plus",
-  ]);
-  await press("fm:saralangan"); // Mini App yo'q — chatdagi savol-javob
-  assert.match(texts(calls).at(-1), /Transportingiz qaysi turdagi/);
-  assert.equal(store.getDriver(42).draft.step, "class");
+  // Rol tanlangach (2026-11-19: saralash olib tashlandi) — rejim so'ralmaydi, darhol ⚡ Tezkor, mashinasiz
+  assert.ok(texts(calls).some((t) => /✅ Rejim: <b>⚡ Tezkor<\/b>[\s\S]*Mening guruhlarim[\s\S]*Guruh qo'shish/.test(t)));
+  assert.deepEqual(store.getDriver(42).profile.feed, { mode: "tezkor", sources: [] });
+  assert.equal(store.getDriver(42).profile.vehicle, null);
+  assert.equal(store.getDriver(42).active, true);
   assert.deepEqual(menuCalls(), [["setMyCommands", 42]], "rol tanlandi — shu chatga buyruqlar");
 
   // Hisobini o'chirdi — buyruqlar olib tashlanadi
@@ -96,10 +90,12 @@ test("/start: avval «Iltimos, rolingizni tanlang», keyin haydovchiga birinchi 
   assert.deepEqual(menuCalls().at(-1), ["deleteMyCommands", 42]);
 });
 
-test("tugmalar bilan to'liq ro'yxatdan o'tish va /pauza", async () => {
+test("tugmalar bilan to'liq ro'yxatdan o'tish (eski saralangan oqimi) va /pauza", async () => {
   const { store, calls, command, press, message } = setup();
   await command("/start");
-  for (const data of ["r:haydovchi", "fm:saralangan", "w:class:isuzu", "w:class:ok", "w:body:tent", "w:capacity:5", "w:size:std", "w:sides:t.orqa", "w:sides:ok", "w:intl:yoq"]) {
+  // 2026-11-19: yangi haydovchi darhol tezkor; mashina ustasi ichkarida qoldi — eski profilsiz haydovchi uchun shu yerda
+  store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
+  for (const data of ["fm:saralangan", "w:class:isuzu", "w:class:ok", "w:body:tent", "w:capacity:5", "w:size:std", "w:sides:t.orqa", "w:sides:ok", "w:intl:yoq"]) {
     await press(data);
   }
   assert.equal(store.getDriver(42).draft.step, "done", "yo'nalish va «qaysi yuklar» savollari yo'q");
@@ -223,7 +219,8 @@ test("haydovchi «✍️ Shu chatga yozish»: matn → AI → preview → tasdiq
   const parseLoad = async () => ({ postType: "mashina_bor", loads: [{ truckClass: "fura", bodyType: "tent", weightT: 20 }] });
   const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP }, parseLoad });
 
-  await press("r:haydovchi"); // avval rejim
+  // 2026-11-19: yangi haydovchi darhol tezkor — bu (eski saralangan) oqim faqat profilsiz haydovchida qolgan
+  store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
   await press("fm:saralangan"); // appUrl bor — wizard boshlanmaydi, 2 yo'l taklif qilinadi
   assert.match(texts(calls).at(-1), /Shu chatga yozish/);
 
@@ -254,7 +251,7 @@ test("haydovchi matni tushunarsiz — xato, keyin aniqroq yozsa preview; AI band
   let reply = null;
   const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP }, parseLoad: async () => reply });
 
-  await press("r:haydovchi");
+  store.saveDriver(42, { role: "haydovchi", profile: null, active: false }); // eski saralangan oqimi (2026-11-19)
   await press("fm:saralangan");
   await message(PRIVATE, MENU.writeHere);
 
@@ -279,7 +276,7 @@ test("haydovchi matni tushunarsiz — xato, keyin aniqroq yozsa preview; AI band
 });
 
 test("pastki menyu: rol tanlanmaguncha yo'q, rol tanlangach Mini App tugmasi, savol-javobsiz", async () => {
-  const { calls, command, press, message } = setup({ config: { miniappUrl: MINIAPP } });
+  const { store, calls, command, press, message } = setup({ config: { miniappUrl: MINIAPP } });
   await command("/start");
   // Rol hali yo'q — pastki menyu chiqmaydi (eski menyu bo'lsa — olinadi), faqat rol tugmalari
   const [intro, question] = calls.filter((c) => c.method === "sendMessage");
@@ -297,9 +294,11 @@ test("pastki menyu: rol tanlanmaguncha yo'q, rol tanlangach Mini App tugmasi, sa
 
   calls.length = 0;
   await press("r:haydovchi");
-  assert.equal(texts(calls).length, 2);
-  assert.equal(texts(calls)[0], "🚚 Haydovchisiz. Sizga to'g'ri keladigan yuk e'lonlarini (transportingiz va yo'nalishingizga mos) yo'naltiramiz.");
-  assert.match(texts(calls)[1], /Yuklarni qanday olasiz/);
+  // 2026-11-19: rejim so'ralmaydi — darhol ⚡ Tezkor (keyin raqam savoli)
+  assert.match(texts(calls)[0], /^🚚 Haydovchisiz\./);
+  assert.match(texts(calls)[1], /✅ Rejim: <b>⚡ Tezkor<\/b>/);
+  // Eski (profilsiz) saralangan oqimi — ichkarida qoldi
+  store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
   calls.length = 0;
   await press("fm:saralangan");
   assert.equal(texts(calls).length, 1);
@@ -946,10 +945,11 @@ test("/start matni: bot haqida Azimjon matni, keyin menyu; menyuda «Ilovalar» 
       "Menyuni yozish qatorining o'ng tomonidagi belgi orqali ochib-yopiladi, umuman yo'qolsa — /start ni bosing.\n" +
       "Telefon ilovalari — /ilovalar.",
   );
-  // Keyingi xabar — rejim tanlash (2026-11-14): «Boshlash uchun pastdagi «🚚 Ro'yxatdan o'tish»» o'rnida
-  assert.match(texts(calls).at(-1), /Yuklarni qanday olasiz/);
+  // Keyingi xabar (2026-11-19): rejim so'ralmaydi — darhol ⚡ Tezkor saqlanadi va to'liq menyu
+  assert.match(texts(calls).at(-1), /✅ Rejim: <b>⚡ Tezkor<\/b>/);
+  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
   const menuOf = calls.filter((c) => c.method === "sendMessage" && c.payload.reply_markup?.keyboard).at(-1).payload.reply_markup;
-  assert.deepEqual(menuOf.keyboard.map((row) => row.map((b) => b.text)), [[MENU.register], [MENU.writeHere], [MENU.role, MENU.help]]);
+  assert.equal(menuOf.keyboard[0][0].text, MENU.feed);
 
   // Ro'yxatdan o'tgach — to'liq menyu va to'liq ro'yxat
   store.saveDriver(42, { profile: PROFILE });
@@ -1653,8 +1653,7 @@ const menuRows = (calls) => {
 
 test("rejim: «⚡ Tezkor» — mashinasiz darhol saqlanadi, menyuda «🎛 Rejim», «📋 Mos yuklar» yo'q", async () => {
   const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP } });
-  await press("r:haydovchi");
-  await press("fm:tezkor");
+  await press("r:haydovchi"); // 2026-11-19: darhol tezkor
   const { profile, active } = store.getDriver(42);
   assert.equal(active, true);
   assert.equal(profile.vehicle, null);
@@ -1662,56 +1661,29 @@ test("rejim: «⚡ Tezkor» — mashinasiz darhol saqlanadi, menyuda «🎛 Reji
   assert.ok(texts(calls).some((t) => /Rejim: <b>⚡ Tezkor<\/b>[\s\S]*darhol/.test(t)));
   assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi/, "raqam bir marta so'raladi");
   await message(PRIVATE, PHONE.later);
-  assert.deepEqual(menuRows(calls), [[MENU.fastOff, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings], [MENU.feed]]);
+  assert.deepEqual(menuRows(calls), [[MENU.feed, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings]]);
   assert.equal(store.activeUsers("haydovchi").length, 1, "mashinasiz ham faol");
   // Eski menyudagi «📋 Mos yuklar» — yo'nalish so'ralmaydi, rejim aytiladi
   await message(PRIVATE, MENU.loads);
   assert.match(texts(calls).at(-1), /«⚡ Tezkor» rejimidasiz/);
-  // Saralanganga qaytdi — mashina yo'q, ro'yxatdan o'tish taklif qilinadi
+  // Rejim oynasi — faqat ⚡ Tezkor va 📌 Mening guruhlarim (saralangan va «+ saralangan» yo'q, o'chirish tugmasi yo'q)
   await message(PRIVATE, MENU.feed);
-  assert.match(texts(calls).at(-1), /Yuklarni qanday olasiz/);
-  await press("fm:saralangan");
-  assert.equal(store.getDriver(42).profile.feed.mode, "saralangan");
-  assert.match(texts(calls).at(-1), /Ro'yxatdan o'tishning 2 yo'li/);
-  assert.deepEqual(menuRows(calls), [[MENU.register], [MENU.writeHere], [MENU.role, MENU.help]]);
+  const picker = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.match(picker.payload.text, /Yuklarni qanday olasiz[\s\S]*Guruh qo'shish/);
+  assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["fm:tezkor", "fm:guruhlarim"]);
+  assert.match(inlineButtons(picker)[0].text, /^✅ ⚡ Tezkor/);
 });
 
-test("rejim: «⚡ Tezkorni o'chirish» — menyudan ham, rejim oynasidan ham; mashina va yo'nalish qoladi, qayta yoqiladi", async () => {
+test("rejim: eski «⚡ Tezkorni o'chirish» tugmasi (menyu va oyna) — rejimlar ko'rsatiladi, rejim o'zgarmaydi", async () => {
   const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP } });
-  // Saralangan, mashina va yo'nalish bor haydovchi tezkorni yoqdi
-  const vehicle = { truckClass: "isuzu", bodyType: "tent", capacityKg: 5000 };
-  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", profile: { vehicle, fromAreas: ["toshkent"], toAreas: [], routeAt: 1, feed: { mode: "saralangan", sources: [] } } });
-  await press("fm:tezkor");
-  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
-  assert.equal(menuRows(calls)[0][0], MENU.fastOff, "tezkorda birinchi tugma — o'chirish");
-
-  // 1) Pastki menyudagi «⚡ Tezkorni o'chirish»
+  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
   await message(PRIVATE, MENU.fastOff);
-  let driver = store.getDriver(42);
-  assert.equal(driver.profile.feed.mode, "saralangan");
-  assert.deepEqual(driver.profile.vehicle, vehicle, "mashina qayta kiritilmaydi");
-  assert.deepEqual(driver.profile.fromAreas, ["toshkent"], "yo'nalish qoladi");
-  assert.equal(driver.active, true);
-  assert.ok(texts(calls).some((t) => /Tezkor o'chirildi/.test(t)));
-  assert.equal(menuRows(calls)[0][0], MENU.loads, "endi «📋 Mos yuklar»");
-
-  // Qayta yoqish — «🎛 Rejim» → «⚡ Tezkor»; rejim oynasida «🔴 Tezkorni o'chirish» faqat tezkor yoqiqda
-  await message(PRIVATE, MENU.feed);
-  let picker = calls.filter((c) => c.method === "sendMessage").at(-1);
-  assert.ok(!inlineButtons(picker).some((b) => b.callback_data === "fm:off"), "tezkor o'chiq — o'chirish tugmasi yo'q");
-  await press("fm:tezkor");
-  await message(PRIVATE, MENU.feed);
-  picker = calls.filter((c) => c.method === "sendMessage").at(-1);
-  assert.match(picker.payload.text, /Tezkor hozir <b>yoqiq<\/b>/);
-  assert.ok(inlineButtons(picker).some((b) => b.callback_data === "fm:off"));
-
-  // 2) Rejim oynasidagi «🔴 Tezkorni o'chirish»
+  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
+  assert.ok(texts(calls).some((t) => /Endi hamma haydovchi ⚡ Tezkor rejimida/.test(t)));
+  assert.deepEqual(inlineButtons(calls.filter((c) => c.method === "sendMessage").at(-1)).map((b) => b.callback_data), ["fm:tezkor", "fm:guruhlarim"]);
   await press("fm:off");
-  assert.equal(store.getDriver(42).profile.feed.mode, "saralangan");
-  // Eski tugma yana bosilsa — o'zgarmaydi, tushuntiradi
-  await press("fm:off");
-  assert.match(texts(calls).at(-1), /Tezkor rejim yoqilmagan/);
-  assert.equal(store.getDriver(42).profile.feed.mode, "saralangan");
+  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
+  assert.equal(menuRows(calls)[0][0], MENU.feed, "birinchi tugma — «🎛 Rejim»");
 });
 
 test("rejim: «📌 Mening guruhlarim» — ro'yxatdan tanlash, kamida bitta; saqlangach menyuda «📌 Guruhlarim»", async () => {
@@ -1729,7 +1701,7 @@ test("rejim: «📌 Mening guruhlarim» — ro'yxatdan tanlash, kamida bitta; sa
   // Hech narsa tanlamay «Tayyor» — oynacha, saqlanmaydi
   await press("fg:ok");
   assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "Kamida bitta guruh yoki kanalni tanlang");
-  assert.equal(store.getDriver(42).profile, null);
+  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor", "o'zgarmadi (rol tanlanganda darhol tezkor)");
   await press("fg:t:@TutGruz");
   assert.match(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).find((b) => b.callback_data === "fg:t:@TutGruz").text, /^✅ @TutGruz/);
   await press("fg:t:@Ochirilgan_guruh"); // eski/soxta tugma — tanlanmaydi

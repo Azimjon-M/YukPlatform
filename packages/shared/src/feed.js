@@ -15,6 +15,12 @@
 // asosiy tavsiya «guruhlarim» (haydovchi o'zi biladigan 3–5 guruh).
 
 export const FEED_MODE_IDS = ["saralangan", "tezkor", "guruhlarim", "guruhlarim_plus"];
+// Tanlab bo'ladigan rejimlar (2026-11-19, Azimjon: «hamma tezkor rejimda! saralashni olib tashlamoqdamiz!») — bot va ilova
+// faqat shularni ko'rsatadi; yangi haydovchi darhol tezkorda. Saralangan / «+ saralangan» — faqat eski profillar uchun ichkarida
+export const FEED_MODE_CHOICES = ["tezkor", "guruhlarim"];
+export const NEW_DRIVER_FEED_MODE = "tezkor";
+// Eski rejim (saralangan / + saralangan) tanlov ro'yxatida yo'q — ekranda tezkor deb ko'rsatiladi
+export const choiceMode = (mode) => (FEED_MODE_CHOICES.includes(mode) ? mode : NEW_DRIVER_FEED_MODE);
 export const DEFAULT_FEED_MODE = "saralangan";
 
 // icon + name — tugma va ro'yxatlar uchun; about — tanlashda ostidagi bir jumla

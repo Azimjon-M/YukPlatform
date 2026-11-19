@@ -4,7 +4,7 @@
 //   groupStep — «📌 Qaysi guruhlardan?»: ro'yxat sahifalab, bosilsa ✅ qo'yiladi/olinadi (fg:t:<nomi>), fg:p:<sahifa>,
 //               «✅ Tayyor» (fg:ok), «⬅️ Orqaga» (fg:back)
 // Tugmalar { text, data } ko'rinishida (route.js dagidek) — bot.js toKeyboard ularni InlineKeyboard ga aylantiradi.
-import { FEED_MODES, FEED_MODE_IDS, FEED_SOURCES_MAX, feedOf, sourceKey } from "@yuk/shared";
+import { FEED_MODES, FEED_MODE_CHOICES, FEED_SOURCES_MAX, choiceMode, feedOf, sourceKey } from "@yuk/shared";
 
 export const FEED_CALLBACK = /^fm:(\w+)$/;
 export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|k:(open|closed)|ok|back)$/;
@@ -13,27 +13,24 @@ export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|k:(open|closed)|ok|back)$/;
 export const CLOSED_PRO_TEXT =
   "🔒 Yopiq guruhlardagi e'lonlar faqat Pro foydalanuvchilarga keladi. Pro avtomatik beriladi: raqamingizni ulashing va o'z Telegram akkauntingizni bog'lang (/account_qosh).";
 export const GROUPS_PAGE = 8;
-export const FAST_OFF_BUTTON = "🔴 Tezkorni o'chirish";
 
 const modeTitle = (id) => `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`;
 
 // Rejim tanlash. profile — hozirgi profil (✅ qaysi rejimda ekanini ko'rsatadi; yangi haydovchida null), intro — tepadagi qator
 export function modeStep({ profile = null, intro = null } = {}) {
-  const current = profile ? feedOf(profile).mode : null;
+  // Faqat tezkor va guruhlarim (2026-11-19: saralash olib tashlandi); eski saralangan profil — tezkor deb ko'rinadi
+  const current = profile ? choiceMode(feedOf(profile).mode) : null;
   const lines = [
     ...(intro ? [intro, ""] : []),
     "🎛 <b>Yuklarni qanday olasiz?</b>",
     "",
-    ...FEED_MODE_IDS.map((id) => `${modeTitle(id)} — ${FEED_MODES[id].about}.`),
+    ...FEED_MODE_CHOICES.map((id) => `${modeTitle(id)} — ${FEED_MODES[id].about}.`),
+    "",
+    "➕ O'z guruhingizni ham qo'shishingiz mumkin — «➕ Guruh qo'shish».",
     "",
     "Rejimni keyin istalgan payt almashtirasiz.",
   ];
-  const keyboard = FEED_MODE_IDS.map((id) => [{ text: `${current === id ? "✅ " : ""}${modeTitle(id)}`, data: `fm:${id}` }]);
-  // Tezkor yoqiq — alohida «o'chirish» tugmasi (2026-11-18): boshqa rejimni tanlash ham uni o'chiradi, lekin buni topish qiyin edi
-  if (current === "tezkor") {
-    lines.push("", `⚡ Tezkor hozir <b>yoqiq</b>. O'chirsangiz — ${modeTitle("saralangan")} rejimiga qaytasiz.`);
-    keyboard.push([{ text: FAST_OFF_BUTTON, data: "fm:off" }]);
-  }
+  const keyboard = FEED_MODE_CHOICES.map((id) => [{ text: `${current === id ? "✅ " : ""}${modeTitle(id)}`, data: `fm:${id}` }]);
   return { text: lines.join("\n"), keyboard };
 }
 
@@ -103,8 +100,9 @@ export function toggleSource(chosen, name) {
 export function feedSavedText(feed, { needsVehicle = false } = {}) {
   const head = `✅ Rejim: <b>${modeTitle(feed.mode)}</b>`;
   if (feed.mode === "tezkor") {
-    return `${head}\n\nHamma guruhlardagi yuk e'lonlari asl matni bilan darhol shu yerga keladi (chet el yo'nalishlarisiz). ` +
-      "Kunduzi daqiqasiga 10 tagacha xabar bo'lishi mumkin — to'xtatish: «⏸ Pauza».";
+    return `${head}\n\nHamma guruhlardagi e'lonlar asl matni bilan darhol shu yerga keladi. ` +
+      "Kunduzi daqiqasiga o'nlab xabar bo'lishi mumkin — to'xtatish: «⏸ Pauza».\n\n" +
+      "📌 Faqat o'zingiz tanlagan guruhlardan olish — «🎛 Rejim» → «📌 Mening guruhlarim». ➕ O'z guruhingizni qo'shish — «➕ Guruh qo'shish».";
   }
   if (feed.mode === "guruhlarim" || feed.mode === "guruhlarim_plus") {
     const groups = `Tanlagan ${feed.sources.length} ta guruhingizdagi har bir yuk e'loni asl matni bilan darhol shu yerga keladi.`;

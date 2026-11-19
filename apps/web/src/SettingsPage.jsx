@@ -13,7 +13,7 @@ import {
   BODY_TYPES,
   CAPACITY_OPTIONS,
   FEED_MODES,
-  FEED_MODE_IDS,
+  FEED_MODE_CHOICES,
   FORM_SIDES,
   SIDE_LABELS,
   TRUCK_CLASSES,
@@ -53,7 +53,8 @@ const fmt = (n) => String(n).replace(".", ",");
 const CLASS_OPTIONS = TRUCK_CLASSES.map((t) => ({ id: t.id, label: t.name, sub: capacityRangeText(t.capacityT), note: t.note }));
 const BODY_OPTIONS = BODY_TYPES.filter((b) => b.form !== false).map((b) => ({ id: b.id, label: b.name, note: b.sub }));
 const SIDE_OPTIONS = FORM_SIDES.map((id) => ({ id, label: SIDE_LABELS[id] }));
-const FEED_OPTIONS = FEED_MODE_IDS.map((id) => ({ id, label: `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`, note: FEED_MODES[id].about }));
+// 2026-11-19: saralash olib tashlandi — faqat ⚡ Tezkor va 📌 Mening guruhlarim
+const FEED_OPTIONS = FEED_MODE_CHOICES.map((id) => ({ id, label: `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`, note: FEED_MODES[id].about }));
 const className = (id) => TRUCK_CLASSES.find((t) => t.id === id)?.name ?? "";
 const dims = (b) => `${fmt(b.lengthM)} × ${fmt(b.widthM)} × ${fmt(b.heightM)} m`;
 
