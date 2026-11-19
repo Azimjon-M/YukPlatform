@@ -4,10 +4,12 @@
 //   groupStep — «📌 Qaysi guruhlardan?»: ro'yxat sahifalab, bosilsa ✅ qo'yiladi/olinadi (fg:t:<nomi>), fg:p:<sahifa>,
 //               «✅ Tayyor» (fg:ok), «⬅️ Orqaga» (fg:back)
 // Tugmalar { text, data } ko'rinishida (route.js dagidek) — bot.js toKeyboard ularni InlineKeyboard ga aylantiradi.
-import { FEED_MODES, FEED_MODE_CHOICES, FEED_SOURCES_MAX, choiceMode, feedOf, sourceKey } from "@yuk/shared";
+import { FEED_MODES, FEED_MODE_CHOICES, FEED_SOURCES_MAX, REGIONS, choiceMode, feedOf, regionTitle, sourceKey } from "@yuk/shared";
 
 export const FEED_CALLBACK = /^fm:(\w+)$/;
 export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|k:(open|closed)|ok|back)$/;
+// «📍 Qaysi viloyatlardan?» (2026-11-19): fr:t:<viloyat> — belgilash, fr:ok — saqlash, fr:back — rejimlarga
+export const REGION_CALLBACK = /^fr:(?:t:([a-z_]+)|ok|back)$/;
 
 // Pro bo'lmagan haydovchi yopiq guruhni bossa (Pro — boshqaruv markazidan yoki avtomatik: raqam + bog'langan akkaunt)
 export const CLOSED_PRO_TEXT =
@@ -88,6 +90,24 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", ki
   return { text: lines.join("\n"), keyboard, page: p };
 }
 
+// «📍 Mening hududimdan»: viloyatlar ro'yxati (✅ belgilangan), 2 ustunda. chosen — viloyat kodlari
+export function regionStep({ chosen = [] } = {}) {
+  const lines = [
+    modeTitle("hududim"),
+    "",
+    "📍 <b>Qaysi viloyat(lar)dan ketadigan e'lonlar kelsin?</b>",
+    "Bir nechtasini belgilash mumkin. E'londa joy aniqlanmasa ham — baribir keladi (yuk o'tkazib yuborilmasin).",
+    "",
+    `Tanlandi: <b>${chosen.length}</b> ta.`,
+  ];
+  const buttons = REGIONS.map((r) => ({ text: `${chosen.includes(r.id) ? "✅" : "▫️"} ${regionTitle(r.id).replace(" viloyati", " vil.")}`, data: `fr:t:${r.id}` }));
+  const keyboard = [];
+  for (let i = 0; i < buttons.length; i += 2) keyboard.push(buttons.slice(i, i + 2));
+  keyboard.push([{ text: "✅ Tayyor", data: "fr:ok" }]);
+  keyboard.push([{ text: "⬅️ Rejimlarga qaytish", data: "fr:back" }]);
+  return { text: lines.join("\n"), keyboard };
+}
+
 // Tanlovga guruh qo'shish / olib tashlash → yangi ro'yxat yoki { error } (chegara)
 export function toggleSource(chosen, name) {
   const key = sourceKey(name);
@@ -102,7 +122,12 @@ export function feedSavedText(feed, { needsVehicle = false } = {}) {
   if (feed.mode === "tezkor") {
     return `${head}\n\nHamma guruhlardagi e'lonlar asl matni bilan darhol shu yerga keladi. ` +
       "Kunduzi daqiqasiga o'nlab xabar bo'lishi mumkin — to'xtatish: «⏸ Pauza».\n\n" +
-      "📌 Faqat o'zingiz tanlagan guruhlardan olish — «🎛 Rejim» → «📌 Mening guruhlarim». ➕ O'z guruhingizni qo'shish — «➕ Guruh qo'shish».";
+      "Kamroq kerak bo'lsa — «🎛 Rejim»: 📍 faqat o'z viloyatingizdan yoki 📌 faqat o'zingiz tanlagan guruhlardan. ➕ O'z guruhingizni qo'shish — «➕ Guruh qo'shish».";
+  }
+  if (feed.mode === "hududim") {
+    const names = (feed.regions ?? []).map(regionTitle).join(", ");
+    return `${head}\n\nTanlagan viloyatlaringizdan (${names}) ketadigan e'lonlar asl matni bilan darhol shu yerga keladi. ` +
+      "E'londa joy aniqlanmasa ham — baribir keladi. Viloyatlarni o'zgartirish — «🎛 Rejim» → «📍 Mening hududimdan».";
   }
   if (feed.mode === "guruhlarim" || feed.mode === "guruhlarim_plus") {
     const groups = `Tanlagan ${feed.sources.length} ta guruhingizdagi har bir yuk e'loni asl matni bilan darhol shu yerga keladi.`;

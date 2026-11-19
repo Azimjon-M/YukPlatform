@@ -14,10 +14,14 @@
 // 2026-11-10/11 o'lchovi (24 soat): tezkor hajmi kuniga ~6 900 e'lon, kunduzi daqiqasiga ~10 ta — shuning uchun
 // asosiy tavsiya «guruhlarim» (haydovchi o'zi biladigan 3–5 guruh).
 
-export const FEED_MODE_IDS = ["saralangan", "tezkor", "guruhlarim", "guruhlarim_plus"];
+import { REGIONS, REGION_IDS } from "./regions.js";
+
+export const FEED_MODE_IDS = ["saralangan", "tezkor", "hududim", "guruhlarim", "guruhlarim_plus"];
 // Tanlab bo'ladigan rejimlar (2026-11-19, Azimjon: «hamma tezkor rejimda! saralashni olib tashlamoqdamiz!») — bot va ilova
 // faqat shularni ko'rsatadi; yangi haydovchi darhol tezkorda. Saralangan / «+ saralangan» — faqat eski profillar uchun ichkarida
-export const FEED_MODE_CHOICES = ["tezkor", "guruhlarim"];
+// 2026-11-19 (keyinroq, Azimjon: «Rejimda Hamma e'lonlar, Men turgan joydan ketadigan e'lonlar, faqat mening guruhlarimdan
+// e'lonlar kelsin»): tezkor — ekranda «🌐 Hamma e'lonlar» (ichki nomi o'zgarmadi), yangi «📍 Mening hududimdan»
+export const FEED_MODE_CHOICES = ["tezkor", "hududim", "guruhlarim"];
 export const NEW_DRIVER_FEED_MODE = "tezkor";
 // Eski rejim (saralangan / + saralangan) tanlov ro'yxatida yo'q — ekranda tezkor deb ko'rsatiladi
 export const choiceMode = (mode) => (FEED_MODE_CHOICES.includes(mode) ? mode : NEW_DRIVER_FEED_MODE);
@@ -34,17 +38,28 @@ export const FEED_MODES = {
     sorted: true,
   },
   tezkor: {
-    icon: "⚡",
-    name: "Tezkor",
-    about: "Hamma guruhlardagi yuk e'lonlari — darhol, saralanmasdan (kuniga minglab xabar)",
+    icon: "🌐",
+    name: "Hamma e'lonlar",
+    about: "Hamma guruhlardagi e'lonlar — darhol (kuniga minglab xabar)",
     vehicle: false,
     groups: false,
     sorted: false,
   },
+  // Siz tanlagan viloyat(lar)dan ketadigan e'lonlar: «qayerdan» AI'siz (qoidaviy parser, ~1 ms) topiladi; topilmasa — baribir
+  // yuboriladi (Azimjon tanlovi: yuk yo'qolmasin; 2026-11-19 o'lchovi: e'lonlarning ~72% ida joy topiladi)
+  hududim: {
+    icon: "📍",
+    name: "Mening hududimdan",
+    about: "Siz tanlagan viloyat(lar)dan ketadigan e'lonlar — darhol (joyi aniqlanmagan e'lonlar ham keladi)",
+    vehicle: false,
+    groups: false,
+    regions: true,
+    sorted: false,
+  },
   guruhlarim: {
     icon: "📌",
-    name: "Mening guruhlarim",
-    about: "Faqat siz tanlagan guruh va kanallardagi yuk e'lonlari — darhol, saralanmasdan",
+    name: "Faqat mening guruhlarim",
+    about: "Faqat siz tanlagan guruh va kanallardagi e'lonlar — darhol",
     vehicle: false,
     groups: true,
     sorted: false,
@@ -75,7 +90,21 @@ export function feedOf(profile) {
   const feed = profile?.feed;
   const mode = validFeedMode(feed?.mode) ?? DEFAULT_FEED_MODE;
   const sources = FEED_MODES[mode].groups && Array.isArray(feed?.sources) ? feed.sources.filter(validSourceName) : [];
-  return { mode, sources };
+  if (!FEED_MODES[mode].regions) return { mode, sources };
+  return { mode, sources, regions: validRegions(feed?.regions) };
+}
+
+// Viloyat kodlari (regions.js) — takrorsiz, ro'yxat tartibida
+const validRegions = (list) => (Array.isArray(list) ? REGION_IDS.filter((id) => list.includes(id)) : []);
+export const regionTitle = (id) => REGIONS.find((r) => r.id === id)?.name ?? id;
+
+// «📍 Mening hududimdan»: e'lon shu haydovchiga mosmi. origins — e'londan topilgan «qayerdan» viloyatlari (bo'sh — topilmadi:
+// baribir yuboriladi). Boshqa rejimlarda — har doim true
+export function regionWanted(profile, origins) {
+  const feed = feedOf(profile);
+  if (!FEED_MODES[feed.mode].regions) return true;
+  if (!origins?.length || !feed.regions.length) return true;
+  return origins.some((id) => feed.regions.includes(id));
 }
 
 export const feedMode = (profile) => feedOf(profile).mode;
@@ -91,6 +120,11 @@ export function sanitizeFeed(input) {
   if (typeof input !== "object") return { error: "Rejim noto'g'ri", field: "feed" };
   const mode = validFeedMode(input.mode);
   if (!mode) return { error: "Rejimni tanlang", field: "feed" };
+  if (FEED_MODES[mode].regions) {
+    const regions = validRegions(input.regions);
+    if (regions.length === 0) return { error: "Kamida bitta viloyatni tanlang", field: "regions" };
+    return { feed: { mode, sources: [], regions } };
+  }
   if (!FEED_MODES[mode].groups) return { feed: { mode, sources: [] } };
   const seen = new Set();
   const sources = [];
@@ -108,7 +142,7 @@ export function sanitizeFeed(input) {
 // guruhlarim / guruhlarim_plus — faqat tanlaganlaridan
 export function rawWanted(profile, source) {
   const { mode, sources } = feedOf(profile);
-  if (mode === "tezkor") return true;
+  if (mode === "tezkor" || FEED_MODES[mode].regions) return true; // hududim — manba bo'yicha hammasi, viloyat — regionWanted
   if (!FEED_MODES[mode].groups) return false;
   const key = sourceKey(source);
   return sources.some((name) => sourceKey(name) === key);
@@ -150,8 +184,9 @@ export function rawProfile(feed, prev = null) {
 
 // "⚡ Tezkor" / "📌 Mening guruhlarim (3 ta)"
 export function feedLabel(profile) {
-  const { mode, sources } = feedOf(profile);
+  const { mode, sources, regions = [] } = feedOf(profile);
   const m = FEED_MODES[mode];
+  if (m.regions) return `${m.icon} ${m.name}${regions.length ? ` (${regions.map(regionTitle).join(", ")})` : ""}`;
   return `${m.icon} ${m.name}${m.groups ? ` (${sources.length} ta guruh)` : ""}`;
 }
 

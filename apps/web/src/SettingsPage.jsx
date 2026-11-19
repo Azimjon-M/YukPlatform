@@ -13,6 +13,7 @@ import {
   BODY_TYPES,
   CAPACITY_OPTIONS,
   FEED_MODES,
+  REGIONS,
   FEED_MODE_CHOICES,
   FORM_SIDES,
   SIDE_LABELS,
@@ -32,6 +33,8 @@ import {
   formFromProfile,
   formNeedsVehicle,
   formUsesGroups,
+  formUsesRegions,
+  toggleFeedRegion,
   manyClassesPicked,
   profileFromForm,
   selectFeed,
@@ -54,6 +57,7 @@ const CLASS_OPTIONS = TRUCK_CLASSES.map((t) => ({ id: t.id, label: t.name, sub: 
 const BODY_OPTIONS = BODY_TYPES.filter((b) => b.form !== false).map((b) => ({ id: b.id, label: b.name, note: b.sub }));
 const SIDE_OPTIONS = FORM_SIDES.map((id) => ({ id, label: SIDE_LABELS[id] }));
 // 2026-11-19: saralash olib tashlandi — faqat ⚡ Tezkor va 📌 Mening guruhlarim
+const REGION_OPTIONS = REGIONS.map((r) => ({ id: r.id, label: r.name }));
 const FEED_OPTIONS = FEED_MODE_CHOICES.map((id) => ({ id, label: `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`, note: FEED_MODES[id].about }));
 const className = (id) => TRUCK_CLASSES.find((t) => t.id === id)?.name ?? "";
 const dims = (b) => `${fmt(b.lengthM)} × ${fmt(b.widthM)} × ${fmt(b.heightM)} m`;
@@ -62,6 +66,7 @@ const dims = (b) => `${fmt(b.lengthM)} × ${fmt(b.widthM)} × ${fmt(b.heightM)} 
 const ALL_STEPS = [
   { id: "rejim", title: "Rejim", sections: ["feed"] },
   { id: "guruhlar", title: "Guruhlar", sections: ["groups"] },
+  { id: "hudud", title: "Hudud", sections: ["regions"] },
   { id: "transport", title: "Transport", sections: ["class", "body", "capacity"] },
   { id: "olcham", title: "O'lcham", sections: ["size", "sides"] },
   { id: "tasdiq", title: "Tasdiqlash", sections: ["intl", "summary"] },
@@ -72,13 +77,14 @@ export function driverSteps(form) {
   const vehicle = formNeedsVehicle(form);
   return ALL_STEPS.filter((s) => {
     if (s.id === "guruhlar") return formUsesGroups(form);
+    if (s.id === "hudud") return formUsesRegions(form);
     if (s.id === "transport") return vehicle;
     if (s.id === "olcham") return vehicle && (showSize(form) || showSides(form));
     return true;
   });
 }
 // «Tekshiring» ro'yxatidagi qator → qaysi qadamga qaytadi
-const ROW_STEP = { feed: "rejim", groups: "guruhlar", vehicle: "transport", size: "olcham", sides: "olcham" };
+const ROW_STEP = { feed: "rejim", groups: "guruhlar", regions: "hudud", vehicle: "transport", size: "olcham", sides: "olcham" };
 
 const STEP_LEAD = {
   guruhlar: "Qaysi guruh va kanallardagi yuk e'lonlari sizga darhol kelsin — belgilang.",
@@ -188,6 +194,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
   const VEHICLE_SECTIONS = ["class", "body", "capacity", "size", "sides", "intl"];
   const show = (id) => {
     if (id === "groups" && !usesGroups) return false;
+    if (id === "regions" && !formUsesRegions(form)) return false;
     if (VEHICLE_SECTIONS.includes(id) && !needVehicle) return false;
     return !registering || wizard.step.sections.includes(id);
   };
@@ -232,7 +239,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
       {!online && inTelegram && !canSendData && <div className="notice">{OPEN_FROM_MENU}</div>}
 
       {show("feed") && (
-        <Section id="feed" title="🎛 Yuklarni qanday olasiz?" hint="Saralanganda yuk 1–5 daqiqada keladi; tezkor va guruhlarimda — e'lon chiqishi bilan, lekin saralanmaydi." error={errorFor("feed")}>
+        <Section id="feed" title="🎛 Qaysi e'lonlar kelsin?" hint="Hamma rejimda e'lon guruhda chiqishi bilan keladi." error={errorFor("feed")}>
           <Chips
             layout="list"
             options={FEED_OPTIONS}
@@ -240,6 +247,21 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
             onPick={(id) => {
               setProblem(null);
               setForm((f) => selectFeed(f, id));
+            }}
+          />
+        </Section>
+      )}
+
+      {show("regions") && (
+        <Section id="regions" title="📍 Qaysi viloyat(lar)dan?" hint="Shu viloyatlardan ketadigan e'lonlar keladi. E'londa joy aniqlanmasa ham — baribir keladi." error={errorFor("regions")}>
+          <Chips
+            layout="list"
+            check
+            options={REGION_OPTIONS}
+            selected={(id) => (form.feedRegions ?? []).includes(id)}
+            onPick={(id) => {
+              setProblem(null);
+              setForm((f) => toggleFeedRegion(f, id));
             }}
           />
         </Section>

@@ -78,7 +78,7 @@ test("/start: avval «Iltimos, rolingizni tanlang», keyin haydovchiga birinchi 
   assert.equal(texts(calls, "editMessageText").at(-1), "🚚 Haydovchiman — yuk qidiraman ✅", "belgi oxirida");
   assert.equal(store.getDriver(42).role, "haydovchi");
   // Rol tanlangach (2026-11-19: saralash olib tashlandi) — rejim so'ralmaydi, darhol ⚡ Tezkor, mashinasiz
-  assert.ok(texts(calls).some((t) => /✅ Rejim: <b>⚡ Tezkor<\/b>[\s\S]*Mening guruhlarim[\s\S]*Guruh qo'shish/.test(t)));
+  assert.ok(texts(calls).some((t) => /✅ Rejim: <b>🌐 Hamma e'lonlar<\/b>[\s\S]*viloyatingizdan[\s\S]*guruhlardan[\s\S]*Guruh qo'shish/.test(t)));
   assert.deepEqual(store.getDriver(42).profile.feed, { mode: "tezkor", sources: [] });
   assert.equal(store.getDriver(42).profile.vehicle, null);
   assert.equal(store.getDriver(42).active, true);
@@ -296,7 +296,7 @@ test("pastki menyu: rol tanlanmaguncha yo'q, rol tanlangach Mini App tugmasi, sa
   await press("r:haydovchi");
   // 2026-11-19: rejim so'ralmaydi — darhol ⚡ Tezkor (keyin raqam savoli)
   assert.match(texts(calls)[0], /^🚚 Haydovchisiz\./);
-  assert.match(texts(calls)[1], /✅ Rejim: <b>⚡ Tezkor<\/b>/);
+  assert.match(texts(calls)[1], /✅ Rejim: <b>🌐 Hamma e'lonlar<\/b>/);
   // Eski (profilsiz) saralangan oqimi — ichkarida qoldi
   store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
   calls.length = 0;
@@ -946,7 +946,7 @@ test("/start matni: bot haqida Azimjon matni, keyin menyu; menyuda «Ilovalar» 
       "Telefon ilovalari — /ilovalar.",
   );
   // Keyingi xabar (2026-11-19): rejim so'ralmaydi — darhol ⚡ Tezkor saqlanadi va to'liq menyu
-  assert.match(texts(calls).at(-1), /✅ Rejim: <b>⚡ Tezkor<\/b>/);
+  assert.match(texts(calls).at(-1), /✅ Rejim: <b>🌐 Hamma e'lonlar<\/b>/);
   assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
   const menuOf = calls.filter((c) => c.method === "sendMessage" && c.payload.reply_markup?.keyboard).at(-1).payload.reply_markup;
   assert.equal(menuOf.keyboard[0][0].text, MENU.feed);
@@ -1658,20 +1658,20 @@ test("rejim: «⚡ Tezkor» — mashinasiz darhol saqlanadi, menyuda «🎛 Reji
   assert.equal(active, true);
   assert.equal(profile.vehicle, null);
   assert.deepEqual(profile.feed, { mode: "tezkor", sources: [] });
-  assert.ok(texts(calls).some((t) => /Rejim: <b>⚡ Tezkor<\/b>[\s\S]*darhol/.test(t)));
+  assert.ok(texts(calls).some((t) => /Rejim: <b>🌐 Hamma e'lonlar<\/b>[\s\S]*darhol/.test(t)));
   assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi/, "raqam bir marta so'raladi");
   await message(PRIVATE, PHONE.later);
   assert.deepEqual(menuRows(calls), [[MENU.feed, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings]]);
   assert.equal(store.activeUsers("haydovchi").length, 1, "mashinasiz ham faol");
   // Eski menyudagi «📋 Mos yuklar» — yo'nalish so'ralmaydi, rejim aytiladi
   await message(PRIVATE, MENU.loads);
-  assert.match(texts(calls).at(-1), /«⚡ Tezkor» rejimidasiz/);
+  assert.match(texts(calls).at(-1), /«🌐 Hamma e'lonlar» rejimidasiz/);
   // Rejim oynasi — faqat ⚡ Tezkor va 📌 Mening guruhlarim (saralangan va «+ saralangan» yo'q, o'chirish tugmasi yo'q)
   await message(PRIVATE, MENU.feed);
   const picker = calls.filter((c) => c.method === "sendMessage").at(-1);
   assert.match(picker.payload.text, /Yuklarni qanday olasiz[\s\S]*Guruh qo'shish/);
-  assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["fm:tezkor", "fm:guruhlarim"]);
-  assert.match(inlineButtons(picker)[0].text, /^✅ ⚡ Tezkor/);
+  assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["fm:tezkor", "fm:hududim", "fm:guruhlarim"]);
+  assert.match(inlineButtons(picker)[0].text, /^✅ 🌐 Hamma e'lonlar/);
 });
 
 test("rejim: eski «⚡ Tezkorni o'chirish» tugmasi (menyu va oyna) — rejimlar ko'rsatiladi, rejim o'zgarmaydi", async () => {
@@ -1679,11 +1679,32 @@ test("rejim: eski «⚡ Tezkorni o'chirish» tugmasi (menyu va oyna) — rejimla
   store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
   await message(PRIVATE, MENU.fastOff);
   assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
-  assert.ok(texts(calls).some((t) => /Endi hamma haydovchi ⚡ Tezkor rejimida/.test(t)));
-  assert.deepEqual(inlineButtons(calls.filter((c) => c.method === "sendMessage").at(-1)).map((b) => b.callback_data), ["fm:tezkor", "fm:guruhlarim"]);
+  assert.ok(texts(calls).some((t) => /Tezkorlik endi hamma rejimda bor/.test(t)));
+  assert.deepEqual(inlineButtons(calls.filter((c) => c.method === "sendMessage").at(-1)).map((b) => b.callback_data), ["fm:tezkor", "fm:hududim", "fm:guruhlarim"]);
   await press("fm:off");
   assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
   assert.equal(menuRows(calls)[0][0], MENU.feed, "birinchi tugma — «🎛 Rejim»");
+});
+
+test("rejim: «📍 Mening hududimdan» — viloyatlar ro'yxati, kamida bitta; saqlangach shu viloyatlar", async () => {
+  const { store, calls, press } = setup({ config: { miniappUrl: MINIAPP } });
+  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
+  await press("fm:hududim");
+  const picker = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.match(picker.payload.text, /Qaysi viloyat\(lar\)dan/);
+  assert.ok(inlineButtons(picker).some((b) => b.callback_data === "fr:t:samarqand"));
+  await press("fr:ok");
+  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "Kamida bitta viloyatni tanlang");
+  await press("fr:t:samarqand");
+  await press("fr:t:buxoro");
+  await press("fr:t:buxoro"); // qayta bosilsa — olinadi
+  assert.match(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).find((b) => b.callback_data === "fr:t:samarqand").text, /^✅/);
+  await press("fr:ok");
+  assert.deepEqual(store.getDriver(42).profile.feed, { mode: "hududim", sources: [], regions: ["samarqand"] });
+  assert.ok(texts(calls).some((t) => /Rejim: <b>📍 Mening hududimdan<\/b>[\s\S]*viloyatlaringizdan \(Samarqand viloyati\) ketadigan/.test(t)));
+  // Qayta ochilsa — tanlov o'sha holatda
+  await press("fm:hududim");
+  assert.match(inlineButtons(calls.filter((c) => c.method === "sendMessage").at(-1)).find((b) => b.callback_data === "fr:t:samarqand").text, /^✅/);
 });
 
 test("rejim: «📌 Mening guruhlarim» — ro'yxatdan tanlash, kamida bitta; saqlangach menyuda «📌 Guruhlarim»", async () => {
@@ -1768,7 +1789,7 @@ test("tezkor xabar (deliverRaw): asl matn, telefonlar, «📄 Asl e'lon» va e'l
   const post = { id: 77, source: "@TutGruz", link: "https://t.me/TutGruz/5", text: "Toshkentdan Samarqandga <20 t> un bor\n90 000 00 01", postedAt: Date.now(), sender: "ali_logist" };
   assert.deepEqual(await deliverRaw(42, post, { phones: ["+998900000001"] }), { ok: true });
   const sent = calls.filter((c) => c.method === "sendMessage").at(-1).payload;
-  assert.match(sent.text, /^Toshkentdan Samarqandga &lt;20 t&gt; un bor\n90 000 00 01\n\n📞 \+998900000001\n💬 <a href="https:\/\/t\.me\/ali_logist">Lichkasi<\/a>\n⚡ Tezkor · 🕒 /);
+  assert.match(sent.text, /^Toshkentdan Samarqandga &lt;20 t&gt; un bor\n90 000 00 01\n\n📞 \+998900000001\n💬 <a href="https:\/\/t\.me\/ali_logist">Lichkasi<\/a>\n⚡ Yangi e'lon · 🕒 /);
   assert.doesNotMatch(sent.text, /@TutGruz/, "guruh nomi matnda yo'q");
   const kb = sent.reply_markup.inline_keyboard.flat();
   assert.equal(kb[0].url, "https://t.me/TutGruz/5");

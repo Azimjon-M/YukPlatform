@@ -12,6 +12,7 @@ import {
   formNeedsVehicle,
   formUsesGroups,
   selectFeed,
+  toggleFeedRegion,
   toggleFeedSource,
   shipperFormFromProfile,
   shipperProfileFromForm,
@@ -223,4 +224,12 @@ test("rejim (2026-11-19): yangi va eski saralangan profil formada ⚡ Tezkor; te
   const result = profileFromForm(formFromProfile(null));
   assert.equal(result.error, undefined);
   assert.deepEqual(result.profile.feed, { mode: "tezkor", sources: [] });
+});
+
+test("hududim (2026-11-19): viloyat belgilanadi, kamida bitta; profilga feed.regions", () => {
+  let form = selectFeed(formFromProfile(null), "hududim");
+  assert.equal(profileFromForm(form).field, "regions");
+  form = toggleFeedRegion(toggleFeedRegion(toggleFeedRegion(form, "samarqand"), "buxoro"), "buxoro");
+  assert.deepEqual(profileFromForm(form).profile.feed, { mode: "hududim", sources: [], regions: ["samarqand"] });
+  assert.deepEqual(formFromProfile({ feed: { mode: "hududim", sources: [], regions: ["andijon"] } }).feedRegions, ["andijon"]);
 });

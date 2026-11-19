@@ -10,7 +10,9 @@ import {
   DEFAULT_ROUTE_SCOPE,
   KIND_MATCHERS,
   KIND_ROLE,
+  FEED_MODES,
   feedMode,
+  regionWanted,
   loadKeys,
   isClosedSource,
   planAllows,
@@ -21,6 +23,15 @@ import {
   sortedWanted,
   usesRawFeed,
 } from "@yuk/shared";
+
+// E'londan «qayerdan» viloyatlari (qoidaviy parser, AI'siz) — «📍 Mening hududimdan» uchun. Topilmasa — []
+export function originRegions(text) {
+  try {
+    return [...new Set((parseByRules(String(text ?? "")).loads ?? []).map((l) => l.fromRegion).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
 
 // E'lon turi → bazadagi kind va kimga boradi (rollar: @yuk/shared roles.js)
 //   yuk_bor     → kind "yuk"     → haydovchilarga (matchLoad: mashinasi va yo'nalishi)
@@ -119,6 +130,8 @@ export async function handleParsed(post, result, deps) {
     let count = 0;
     for (const user of users) {
       if (kind === "yuk" && deps.sortingOff && post.shipper == null) break;
+      // «📍 Mening hududimdan» — yuk beruvchining o'z yukida ham viloyat tekshiriladi
+      if (kind === "yuk" && !regionWanted(user.profile, load.fromRegion ? [load.fromRegion] : [])) continue;
       if (kind === "yuk" && rawFor(user.profile, post.source)) {
         // Shu guruhdagi hamma yuk unga kerak (tezkor / guruhlarim): asl matn bilan olgan bo'lsa — bo'ldi,
         // olmagan bo'lsa (AI'siz tekshiruv o'tkazib yuborgan, yuk beruvchining o'z yuki) — mashina va yo'nalishsiz, shu yerda
@@ -294,7 +307,11 @@ export function createWorker(
   // Bitta e'lon: kimga kerak (rejim + guruh) → yuk e'lonimi (AI'siz) → tezkor rejimda chet el emasmi → yuborish navbatiga
   function fast(post, users) {
     if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || (!fastAll && !contactOf(post))) return;
-    const wanted = users.filter((u) => wantedFn(u.profile, post.source));
+    // «📍 Mening hududimdan» (2026-11-19): e'londan «qayerdan» viloyatlari — AI'siz (qoidaviy parser, ~1 ms), faqat kerak bo'lsa;
+    // topilmasa — bo'sh ro'yxat, regionWanted baribir yuboradi
+    let origins = null;
+    const originsOf = () => (origins ??= originRegions(post.text));
+    const wanted = users.filter((u) => wantedFn(u.profile, post.source) && (!FEED_MODES[feedMode(u.profile)].regions || regionWanted(u.profile, originsOf())));
     if (!wanted.length) return;
     let look = { load: true, outOfScope: false };
     if (!fastAll) {

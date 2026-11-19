@@ -972,3 +972,16 @@ test("sortingOff: yuk beruvchining o'z yuki — hammaga saralanmasdan («📌 Me
   await createWorker(deps, { log: () => {} }).runOnce();
   assert.deepEqual([...new Set(delivered)].sort(), [1, 2, 7, 9]);
 });
+
+test("sortingOff + «📍 Mening hududimdan»: tanlagan viloyatidan ketadigan va joyi aniqlanmagan e'lonlar keladi, boshqasi yo'q", async () => {
+  const { store, deps, raw, post } = rawSetup();
+  deps.sortingOff = true;
+  deps.pool = noAi;
+  store.saveDriver(10, { role: "haydovchi", active: true, profile: { ...RAW_BASE, feed: { mode: "hududim", sources: [], regions: ["samarqand"] } } });
+  post("@g", 1, "Samarqanddan Toshkentga 20 tonna un bor, tent kerak +998900000011");
+  post("@g", 2, "Andijondan Buxoroga 10 tonna yuk bor, isuzu kerak +998900000012");
+  post("@g", 3, CHAT_TEXT);
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(raw.filter(([c]) => c === 10).map(([, id]) => id).sort(), [1, 3]);
+  assert.equal(raw.filter(([c]) => c === 7).length, 3, "hamma e'lonlar rejimi — hammasi");
+});

@@ -36,6 +36,7 @@ import {
   sortedReady,
   telegramUsername,
   validFeedMode,
+  sanitizeFeed,
   NEW_DRIVER_FEED_MODE,
   validRole,
   withPrevFeed,
@@ -43,7 +44,7 @@ import {
 } from "@yuk/shared";
 import { createCommandSync } from "./commands.js";
 import { profileFromText } from "./driverText.js";
-import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, feedSavedText, groupStep, modeStep, toggleSource } from "./feed.js";
+import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, REGION_CALLBACK, feedSavedText, groupStep, modeStep, regionStep, toggleSource } from "./feed.js";
 import { SENDER_TEXT, escapeHtml, formatLoad, formatRaw, formatTruck } from "./format.js";
 import { IDLE_BUTTONS } from "./idle.js";
 import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
@@ -201,7 +202,7 @@ function helpText(driver) {
     ? []
     : [
         ...(mode.groups ? [`${MENU.groups} — qaysi guruh va kanallardan yuk e'lonlari darhol kelishi`] : []),
-        `${MENU.feed} — yuklarni olish usuli: ⚡ tezkor (hamma guruh) yoki 📌 o'zingiz tanlagan guruhlardan (hozir: ${mode.icon} ${mode.name})`,
+        `${MENU.feed} — qaysi e'lonlar kelsin: 🌐 hammasi, 📍 o'z viloyatingizdan yoki 📌 o'zingiz tanlagan guruhlardan (hozir: ${mode.icon} ${mode.name})`,
       ];
   const menuLines = driver?.profile || isShipper
     ? [
@@ -738,6 +739,11 @@ export function createBot({
     await render(ctx, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: toKeyboard(keyboard) }, edit);
   }
 
+  async function showRegions(ctx, draft, { edit = false } = {}) {
+    const { text, keyboard } = regionStep({ chosen: draft.regions });
+    await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
+  }
+
   // «🎛 Rejim» / /rejim (faqat haydovchi)
   async function openModes(ctx) {
     const driver = rememberUser(ctx);
@@ -782,6 +788,13 @@ export function createBot({
     }
     // Inline tugmadan kelgan bo'lsa — rejim oynasini yopamiz («⚡ Tezkorni o'chirish» menyu tugmasidan kelganda tahrirlanadigan xabar yo'q)
     if (ctx.callbackQuery && !auto) await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[mode].icon} ${FEED_MODES[mode].name} ✅`).catch(() => {});
+    if (FEED_MODES[mode].regions) {
+      // «📍 Mening hududimdan» — viloyatlar tanlovi (oldin tanlagani bo'lsa — o'sha holatda)
+      const feed = feedOf(driver.profile);
+      const draft = { mode, regions: [...(feed.regions ?? [])], at: Date.now() };
+      feedDrafts.set(ctx.chat.id, draft);
+      return showRegions(ctx, draft);
+    }
     if (FEED_MODES[mode].groups) {
       // Shu yoki boshqa guruh rejimida edi (guruhlarim ↔ + saralangan) — tanlovi qoladi; boshqa rejimdan — bo'sh
       const feed = feedOf(driver.profile);
@@ -809,7 +822,7 @@ export function createBot({
     const driver = rememberUser(ctx);
     if (roleOf(driver) !== "haydovchi") return showStart(ctx);
     if (ctx.callbackQuery) await ctx.editMessageReplyMarkup().catch(() => {});
-    await ctx.reply("Endi hamma haydovchi ⚡ Tezkor rejimida. Faqat o'zingiz tanlagan guruhlardan olish uchun — «📌 Mening guruhlarim»; vaqtincha to'xtatish — «⏸ Pauza».", menu(driver));
+    await ctx.reply("Tezkorlik endi hamma rejimda bor. Kamroq e'lon kerak bo'lsa — 📍 faqat o'z viloyatingizdan yoki 📌 faqat o'z guruhlaringizdan; vaqtincha to'xtatish — «⏸ Pauza».", menu(driver));
     return showModes(ctx, driver);
   }
 
@@ -1212,6 +1225,38 @@ export function createBot({
     if (!mode) return;
     // Eski xabardagi «🎯 Saralangan» / «+ saralangan» tugmasi ichkarida ishlayveradi (saralash o'chiq — baribir hamma e'lon keladi)
     await pickMode(ctx, mode);
+  });
+
+  // «📍 Qaysi viloyatlardan?»: ✅ qo'yish/olish, «✅ Tayyor» (kamida bitta), «⬅️ Rejimlarga qaytish»
+  bot.callbackQuery(REGION_CALLBACK, async (ctx) => {
+    if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
+    const driver = rememberUser(ctx);
+    const draft = feedDraft(ctx.chat.id);
+    if (roleOf(driver) !== "haydovchi" || !draft || !FEED_MODES[draft.mode]?.regions) {
+      await ctx.answerCallbackQuery({ text: "Bu ro'yxat eskirgan — qaytadan oching", show_alert: true });
+      await ctx.editMessageReplyMarkup().catch(() => {});
+      return roleOf(driver) === "haydovchi" ? showModes(ctx, driver) : showStart(ctx);
+    }
+    draft.at = Date.now();
+    const data = ctx.callbackQuery.data;
+    if (data === "fr:back") {
+      await ctx.answerCallbackQuery();
+      feedDrafts.delete(ctx.chat.id);
+      return showModes(ctx, driver, { edit: true });
+    }
+    if (data === "fr:ok") {
+      const checked = sanitizeFeed({ mode: draft.mode, regions: draft.regions });
+      if (checked.error) return ctx.answerCallbackQuery({ text: checked.error, show_alert: true });
+      await ctx.answerCallbackQuery();
+      feedDrafts.delete(ctx.chat.id);
+      await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[draft.mode].icon} ${FEED_MODES[draft.mode].name} ✅`).catch(() => {});
+      const updated = store.saveDriver(ctx.chat.id, { role: "haydovchi", profile: rawProfile(checked.feed, driver.profile), draft: null, active: true });
+      return feedSaved(ctx, updated);
+    }
+    const id = ctx.match[1];
+    await ctx.answerCallbackQuery();
+    draft.regions = draft.regions.includes(id) ? draft.regions.filter((r) => r !== id) : [...draft.regions, id];
+    return showRegions(ctx, draft, { edit: true });
   });
 
   // «📌 Qaysi guruhlardan?»: ✅ qo'yish/olish, sahifa, «✅ Tayyor», «⬅️ Rejimlarga qaytish»
@@ -1678,7 +1723,7 @@ export function createBot({
   async function deliverRawNow(chatId, rawPost, { phones = [] } = {}) {
     const post = withSender(rawPost);
     const mode = FEED_MODES[feedMode(store.getDriver(chatId)?.profile)];
-    const { text } = formatRaw(post, { phones, label: mode.groups ? "📌 Guruhingizdan" : "⚡ Tezkor" });
+    const { text } = formatRaw(post, { phones, label: mode.groups ? "📌 Guruhingizdan" : mode.regions ? "📍 Hududingizdan" : "⚡ Yangi e'lon" });
     const url = rawCallUrl(chatId, post.id);
     return sendDirect(chatId, text, loadButtons({ phones }, post, url), () => loadButtons({ phones }, post, url, { lichka: false }));
   }

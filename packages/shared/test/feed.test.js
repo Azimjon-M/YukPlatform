@@ -78,9 +78,9 @@ test("profil matni: mashinasiz rejimda faqat rejim va guruhlar", () => {
   const mine = { vehicle: null, feed: { mode: "guruhlarim", sources: ["@TutGruz", "-1001234567"] } };
   assert.deepEqual(profileRows(mine).map((r) => r.id), ["feed", "groups"]);
   const names = { "@TutGruz": "Tut Gruz", "-1001234567": "Yopiq guruh" };
-  assert.equal(describeProfile(mine, "qoshni", "haydovchi", { sourceName: (n) => names[n] }), "🎛 Rejim: 📌 Mening guruhlarim\n📌 Guruhlar: Tut Gruz, Yopiq guruh");
-  assert.equal(describeProfile({ feed: { mode: "tezkor" } }), "🎛 Rejim: ⚡ Tezkor");
-  assert.equal(feedLabel(mine), "📌 Mening guruhlarim (2 ta guruh)");
+  assert.equal(describeProfile(mine, "qoshni", "haydovchi", { sourceName: (n) => names[n] }), "🎛 Rejim: 📌 Faqat mening guruhlarim\n📌 Guruhlar: Tut Gruz, Yopiq guruh");
+  assert.equal(describeProfile({ feed: { mode: "tezkor" } }), "🎛 Rejim: 🌐 Hamma e'lonlar");
+  assert.equal(feedLabel(mine), "📌 Faqat mening guruhlarim (2 ta guruh)");
   const plus = { vehicle: FURA, feed: { mode: "guruhlarim_plus", sources: ["@a1234"] }, domestic: true, international: false };
   assert.deepEqual(profileRows(plus).map((r) => r.id).slice(0, 3), ["feed", "groups", "vehicle"]);
 });
@@ -112,4 +112,19 @@ test("sortedReady / profileReady / rawProfile: mashinasiz profil qaysi rejimda i
   const rows = profileRows(plusNoVehicle);
   assert.deepEqual(rows.map((r) => r.id), ["feed", "groups", "vehicle"]);
   assert.equal(rows.at(-1).value, "kiritilmagan");
+});
+
+test("hududim (2026-11-19): viloyatlar tanlanadi; e'lon qayerdan ekani topilmasa ham keladi", async () => {
+  const { sanitizeFeed, feedOf, regionWanted, rawWanted, feedLabel, FEED_MODE_CHOICES } = await import("../src/feed.js");
+  assert.deepEqual(FEED_MODE_CHOICES, ["tezkor", "hududim", "guruhlarim"]);
+  assert.deepEqual(sanitizeFeed({ mode: "hududim", regions: ["samarqand", "yoq", "samarqand"] }), { feed: { mode: "hududim", sources: [], regions: ["samarqand"] } });
+  assert.equal(sanitizeFeed({ mode: "hududim", regions: [] }).field, "regions");
+  const profile = { feed: { mode: "hududim", sources: [], regions: ["samarqand"] } };
+  assert.deepEqual(feedOf(profile).regions, ["samarqand"]);
+  assert.equal(rawWanted(profile, "@istalgan"), true);
+  assert.equal(regionWanted(profile, ["samarqand", "buxoro"]), true);
+  assert.equal(regionWanted(profile, ["andijon"]), false);
+  assert.equal(regionWanted(profile, []), true, "joyi topilmagan — baribir");
+  assert.equal(regionWanted({ feed: { mode: "tezkor" } }, ["andijon"]), true);
+  assert.equal(feedLabel(profile), "📍 Mening hududimdan (Samarqand viloyati)");
 });
