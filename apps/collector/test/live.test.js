@@ -456,3 +456,33 @@ test("a'zo bo'lish: 24 soatlik limit, FLOOD_WAIT, xato va guruhlar limiti", asyn
   assert.equal(full.joins.length, 1);
   assert.ok(fullLogs.includes("A'zo bo'lish to'xtadi: akkaunt guruhlar limitiga yetgan (CHANNELS_TOO_MUCH)"));
 });
+
+test("pollParallel: sekin javob beradigan Telegram'da guruhlar parallel o'qiladi, so'rovlar orasi baribir gapMs", async () => {
+  const store = openStore({ file: ":memory:" });
+  const names = ["a1", "a2", "a3", "a4", "a5", "a6"];
+  for (const name of names) {
+    store.addSource(`@${name}`);
+    store.setCursor(`@${name}`, 100);
+  }
+  let active = 0;
+  let peak = 0;
+  const starts = [];
+  const reader = {
+    latestId: async () => 100,
+    since: async () => {
+      starts.push(Date.now());
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 120));
+      active--;
+      return [];
+    },
+  };
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 700);
+  await runLive({ sources: names.map(S), reader, store, log: () => {}, signal: controller.signal, intervalMs: 50, minMs: 50, gapMs: 20, pollParallel: 3 });
+  assert.ok(peak >= 2 && peak <= 3, `bir vaqtda ${peak} ta`);
+  assert.ok(starts.length >= 8, `${starts.length} ta so'rov (ketma-ket bo'lsa ~5 ta bo'lardi)`);
+  for (let i = 1; i < starts.length; i++) assert.ok(starts[i] - starts[i - 1] >= 15, "so'rovlar orasi gapMs dan kam emas");
+  assert.equal(active, 0, "to'xtaganda hamma so'rov tugadi");
+});

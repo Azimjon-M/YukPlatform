@@ -204,6 +204,10 @@ export async function runLive({
   tick = null,
   emptyText = "Kuzatiladigan guruh yo'q: boshqaruv markazining «Manbalar» bo'limidan qo'shing.",
   gapMs = 2_000,
+  // Bir vaqtda nechta guruh o'qiladi (2026-11-19, tezlik: bitta so'rov Telegram'dan 2–3 s javob kutadi — ketma-ket
+  // o'qishda daqiqasiga ~18 ta so'rovdan oshmasdi). 1 — avvalgidek ketma-ket (testlar)
+  pollParallel = 1,
+  fastNew = false,
   backfill = 0,
   log = console.log,
   signal,
@@ -224,11 +228,17 @@ export async function runLive({
   let pauseUntil = -Infinity; // FLOOD_WAIT: Telegram aytgan vaqtgacha hech narsa so'ralmaydi
   let slowUntil = -Infinity; // FLOOD_WAIT'dan keyin 1 soat so'rovlar ikki barobar kam
   let requests = 0;
-  async function pace() {
-    const waitMs = Math.max(lastRequestAt + gapMs, pauseUntil) - now();
-    if (waitMs > 0) await sleep(waitMs);
-    lastRequestAt = now();
-    requests++;
+  // Navbatli: parallel o'qishda ham (pollParallel) so'rovlar orasida kamida gapMs
+  let paceChain = Promise.resolve();
+  function pace() {
+    const turn = paceChain.then(async () => {
+      const waitMs = Math.max(lastRequestAt + gapMs, pauseUntil) - now();
+      if (waitMs > 0) await sleep(waitMs);
+      lastRequestAt = now();
+      requests++;
+    });
+    paceChain = turn.catch(() => {});
+    return turn;
   }
   function handleFlood(error) {
     const seconds = floodSeconds(error);
@@ -647,8 +657,9 @@ export async function runLive({
     const since = now() - s.lastPoll;
     if (covered(label)) {
       // Yangisi bor: jim guruh darhol o'qiladi (kam xarajat), faol guruh — o'z oralig'idan tez emas (so'rovlar me'yoridan oshmasin)
+      // fastNew (2026-11-19, tezlik): yangisi bor guruh faol bo'lsa ham minMs dan kechikmaydi (budjet o'rniga tezlik)
       const rate = rates.get(label);
-      const busy = rate != null && rate * (interval / MINUTE) >= 1;
+      const busy = !fastNew && rate != null && rate * (interval / MINUTE) >= 1;
       const spacing = busy ? interval : Math.min(interval, minMs);
       if (tops.get(label).top > cursor) return since >= spacing ? { score: since / spacing } : { at: s.lastPoll + spacing };
       return since >= safetyMs ? { score: since / safetyMs } : { at: s.lastPoll + safetyMs };
@@ -755,6 +766,8 @@ export async function runLive({
   }
 
   let empty = false;
+  const inflight = new Map(); // nomi → o'qilayotgan so'rov (pollParallel > 1)
+  let topsRunning = null; // fondagi «yangisi bormi» (pollParallel > 1)
   try {
     while (!signal?.aborted) {
       if (tick) await tick();
@@ -782,8 +795,19 @@ export async function runLive({
       }
       if (reader.membership && now() - membershipAt >= membershipMs) await checkMembership(list);
       if (reader.tops && now() - topsAt >= topsMs && now() >= topsBrokenUntil && !signal?.aborted) {
-        await checkTops(list);
-        saveSchedule(list);
+        // Fonda (2026-11-19): Telegram bu so'rovga sekin javob beradi (o'lchov: daqiqasiga ~50 s) — kutib tursak, shu
+        // vaqtda hech bir guruh o'qilmasdi. Bittadan ortiq bir vaqtda emas
+        if (pollParallel > 1) {
+          if (!topsRunning) {
+            topsRunning = checkTops(list)
+              .then(() => saveSchedule(list))
+              .catch((error) => log(`«Yangisi bormi» xatosi: ${errorText(error)}`))
+              .finally(() => (topsRunning = null));
+          }
+        } else {
+          await checkTops(list);
+          saveSchedule(list);
+        }
       }
       if (joins && reader.join && store.setJoinState && !joinsStopped && now() >= nextJoinAt && !signal?.aborted) await joinNext(list);
       report(list);
@@ -793,15 +817,23 @@ export async function runLive({
       let nextScore = -Infinity;
       let wakeAt = now() + IDLE_MS;
       for (const source of list) {
+        if (inflight.has(sourceLabel(source))) continue; // hozir o'qilyapti
         const plan = planOf(source);
         if (plan.score != null && plan.score > nextScore) [next, nextScore] = [source, plan.score];
         else if (plan.at != null) wakeAt = Math.min(wakeAt, plan.at);
       }
       if (reader.tops && (joined.size || topsAll)) wakeAt = Math.min(wakeAt, Math.max(topsAt + topsMs, topsBrokenUntil));
-      if (next) await pollOne(next);
+      if (next && pollParallel > 1) {
+        const label = sourceLabel(next);
+        inflight.set(label, pollOne(next).finally(() => inflight.delete(label)));
+        if (inflight.size >= pollParallel) await Promise.race(inflight.values());
+        else await paceChain; // keyingisini navbatdagi so'rov vaqti kelganda tanlaymiz (holat yangilangan bo'ladi)
+      } else if (next) await pollOne(next);
+      else if (inflight.size) await Promise.race([...inflight.values(), sleep(Math.max(200, wakeAt - now()))]);
       else await sleep(Math.max(200, wakeAt - now()));
     }
   } finally {
+    await Promise.allSettled([...inflight.values(), topsRunning]);
     stopListening?.();
   }
 }

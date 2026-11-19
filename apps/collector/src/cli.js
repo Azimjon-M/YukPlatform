@@ -191,7 +191,8 @@ async function cmdLive() {
   // --interval — yangi guruhning (faolligi hali bilinmaydi) oralig'i; 30 s dan tez so'rash — FLOOD_WAIT xavfi.
   // TG_POLL_BUDGET — har akkaunt Telegram'ga daqiqasiga taxminan nechta so'rov yuboradi (standart 20; FLOOD_WAIT ko'p chiqsa kamaytiring)
   const intervalMs = Math.max(30, Number(args.interval)) * 1000;
-  const budgetPerMin = Math.min(Math.max(Number(process.env.TG_POLL_BUDGET) || 20, 4), 30);
+  // 2026-11-19 (tezlik): standart 20 → 40, chegara 30 → 60
+  const budgetPerMin = Math.min(Math.max(Number(process.env.TG_POLL_BUDGET) || 40, 4), 60);
   const store = openStore();
   // Ikkinchi collector bitta Telegram sessiyasini ikki joyda ochadi — Telegram sessiyani bekor qilishi mumkin
   acquireRunLock("collector");
@@ -219,6 +220,12 @@ async function cmdLive() {
   const live = {
     intervalMs,
     budgetPerMin,
+    // 2026-11-19 (Azimjon: «Bizga tezlik kerak»): faol guruh yangisi bo'lsa 10 s dan tez emas (20 s edi), Telegram'ga
+    // so'rovlar orasi 1,2 s (2 s edi; .env COLLECTOR_GAP_MS). FLOOD_WAIT bo'lsa live.js o'zi to'xtab, 1 soat sekinlashadi
+    minMs: 10_000,
+    gapMs: Math.max(Number(process.env.COLLECTOR_GAP_MS) || 1_200, 500),
+    fastNew: true,
+    pollParallel: Math.min(Math.max(Number(process.env.COLLECTOR_PARALLEL) || 4, 1), 8),
     backfill: Number(args.backfill),
     // Bot aloqasiz e'lonni yubormaydi — foydalanuvchi qo'shgan guruhni tekshirishda ham ular sanalmaydi (REQUIRE_CONTACT=0 — sanaladi)
     requireContact: !/^(0|yo'q|yoq|no|false|off)$/i.test(process.env.REQUIRE_CONTACT?.trim() ?? ""),
