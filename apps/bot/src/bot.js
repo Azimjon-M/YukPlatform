@@ -579,7 +579,24 @@ export function createBot({
     await ctx.reply(text, options);
   }
 
+  // «Band» holati (2026-11-19, Azimjon: «rejim yoki guruh qo'shish ish bajarayotganimda ham e'lonlar to'xtamay kelmoqda …
+  // ish yakunlanmaguncha e'lonlar kelmay tursin»): sozlash oynasi (rejim, viloyat/guruh tanlovi, «➕ Guruh qo'shish»,
+  // savol-javob) ochiq turganda tezkor e'lonlar shu odamga yuborilmaydi (pipeline.js deps.held). Pauza emas — saqlanmaydi:
+  // saqlash/bekor qilish bilan tugaydi, tashlab ketilsa — oxirgi bosishdan BUSY_IDLE_MS keyin o'zi tugaydi
+  const BUSY_IDLE_MS = 3 * 60_000;
+  const busy = new Map(); // chatId → qachongacha
+  const hold = (chatId) => busy.set(chatId, Date.now() + BUSY_IDLE_MS);
+  const release = (chatId) => busy.delete(chatId);
+  function isBusy(chatId) {
+    const until = busy.get(chatId);
+    if (until == null) return false;
+    if (Date.now() <= until) return true;
+    busy.delete(chatId);
+    return false;
+  }
+
   async function startWizard(ctx, profile = null, role = "haydovchi") {
+    hold(ctx.chat.id);
     const draft = newDraft(profile, scope, role);
     store.saveDriver(ctx.chat.id, { draft });
     await showStep(ctx, draft);
@@ -603,6 +620,7 @@ export function createBot({
   }
 
   async function saved(ctx, profile, role) {
+    release(ctx.chat.id);
     // Mini App boshqa rol bilan saqladi (masalan, formada rolni almashtirib) — avval eski rolning sozlamalarini saqlab qo'yamiz
     if (store.getDriver(ctx.chat.id)?.role !== role) store.switchRole(ctx.chat.id, role);
     // Haydovchi formasida yo'nalish yo'q (u «📋 Mos yuklar» da tanlanadi) — eskisi qoladi. Rejimni yubormagan forma
@@ -727,11 +745,13 @@ export function createBot({
   };
 
   async function showModes(ctx, driver, { edit = false, intro = null } = {}) {
+    hold(ctx.chat.id);
     const { text, keyboard } = modeStep({ profile: driver.profile, intro });
     await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
 
   async function showGroups(ctx, draft, { edit = false } = {}) {
+    hold(ctx.chat.id);
     const pro = isPro(store.getDriver(ctx.chat.id));
     const list = store.feedSources(ctx.chat.id, { pro });
     const { text, keyboard, page } = groupStep({ list, chosen: draft.sources, page: draft.page, mode: draft.mode, kind: draft.kind, pro });
@@ -740,6 +760,7 @@ export function createBot({
   }
 
   async function showRegions(ctx, draft, { edit = false } = {}) {
+    hold(ctx.chat.id);
     const { text, keyboard } = regionStep({ chosen: draft.regions });
     await render(ctx, text, { parse_mode: "HTML", reply_markup: toKeyboard(keyboard) }, edit);
   }
@@ -766,6 +787,7 @@ export function createBot({
 
   // Rejim saqlandi → matn (+ kerak bo'lsa ro'yxatdan o'tish, yo'nalish yoki raqam savoli). driver — bazadagi yangi holat
   async function feedSaved(ctx, driver) {
+    release(ctx.chat.id);
     const { profile } = driver;
     const feed = feedOf(profile);
     const needsVehicle = FEED_MODES[feed.mode].vehicle && !profile.vehicle;
@@ -830,6 +852,7 @@ export function createBot({
   }
 
   async function setActive(ctx, active) {
+    release(ctx.chat.id);
     const driver = rememberUser(ctx);
     // Azimjon, 2026-11-12: «⏸ Pauza / ▶️ Davom ettirish» tugmalari pastki menyuda FAQAT haydovchida. Lekin handler
     // O'CHIRILMAGAN — eski menyuda bosilsa yoki idle DM'dagi inline «▶️ Davom ettirish» kelib qolsa ishlayveradi,
@@ -1115,6 +1138,7 @@ export function createBot({
   const sourceIntake = createSourceIntake({ api: bot.api, store, log, ours: [config.channel, ...(config.requiredChats ?? [])] });
   // Raqam so'raladi va niyat eslab qolinadi (yuqorida groupIntents): username — havola yuborgan bo'lsa, o'sha guruh
   function needPhone(ctx, username = null) {
+    hold(ctx.chat.id);
     groupIntents.set(ctx.chat.id, { username, at: Date.now() });
     return ctx.reply(INTAKE.needPhone(Boolean(username)), { reply_markup: phoneKeyboard(false) });
   }
@@ -1127,6 +1151,7 @@ export function createBot({
     const driver = rememberUser(ctx);
     if (!roleOf(driver)) return showStart(ctx);
     if (!driver.phone) return needPhone(ctx);
+    hold(ctx.chat.id); // havola kutilyapti — shu orada e'lon chalg'itmasin
     await ctx.reply(sourceIntake.intro(ctx.chat.id), html(driver));
   }
   // /account_qosh (Azimjon, 2026-11-13): o'z Telegram akkauntini collector'ga ulash — Mini App Sozlamalardagi
@@ -1166,6 +1191,7 @@ export function createBot({
     const link = parseSourceLink(ctx.message.text);
     if (!driver.phone) return needPhone(ctx, link.username ?? null);
     const text = link.error ? INTAKE[link.error] : await sourceIntake.submit(ctx.chat.id, link);
+    if (!link.error) release(ctx.chat.id); // havola qabul qilindi — guruh qo'shish tugadi (xato bo'lsa — yana kutamiz)
     await ctx.reply(text, html(driver));
   });
   // O'zi qo'shgan guruh sinovga olindi yoki o'tdi va haydovchi «📌 Mening guruhlarim» rejimida — guruh uning tanloviga
@@ -1593,6 +1619,7 @@ export function createBot({
 
   // Chatdagi savol-javob (Mini App bo'lmasa)
   bot.callbackQuery(/^w:(\w+):(.+)$/, async (ctx) => {
+    if (ctx.chat) hold(ctx.chat.id); // savol-javob davom etyapti
     const [, step, value] = ctx.match;
     const driver = store.getDriver(ctx.chat.id);
     const role = roleOf(driver);
@@ -1799,5 +1826,5 @@ export function createBot({
   // notices — server (apps/api) qo'ygan topshiriqlar (xaritada yo'nalish tanlandi): main.js notices.start()
   // sources — foydalanuvchi qo'shgan guruhlar kuzatuvchisi: main.js sources.start()
   // directDone — yuk beruvchiga natija (main.js worker deps.onDirect)
-  return { bot, init, publish, deliver, deliverRaw, canReceive, directDone, members, commands, notices, sources, group };
+  return { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, members, commands, notices, sources, group };
 }

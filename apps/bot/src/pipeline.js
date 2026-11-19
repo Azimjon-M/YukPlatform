@@ -338,6 +338,7 @@ export function createWorker(
         if (controller.signal.aborted) break;
         try {
           if (!planAllows(user, plan)) continue; // yopiq guruh — faqat Pro
+          if (deps.held?.(user.chatId)) continue; // sozlash oynasi ochiq (bot.js isBusy) — shu e'lon unga yuborilmaydi
           if (deps.canReceive && !(await deps.canReceive(user))) continue;
           const outcome = await deps.deliverRaw(user.chatId, post, { phones });
           const ok = outcome === true || outcome?.ok === true;

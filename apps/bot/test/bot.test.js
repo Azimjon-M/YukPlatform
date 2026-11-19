@@ -19,7 +19,7 @@ const CHANNEL = { id: -1009876543210, type: "channel", title: "Yuk Ekspert", use
 function setup({ fail, answer, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued } = {}) {
   const store = openStore({ file: ":memory:" });
   const config = { channel: "@Yuk_Ekspert", channelId: CHANNEL.id, admins: [], miniappUrl: null, ...extra };
-  const { bot, init, publish, deliver, deliverRaw, canReceive, directDone, notices, sources } = createBot({
+  const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources } = createBot({
     token: `123456:${"x".repeat(35)}`,
     store,
     config,
@@ -52,7 +52,7 @@ function setup({ fail, answer, config: extra = {}, appUrl, linkToken, callLink, 
   const press = (data) =>
     send({ callback_query: { id: String(++updateId), from: USER, chat_instance: "x", data, message: { message_id: 101, date: 0, chat: PRIVATE, text: "..." } } });
   const webAppData = (data) => message(PRIVATE, undefined, { web_app_data: { data, button_text: MENU.settings } });
-  return { store, calls, send, message, command, press, webAppData, init, publish, deliver, deliverRaw, canReceive, directDone, notices, sources };
+  return { store, calls, send, message, command, press, webAppData, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources };
 }
 
 const ROLE_QUESTION = /^Iltimos, rolingizni tanlang/;
@@ -1831,4 +1831,24 @@ test("«📌 Qaysi guruhlardan?»: 🌐 Ochiq / 🔒 Yopiq bo'limlari; Pro bo'lm
   // Yopiq guruh umuman yo'q — bo'lim tugmalari yo'q
   assert.ok(!texts(groupStep({ list: [list[0]] })).some((t) => t.includes("Yopiq ·")));
   assert.ok([...CLOSED_PRO_TEXT].length <= 200, "Telegram alert matni 200 belgigacha");
+});
+
+test("band holati (2026-11-19): rejim/viloyat tanlovi va «➕ Guruh qo'shish» ochiq turganda — band; saqlansa, tezkor tanlansa yoki havola yuborilsa — tugaydi", async () => {
+  const { store, press, message, isBusy } = setup({ config: { miniappUrl: MINIAPP } });
+  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
+  assert.equal(isBusy(42), false);
+  await message(PRIVATE, MENU.feed);
+  assert.equal(isBusy(42), true, "rejim oynasi ochiq");
+  await press("fm:hududim");
+  await press("fr:t:samarqand");
+  assert.equal(isBusy(42), true, "viloyat tanlanyapti");
+  await press("fr:ok");
+  assert.equal(isBusy(42), false, "saqlandi");
+  await message(PRIVATE, MENU.feed);
+  await press("fm:tezkor");
+  assert.equal(isBusy(42), false, "darhol saqlanadigan rejim");
+  await message(PRIVATE, MENU.addGroup);
+  assert.equal(isBusy(42), true, "havola kutilyapti");
+  await message(PRIVATE, "@Yangi_guruh");
+  assert.equal(isBusy(42), false, "havola yuborildi");
 });

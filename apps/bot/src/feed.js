@@ -30,7 +30,7 @@ export function modeStep({ profile = null, intro = null } = {}) {
     "",
     "➕ O'z guruhingizni ham qo'shishingiz mumkin — «➕ Guruh qo'shish».",
     "",
-    "Rejimni keyin istalgan payt almashtirasiz.",
+    "Rejimni keyin istalgan payt almashtirasiz. Sozlash paytida e'lonlar to'xtab turadi.",
   ];
   const keyboard = FEED_MODE_CHOICES.map((id) => [{ text: `${current === id ? "✅ " : ""}${modeTitle(id)}`, data: `fm:${id}` }]);
   return { text: lines.join("\n"), keyboard };

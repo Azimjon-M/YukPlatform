@@ -985,3 +985,15 @@ test("sortingOff + «📍 Mening hududimdan»: tanlagan viloyatidan ketadigan va
   assert.deepEqual(raw.filter(([c]) => c === 10).map(([, id]) => id).sort(), [1, 3]);
   assert.equal(raw.filter(([c]) => c === 7).length, 3, "hamma e'lonlar rejimi — hammasi");
 });
+
+test("deps.held: sozlash oynasi ochiq haydovchiga tezkor e'lon yuborilmaydi, boshqalarga — ha", async () => {
+  const { deps, raw, post } = rawSetup();
+  deps.sortingOff = true;
+  deps.pool = noAi;
+  deps.held = (chatId) => chatId === 7;
+  post("@g", 1, LOAD_TEXT);
+  await createWorker(deps, { log: () => {} }).runOnce();
+  const got = raw.map(([c]) => c);
+  assert.ok(!got.includes(7), "band — yo'q");
+  assert.ok(got.includes(1) && got.includes(9));
+});

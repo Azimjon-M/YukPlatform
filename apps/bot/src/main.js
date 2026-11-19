@@ -218,7 +218,7 @@ async function main() {
   };
   // Ishchi pastda yaratiladi, bot esa undan oldin: «navbatga tushdi — darhol ko'r» keyin ulanadi
   let worker = null;
-  const { bot, init, publish, deliver, deliverRaw, canReceive, directDone, commands, notices, sources, group } = createBot({
+  const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, commands, notices, sources, group } = createBot({
     token: config.token,
     store,
     config,
@@ -236,7 +236,7 @@ async function main() {
   // onDirect — yuk beruvchining yuki yuborildi: natijani unga yozadi.
   // deliverRaw — «⚡ Tezkor» / «📌 Mening guruhlarim» rejimidagilarga asl matn, AI'siz (pipeline.js tezkor yo'l)
   worker = createWorker(
-    { pool, store, publish, deliver, deliverRaw, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone, sortingOff: sortingOffOn() },
+    { pool, store, publish, deliver, deliverRaw, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone, sortingOff: sortingOffOn(), held: isBusy },
     { log, maxAgeMs: maxPostAgeMs },
   );
   if (sortingOffOn()) log("⚡ Saralash o'chiq: hamma haydovchiga guruh e'lonlari asl matn bilan, filtrsiz, darhol (FEED_SORTING=1 — saralash qaytadi)");
