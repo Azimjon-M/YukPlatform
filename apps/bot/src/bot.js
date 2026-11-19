@@ -297,6 +297,7 @@ export function postFromMessage(chat, message) {
 // parseLoad(text) — yuk beruvchi chatga yozgan yukni tushunish (main.js: qoidaviy parser, bo'lmasa AI; null — AI band);
 // onLoadQueued() — yuk beruvchining yuki navbatga tushdi (main.js: ishchi darhol uyg'onadi)
 export function createBot({
+  actionHoldMs = 60_000, // har amaldan keyin e'lonlar shu chatga qancha uzilib turadi (testlar 0 beradi)
   token,
   store,
   config,
@@ -390,6 +391,17 @@ export function createBot({
     if (result.ok) return next();
     if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text: "Avval kanal va guruhimizga a'zo bo'ling" }).catch(() => {});
     await sendJoinPrompt(ctx, result.missing);
+  });
+
+  // Har qanday amal ham chatni uzadi (2026-11-19, Azimjon: «botda amal sodir bo'lganida ham … Filtr tugmasini bosganimda
+  // vahokazo btn yoki /... qilinganida»): shaxsiy chatdagi har xabar, tugma yoki buyruq kelishi bilan e'lonlar shu chatga
+  // ACTION_HOLD_MS uziladi va yo'ldagi e'lon yetib borguncha kutiladi — botning javobi doim e'londan keyin chiqadi, javobni
+  // o'qiyotganda e'lon aralashmaydi. Oxirgi amaldan ACTION_HOLD_MS o'tgach o'zi ulanadi. Sozlash oynalari (Filtr, guruhlar…)
+  // o'zi uzoqroq (BUSY_IDLE_MS) ushlaydi; «✅ Tayyor», saqlash, «⏸ Pauza / ▶️ Davom ettirish» — darhol ulaydi (release)
+  const ACTION_HOLD_MS = actionHoldMs;
+  bot.use(async (ctx, next) => {
+    if (ctx.chat?.type === "private" && ctx.from && (ctx.message || ctx.callbackQuery)) await (ACTION_HOLD_MS > 0 ? hold(ctx.chat.id, ACTION_HOLD_MS) : drain(ctx.chat.id));
+    return next();
   });
 
   const isChannel = (chat) =>
@@ -580,7 +592,8 @@ export function createBot({
   const busy = new Map(); // chatId → qachongacha
   // hold — chatni charxpalakdan uzadi va hozir YO'LDA turgan xabar(lar) yetib borishini kutadigan promise qaytaradi:
   // oyna shundan keyin chiqadi, demak undan keyin hech qanday e'lon kelmaydi
-  const hold = (chatId) => (busy.set(chatId, Date.now() + BUSY_IDLE_MS), drain(chatId));
+  // ms — qancha vaqt uzilib turadi (oldingi uzunroq muddat qisqartirilmaydi)
+  const hold = (chatId, ms = BUSY_IDLE_MS) => (busy.set(chatId, Math.max(busy.get(chatId) ?? 0, Date.now() + ms)), drain(chatId));
   const release = (chatId) => busy.delete(chatId);
   function isBusy(chatId) {
     const until = busy.get(chatId);

@@ -16,10 +16,11 @@ const CHANNEL = { id: -1009876543210, type: "channel", title: "Yuk Ekspert", use
 
 // fail(method, payload) → true (403 «bloklagan») yoki Telegram javobi obyekti (masalan 400) — shu so'rov xato bilan qaytadi
 // answer(method, payload) → Telegram javobidagi result (masalan getChatMember uchun { status }) yoki undefined — standart
-function setup({ fail, answer, slow, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued } = {}) {
+function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued } = {}) {
   const store = openStore({ file: ":memory:" });
   const config = { channel: "@Yuk_Ekspert", channelId: CHANNEL.id, admins: [], miniappUrl: null, ...extra };
   const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources } = createBot({
+    actionHoldMs,
     token: `123456:${"x".repeat(35)}`,
     store,
     config,
@@ -1883,6 +1884,24 @@ test("charxpalak: e'lon yo'lda turganda «🎛 Filtr» — oyna e'londan keyin c
   assert.equal(arrived[0], "e'lon");
   assert.match(arrived.at(-1), /Qaysi yuklar kelsin/);
   assert.equal((await deliverRaw(42, { ...post, id: 96 }, { phones: [] })).ok, false);
+});
+
+test("har qanday amal (/start, ❓ Yordam, tugma) chatni 60 s uzadi; «✅ Tayyor» / ▶️ darhol ulaydi; boshqa chat uzilmaydi", async () => {
+  const { store, deliverRaw, message, command, press, isBusy } = setup({ actionHoldMs: 60_000 });
+  for (const id of [42, 43]) store.saveDriver(id, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
+  const post = { id: 97, source: "@TutGruz", link: "https://t.me/TutGruz/9", text: "Toshkentdan Samarqandga 20 t un bor", postedAt: Date.now() };
+  assert.equal(isBusy(42), false);
+  await command("/start");
+  assert.equal(isBusy(42), true);
+  assert.equal((await deliverRaw(42, post, { phones: [] })).ok, false, "/start dan keyin uzildi");
+  assert.equal((await deliverRaw(43, { ...post, id: 98 }, { phones: [] })).ok, true, "boshqa haydovchiga ketaveradi");
+  await message(PRIVATE, MENU.help);
+  assert.equal(isBusy(42), true);
+  await message(PRIVATE, MENU.feed);
+  await press("fm:done");
+  assert.equal(isBusy(42), false, "«✅ Tayyor» — darhol ulanadi");
+  await press("fm:tezkor");
+  assert.equal(isBusy(42), true, "tugma bosildi — yana uzildi");
 });
 
 test("«💬 Lichkasi» tugmasi: username'i yo'q, bot taniydigan odamga — ID bo'yicha; begonaga va username bo'lsa — tugma yo'q", async () => {
