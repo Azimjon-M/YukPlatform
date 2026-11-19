@@ -386,6 +386,11 @@ test("Mini App API /pub/me/tg-accounts: har kim faqat o'zinikini ko'radi, admin 
     assert.deepEqual((await call("GET", "/pub/me/tg-accounts", me)).body.accounts.map((a) => a.name), ["ufk-1"]);
     // Admin yo'li oddiy foydalanuvchiga hamon yopiq
     assert.equal((await call("GET", "/pub/admin/tg-accounts", me)).status, 403);
+    // «🔗 Havola orqali»: 1 soatlik token — o'sha odamning o'zi bo'lib kiradi
+    const link = await call("POST", "/pub/me/tg-accounts/desktop-link", me);
+    assert.deepEqual([link.status, link.body.ttl], [200, 3600]);
+    assert.equal((await call("GET", "/pub/me/tg-accounts", link.body.token)).status, 200);
+    assert.equal((await fetch(`${base}/pub/me/tg-accounts/desktop-link`, { method: "POST" })).status, 401);
   } finally {
     server.close();
   }

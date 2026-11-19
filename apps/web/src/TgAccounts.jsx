@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { ADMIN_TG, MY_TG } from "./api.js";
-import { confirmAction, haptic } from "./telegram.js";
+import { confirmAction, haptic, inTelegram, openLink } from "./telegram.js";
 import { Notice, Spinner } from "./ui.jsx";
 import { ACTIVE_STEPS, accountError, accountLabel, accountStatus, accountWho, codeWhere, scanText, suggestAccountName } from "./tgAccounts.js";
 
@@ -87,7 +87,63 @@ function AccountRow({ account, mine, onRelogin }) {
 }
 
 // Yangi kirish: nom + raqam
-function StartForm({ initial, mine, busy, error, onSubmit, onQr, onCancel }) {
+// «🔗 Havola orqali»: shu sahifani kompyuterda (yoki boshqa telefonda) ochadigan havola — QR o'sha ekranda chiqadi,
+// akkaunt ochiq telefon uni skanerlaydi. Havola 1 soat amal qiladi va hisobingizga kiradi — hech kimga berilmaydi
+function DesktopLink({ getLink }) {
+  const [state, setState] = useState(null); // null | "busy" | { url } | { error }
+  const [copied, setCopied] = useState(false);
+  const make = async () => {
+    setState("busy");
+    try {
+      const { token } = await getLink();
+      setState({ url: `${window.location.origin}/?v=akkaunt&t=${encodeURIComponent(token)}` });
+    } catch (e) {
+      setState({ error: e.message });
+    }
+  };
+  const copy = async (url) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      haptic.success();
+    } catch {
+      setCopied(false);
+    }
+  };
+  if (!state || state === "busy" || state.error) {
+    return (
+      <>
+        <button type="button" className="secondary tg-link-start" disabled={state === "busy"} onClick={make}>
+          {state === "busy" ? "Tayyorlanyapti…" : "🔗 Havola orqali (kompyuterda ochish)"}
+        </button>
+        <p className="hint tg-under">Telefoningiz bitta bo'lsa: havolani kompyuterda oching — QR o'sha yerda chiqadi, telefon bilan skanerlaysiz.</p>
+        {state?.error && <p className="error">{state.error}</p>}
+      </>
+    );
+  }
+  const share = `https://t.me/share/url?url=${encodeURIComponent(state.url)}&text=${encodeURIComponent("Kompyuterda oching — Telegram akkaunt ulash")}`;
+  return (
+    <div className="tg-link">
+      <p className="hint">1. Havolani o'zingizga yuboring yoki nusxa oling:</p>
+      <p className="tg-link-url">{state.url}</p>
+      <div className="account-actions tg-actions">
+        <button type="button" className="secondary" onClick={() => copy(state.url)}>
+          {copied ? "✅ Nusxa olindi" : "📋 Nusxa olish"}
+        </button>
+        {inTelegram && (
+          <a className="secondary button-link" href={share} onClick={(e) => openLink(share, e)}>
+            📤 «Saqlangan xabarlar»ga
+          </a>
+        )}
+      </div>
+      <p className="hint">2. Kompyuterda (Telegram Desktop yoki brauzer) havolani oching va u yerda «📷 QR orqali» ni bosing.</p>
+      <p className="hint">3. Akkaunt ochiq telefonda: Telegram → Sozlamalar → Qurilmalar → «Qurilma ulash» — QR'ni skanerlang.</p>
+      <p className="hint">🔒 Havola 1 soat ishlaydi va hisobingizga kiradi — uni hech kimga bermang.</p>
+    </div>
+  );
+}
+
+function StartForm({ initial, mine, busy, error, onSubmit, onQr, onDesktopLink, onCancel }) {
   const [name, setName] = useState(initial.name);
   const [phone, setPhone] = useState("");
   return (
@@ -115,6 +171,12 @@ function StartForm({ initial, mine, busy, error, onSubmit, onQr, onCancel }) {
         📷 QR orqali (kodsiz)
       </button>
       <p className="hint tg-under">Kod kutish shart emas: QR'ni akkaunt ochiq turgan telefon skanerlaydi — bu sahifa boshqa qurilmada (masalan, kompyuterda) ochiq bo'lishi kerak.</p>
+      {mine && onDesktopLink && (
+        <>
+          <p className="hint tg-or">yoki havola bilan:</p>
+          <DesktopLink getLink={onDesktopLink} />
+        </>
+      )}
       <p className="hint tg-or">yoki raqam va kod bilan:</p>
       <label className="field">
         <span>Raqami</span>
@@ -325,6 +387,7 @@ export function TgAccounts({ onAuthLost, mine = false }) {
         error={error}
         onSubmit={(name, phone) => act(() => api.start(name || null, phone), { closeForm: true })}
         onQr={(name) => act(() => api.startQr(name || null), { closeForm: true })}
+        onDesktopLink={mine ? () => api.desktopLink() : null}
         onCancel={() => {
           setForm(null);
           setError(null);
@@ -381,7 +444,7 @@ export function TgAccounts({ onAuthLost, mine = false }) {
     );
   } else if (!data.unavailable) {
     panel = (
-      <button type="button" className="more" onClick={() => openForm()}>
+      <button type="button" className={mine ? "primary tg-add" : "more"} onClick={() => openForm()}>
         ➕ Akkaunt qo'shish
       </button>
     );

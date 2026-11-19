@@ -457,14 +457,13 @@ export function App() {
         {role === "haydovchi" && !registering && roleLine}
         {/* Telegram akkauntini collector'ga ulash — istalgan foydalanuvchi, faqat o'zinikilari (Azimjon, 2026-11-13:
             «adminlik bermasdan shunchaki sozlamalar ichiga qo'shib ber») */}
+        {/* Alohida karta (2026-11-19, Azimjon: «Telefon Raqam sectionidan uzib alohida qil» — sarlavha kulrang yozuv edi) */}
         {online && !registering && (
-          <>
-            <h2 className="group-title" id="tg-akkauntlar" ref={scrollToTgAccounts}>
-              📡 Telegram akkauntlarim
-            </h2>
-            <p className="hint">Yopiq yuk guruhlariga a'zo alohida Telegram akkauntingizni ulang — o'sha guruhlardagi e'lonlar ham o'qiladi.</p>
+          <section className="section tg-section" id="tg-akkauntlar" ref={scrollToTgAccounts}>
+            <h2>📡 Telegram akkaunt ulash</h2>
+            <p className="hint">Yopiq yuk guruhlariga a'zo alohida Telegram akkauntingizni ulang — o'sha guruhlardagi e'lonlar ham sizga keladi. Raqamingiz ulashilgan bo'lsa — avtomatik Pro.</p>
             <TgAccounts mine onAuthLost={onAuthLost} />
-          </>
+          </section>
         )}
         {online && !registering && <AccountCard me={me} onSignedOut={onSignedOut} onDeleted={onDeleted} />}
       </>

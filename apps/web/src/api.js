@@ -219,6 +219,8 @@ export function tgAccountsApi(base) {
     resend: (id) => request("POST", `${login(id)}/resend`),
     password: (id, password) => request("POST", `${login(id)}/password`, { body: { password } }),
     cancel: (id) => request("DELETE", login(id)),
+    // faqat /pub/me: shu sahifani boshqa qurilmada ochish uchun 1 soatlik token → { token, ttl }
+    desktopLink: () => request("POST", `${base}/desktop-link`),
   };
 }
 export const ADMIN_TG = tgAccountsApi("/pub/admin/tg-accounts");

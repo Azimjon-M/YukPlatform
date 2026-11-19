@@ -766,6 +766,13 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   pub.delete("/me/tg-accounts/login/:id", (req, res) => {
     res.json({ ok: needLogin().cancel(req.params.id, mine(req)) });
   });
+  // «🔗 Havola orqali» (2026-11-19, Azimjon): telefon bitta — QR'ni o'zi skanerlay olmaydi. Shu sahifani kompyuterda ochadigan
+  // 1 soatlik kirish tokeni; manzilni ilova o'zi yasaydi (location.origin + ?v=akkaunt&t=…). Telegram'ning tg://login havolasi
+  // emas — uni Telegram havoladan qabul qilmaydi (2026-11-14 sinalgan), shuning uchun QR o'sha kompyuterda chiqadi
+  pub.post("/me/tg-accounts/desktop-link", (req, res) => {
+    const ttl = 60 * 60;
+    res.json({ token: sessions.issue(mine(req), { ttl }), ttl });
+  });
 
   pub.use("/admin", admin);
 

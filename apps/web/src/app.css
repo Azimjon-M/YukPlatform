@@ -1463,3 +1463,51 @@ circle.truck-near {
 .section .search {
   margin-bottom: 10px;
 }
+
+/* Sozlamalar: «📡 Telegram akkaunt ulash» — alohida karta (2026-11-19). Ichidagi kirish qadamlari ham .section —
+   karta ichida karta bo'lmasin: ular tekis ko'rinadi */
+.tg-section .section {
+  margin: 12px 0 0;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+.tg-section .users {
+  margin: 0 0 10px;
+}
+
+.tg-add {
+  display: block;
+  width: 100%;
+}
+
+.tg-link-start {
+  display: block;
+  width: 100%;
+}
+
+.tg-link {
+  margin: 4px 0 0;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+}
+
+.tg-link-url {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
