@@ -1799,7 +1799,9 @@ export function createBot({
   // e'lonlar bir zumda ketsa Telegram 429 «retry after 527» bilan chatni ~9 daqiqaga yopib qo'ydi (haydovchi hech narsa
   // olmaydi). Endi: bir chatga xabarlar orasida kamida RAW_CHAT_GAP_MS; 429 bo'lsa — Telegram aytgan vaqtgacha bu chatga
   // urinilmaydi (har urinish blokni uzaytirishi mumkin), o'sha paytdagi e'lonlar o'tkazib yuboriladi (eskirgan bo'ladi)
-  const RAW_CHAT_GAP_MS = 1_100;
+  // 2026-11-19: 1,1 s yetmadi — 3 chatga har ~5 daqiqada 429 tushib, Telegram jazoni 6–18 soatga oshirdi (retry after 21585…64913).
+  // 3 s (daqiqasiga ~20 ta) — zaxira bilan; .env RAW_CHAT_GAP_MS bilan o'zgartiriladi. Navbatda 5 daqiqadan eskisi tashlanadi
+  const RAW_CHAT_GAP_MS = Math.max(1_000, Number(process.env.RAW_CHAT_GAP_MS) || 3_000);
   const rawLastAt = new Map(); // chatId → oxirgi yuborilgan vaqt
   const rawBlockedUntil = new Map(); // chatId → 429 tugaydigan vaqt
   async function deliverRaw(chatId, rawPost, opts = {}) {
