@@ -28,28 +28,25 @@ const modeTitle = (id) => `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`;
 export function modeStep({ profile = null, intro = null } = {}) {
   const feed = feedOf(profile);
   const mode = choiceMode(feed.mode);
+  const mine = FEED_MODES[mode].groups;
+  // 2026-11-19 (soddalashtirish): qisqa matn — nima tanlangani va bitta ko'rsatma; tushuntirishlar ro'yxat ichida
   const lines = [
     ...(intro ? [intro, ""] : []),
-    "🎛 <b>Qaysi e'lonlar kelsin?</b>",
+    "🎛 <b>Qaysi yuklar kelsin?</b>",
+    "Tugmani bosib tanlang. Tanlamasangiz — hammasi keladi.",
     "",
-    "Yuk e'lonlari darhol, asl matni bilan keladi. Quruq gap (reklama, guruh botlarining xabarlari, salom-alik) — o'zi tashlanadi.",
-    "",
-    "Filtr qo'ymasangiz — hammasi keladi:",
-    `🚚 Transport: <b>${trucksText(feed.trucks)}</b>`,
+    `🚚 Mashina: <b>${trucksText(feed.trucks)}</b>`,
     `📍 Qayerdan: <b>${regionsText(feed.regions)}</b>`,
-    `📌 Guruhlar: <b>${FEED_MODES[mode].groups ? `tanlangan ${feed.sources.length} ta guruh` : "Hamma guruhlar"}</b>`,
-    "",
-    "Transport turi yoki joyi yozilmagan e'lon — har qanday filtrda keladi (yuk o'tkazib yuborilmasin).",
-    "➕ O'z guruhingizni qo'shish — «➕ Guruh qo'shish». Sozlash paytida e'lonlar to'xtab turadi.",
+    `📌 Guruhlar: <b>${mine ? `tanlangan ${feed.sources.length} ta` : "Hamma guruhlar"}</b>`,
   ];
   const short = (text) => (text.length > 28 ? `${text.slice(0, 27)}…` : text);
   const keyboard = [
-    [{ text: `🚚 Transport: ${short(trucksText(feed.trucks))}`, data: "ft:open" }],
+    [{ text: `🚚 Mashina: ${short(trucksText(feed.trucks))}`, data: "ft:open" }],
     [{ text: `📍 Qayerdan: ${short(regionsText(feed.regions).replace(/ viloyati/g, ""))}`, data: "fm:hududim" }],
     // Manba — ikki tugmali tanlov (✅ — hozirgisi). «📌» doim ro'yxatni ochadi (tanlovni o'zgartirish uchun)
     [
-      { text: `${FEED_MODES[mode].groups ? "" : "✅ "}🌐 Hamma guruhlar`, data: "fm:tezkor" },
-      { text: `${FEED_MODES[mode].groups ? `✅ 📌 Tanlangan: ${feed.sources.length} ta` : "📌 Guruh tanlash"}`, data: "fm:guruhlarim" },
+      { text: `${mine ? "" : "✅ "}🌐 Hamma guruhlar`, data: "fm:tezkor" },
+      { text: mine ? `✅ 📌 Tanlangan: ${feed.sources.length} ta` : "📌 Guruh tanlash", data: "fm:guruhlarim" },
     ],
     [{ text: "✅ Tayyor", data: "fm:done" }],
   ];
@@ -76,17 +73,13 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", ki
   const pages = Math.max(1, Math.ceil(part.length / GROUPS_PAGE));
   const p = Math.min(Math.max(0, Math.floor(page) || 0), pages - 1);
   const shown = part.slice(p * GROUPS_PAGE, (p + 1) * GROUPS_PAGE);
-  const rest = mode === "guruhlarim_plus" ? "Qolgan guruhlardan esa — mashinangiz va yo'nalishingizga moslari." : "Boshqa guruhlardan hech narsa kelmaydi.";
+  const rest = mode === "guruhlarim_plus" ? "Qolgan guruhlardan — mashinangizga moslari." : "Faqat shulardan yuk keladi.";
   const lines = [
-    `${modeTitle(mode)}`,
+    "📌 <b>Qaysi guruhlardan?</b>",
+    `Guruhni bosing — ✅ belgi qo'yiladi. ${rest}`,
     "",
-    "📌 <b>Qaysi guruh va kanallardan?</b>",
-    `Tanlaganlaringizdagi har bir yuk e'loni darhol, asl matni bilan keladi. ${rest}`,
-    "",
-    list.length
-      ? `Tanlandi: <b>${keys.size}</b> ta. Raqam — kuniga nechta e'lon.`
-      : "Ro'yxat hozircha bo'sh.",
-    "Kerakli guruh ro'yxatda yo'q bo'lsa — «➕ Guruh qo'shish» bilan qo'shing: tekshiruvdan o'tsa, shu yerda chiqadi.",
+    list.length ? `Tanlandi: <b>${keys.size}</b> ta. Raqam — kuniga nechta e'lon.` : "Ro'yxat hozircha bo'sh.",
+    "Kerakli guruh yo'qmi? — «➕ Guruh qo'shish».",
   ];
   if (tab === "closed") lines.push("", pro ? "🔒 <b>Yopiq guruhlar</b> — Pro foydalanuvchi sifatida ulardagi e'lonlar ham sizga keladi." : CLOSED_PRO_TEXT);
   const count = (items) => items.filter((s) => keys.has(sourceKey(s.name))).length;
@@ -112,39 +105,39 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", ki
     ]);
   }
   // Bitta chiqish — doim saqlaydi: guruh tanlangan bo'lsa — «📌 Tanlangan guruhlar», hech biri — «🌐 Hamma guruhlar»
-  keyboard.push([{ text: "✅ Saqlash va orqaga", data: "fg:ok" }]);
+  keyboard.push([{ text: "💾 Saqlash", data: "fg:ok" }]);
   return { text: lines.join("\n"), keyboard, page: p };
 }
 
 // «📍 Qayerdan?»: viloyatlar ro'yxati (✅ belgilangan), 2 ustunda. chosen — viloyat kodlari; bo'sh — hamma joydan
 export function regionStep({ chosen = [] } = {}) {
   const lines = [
-    "📍 <b>Qaysi viloyat(lar)dan ketadigan e'lonlar kelsin?</b>",
-    "Bir nechtasini belgilash mumkin. Hech birini belgilamasangiz — hamma joydan. E'londa joy aniqlanmasa ham — baribir keladi.",
-    "",
-    `Tanlandi: <b>${chosen.length ? `${chosen.length} ta` : "hamma joy"}</b>`,
+    "📍 <b>Yuk qayerdan ketsin?</b>",
+    "Viloyatni bosing — ✅ belgi qo'yiladi. Bir nechta bo'lishi mumkin.",
+    "Joyi yozilmagan yuk ham keladi.",
   ];
-  const buttons = REGIONS.map((r) => ({ text: `${chosen.includes(r.id) ? "✅" : "▫️"} ${regionTitle(r.id).replace(" viloyati", " vil.")}`, data: `fr:t:${r.id}` }));
+  // Tugmada qisqa nom (uzun nom telefonda kesilib qolardi)
+  const short = (id) => ({ qoraqalpogiston: "Qoraqalpog'iston", xorij: "Chet el" })[id] ?? regionTitle(id).replace(" viloyati", " vil.");
+  const buttons = REGIONS.map((r) => ({ text: `${chosen.includes(r.id) ? "✅" : "▫️"} ${short(r.id)}`, data: `fr:t:${r.id}` }));
   const keyboard = [];
   for (let i = 0; i < buttons.length; i += 2) keyboard.push(buttons.slice(i, i + 2));
-  keyboard.push([{ text: `${chosen.length ? "▫️" : "✅"} Hamma joy (filtrsiz)`, data: "fr:all" }]);
+  keyboard.push([{ text: `${chosen.length ? "▫️" : "✅"} Hamma joydan`, data: "fr:all" }]);
   // Bitta chiqish tugmasi — doim saqlaydi (2026-11-19: «⬅️ Orqaga» saqlamasdi, haydovchi tanlovi yo'qoldi deb o'yladi)
-  keyboard.push([{ text: "✅ Saqlash va orqaga", data: "fr:ok" }]);
+  keyboard.push([{ text: "💾 Saqlash", data: "fr:ok" }]);
   return { text: lines.join("\n"), keyboard };
 }
 
 // «🚚 Qaysi transport?»: to'rt tur (✅ belgilangan). chosen — TRUCK_FILTERS kodlari; bo'sh — hammasi
 export function truckStep({ chosen = [] } = {}) {
   const lines = [
-    "🚚 <b>Qaysi transport uchun e'lonlar kelsin?</b>",
-    "Bir nechtasini belgilash mumkin. Hech birini belgilamasangiz — hammasi. E'londa mashina turi yozilmagan bo'lsa ham — baribir keladi.",
-    "",
-    `Tanlandi: <b>${trucksText(chosen)}</b>`,
+    "🚚 <b>Mashinangiz qaysi?</b>",
+    "Bosing — ✅ belgi qo'yiladi. Bir nechta bo'lishi mumkin.",
+    "Mashinasi yozilmagan yuk ham keladi.",
   ];
   const keyboard = TRUCK_FILTERS.map((t) => [{ text: `${chosen.includes(t.id) ? "✅" : "▫️"} ${t.icon} ${t.name}`, data: `ft:t:${t.id}` }]);
-  keyboard.push([{ text: `${chosen.length ? "▫️" : "✅"} Hammasi (filtrsiz)`, data: "ft:all" }]);
+  keyboard.push([{ text: `${chosen.length ? "▫️" : "✅"} Hamma mashinalar`, data: "ft:all" }]);
   // Bitta chiqish tugmasi — doim saqlaydi (2026-11-19: «⬅️ Orqaga» saqlamasdi, haydovchi tanlovi yo'qoldi deb o'yladi)
-  keyboard.push([{ text: "✅ Saqlash va orqaga", data: "ft:ok" }]);
+  keyboard.push([{ text: "💾 Saqlash", data: "ft:ok" }]);
   return { text: lines.join("\n"), keyboard };
 }
 
@@ -159,22 +152,20 @@ export function toggleSource(chosen, name) {
 // Saqlangach yoziladigan matn: nima keladi
 export function feedSavedText(feed, { needsVehicle = false } = {}) {
   const f = feedOf({ feed });
+  // 2026-11-19 (soddalashtirish): «✅ Tayyor!» + nima tanlangani + ikki tugma nomi
+  const mine = f.mode === "guruhlarim" || f.mode === "guruhlarim_plus";
+  const filters = [
+    `🚚 Mashina: <b>${trucksText(f.trucks)}</b>`,
+    `📍 Qayerdan: <b>${regionsText(f.regions)}</b>`,
+    `📌 Guruhlar: <b>${mine ? `tanlangan ${f.sources.length} ta` : "Hamma guruhlar"}</b>`,
+  ].join("\n");
+  if (f.mode === "tezkor" || f.mode === "guruhlarim") {
+    return `✅ <b>Tayyor!</b> Yuk e'lonlari shu yerga keladi.\n\n${filters}\n\nKamroq kerak bo'lsa — «🎛 Filtr».\nTo'xtatish — «⏸ Pauza».`;
+  }
   const head = `✅ Rejim: <b>${modeTitle(f.mode)}</b>`;
-  const filters = `🚚 Transport: <b>${trucksText(f.trucks)}</b>\n📍 Qayerdan: <b>${regionsText(f.regions)}</b>`;
-  const change = "O'zgartirish — «🎛 Rejim».";
-  if (f.mode === "tezkor") {
-    const many = !f.trucks.length && !f.regions.length ? " Kunduzi daqiqasiga o'nlab xabar bo'lishi mumkin — kamroq kerak bo'lsa, transport yoki viloyat tanlang; to'xtatish — «⏸ Pauza»." : "";
-    return `${head}\n${filters}\n\nHamma guruhlardagi yuk e'lonlari asl matni bilan darhol shu yerga keladi, quruq gap tashlanadi.${many}\n\n${change} ➕ O'z guruhingizni qo'shish — «➕ Guruh qo'shish».`;
+  if (f.mode === "guruhlarim_plus") {
+    const sorted = needsVehicle ? "Boshqa guruhlardan mos yuklar uchun mashinangizni kiriting — pastdagi «🚚 Ro'yxatdan o'tish»." : "Boshqa guruhlardan — mashinangiz va yo'nalishingizga moslari.";
+    return `${head}\n\nTanlagan ${f.sources.length} ta guruhingizdagi yuk e'lonlari darhol keladi.\n${sorted}`;
   }
-  if (f.mode === "guruhlarim" || f.mode === "guruhlarim_plus") {
-    const groups = `Tanlagan ${f.sources.length} ta guruhingizdagi yuk e'lonlari asl matni bilan darhol shu yerga keladi.`;
-    if (f.mode === "guruhlarim") return `${head}\n${filters}\n\n${groups}\n\n${change}`;
-    const sorted = needsVehicle
-      ? "Boshqa guruhlardan mos yuklar uchun mashinangizni kiriting — pastdagi «🚚 Ro'yxatdan o'tish»."
-      : "Boshqa guruhlardan — mashinangiz va yo'nalishingizga moslari.";
-    return `${head}\n\n${groups}\n${sorted}`;
-  }
-  return needsVehicle
-    ? `${head}\n\nMos yuklarni topish uchun mashinangizni kiriting.`
-    : `${head}\n\nMashinangiz va yo'nalishingizga mos yuklar keladi.`;
+  return needsVehicle ? `${head}\n\nMos yuklarni topish uchun mashinangizni kiriting.` : `${head}\n\nMashinangiz va yo'nalishingizga mos yuklar keladi.`;
 }

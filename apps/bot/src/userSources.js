@@ -13,7 +13,7 @@ import { MENU } from "./menu.js";
 
 // «➕ Guruh qo'shish» nima — hamma joyda shu bitta jumla (Azimjon matni, 2026-11-10): /start va /yordam dagi menyu
 // ro'yxati, raqam so'rash, «Guruh qo'shish» bosilgandagi xabar, raqamsiz bosganda
-export const ADD_GROUP_ABOUT = "siz yuk guruhi yoki kanali qo'sha olasiz va ulardagi mos e'lonlar ham shu yerga keladi.";
+export const ADD_GROUP_ABOUT = "o'z yuk guruhingiz yoki kanalingizni qo'shing — undagi e'lonlar ham shu yerga keladi.";
 export const ADD_GROUP_TEXT = `${MENU.addGroup} — ${ADD_GROUP_ABOUT}`;
 
 const MINUTE = 60_000;
@@ -87,15 +87,12 @@ export function intakeText(sources = [], { trialStats = () => null, rules = SOUR
   const lines = [
     `<b>${MENU.addGroup}</b> — ${ADD_GROUP_ABOUT}`,
     "",
-    "Yuk e'lonlari chiqadigan <b>ochiq</b> Telegram guruh yoki kanal havolasini shu yerga yuboring, masalan:",
+    // 2026-11-19 (soddalashtirish): bitta harakat + qisqa tekshiruv qoidasi
+    "👇 Guruh yoki kanal havolasini shu yerga yuboring, masalan:",
     "https://t.me/guruh_nomi yoki @guruh_nomi",
     "",
-    "🔒 <b>Yopiq guruh</b> ham qo'shiladi — agar unga a'zo Telegram akkauntingizni ulagan bo'lsangiz (/account_qosh): guruhning taklif havolasini (https://t.me/+…) yoki undagi istalgan xabar havolasini yuboring.",
-    "",
-    "<b>Qanday tekshiramiz:</b>",
-    "1. Darhol — oxirgi 50 ta xabarini ko'ramiz: yuk e'lonlari bo'lmasa, qo'shilmaydi.",
-    `2. Keyin ${Math.round(rules.trialMs / HOUR)} soat sinov: kamida ${rules.minLoads} ta yuk e'loni chiqsa — doimiy qo'shiladi, chiqmasa — o'chiriladi.`,
-    "🔒 Yopiq guruh: oxirgi 100 ta xabari ko'riladi (gap-so'z orasidagi e'lonlar ham hisobga olinadi). Yuk guruhi bo'lsa — sinovsiz, darhol qo'shiladi va o'chirilmaydi (faqat akkauntingiz uni o'qiy olishi kerak).",
+    `Tekshiramiz: ${Math.round(rules.trialMs / HOUR)} soatda kamida ${rules.minLoads} ta yuk e'loni chiqsa — qo'shiladi.`,
+    "🔒 Yopiq guruh: avval unga a'zo akkauntingizni ulang (/account_qosh), keyin taklif havolasini (https://t.me/+…) yuboring.",
   ];
   if (sources.length) {
     lines.push("", "<b>Siz qo'shgan guruhlar:</b>");
@@ -108,8 +105,8 @@ export function intakeText(sources = [], { trialStats = () => null, rules = SOUR
 export const INTAKE = {
   // Raqam ulashilgach bot o'zi guruh qo'shishga qaytadi (bot.js groupIntents); havola yuborgan bo'lsa — o'shani tekshiradi
   needPhone: (withLink = false) =>
-    `${ADD_GROUP_TEXT}\n\nBu imkoniyat — raqamini ulashganlar uchun. Pastdagi «${MENU.phone}» tugmasini bosing — ` +
-    (withLink ? "yuborgan havolangizni shundan keyin darhol tekshiramiz." : "keyin guruh havolasini yuborasiz."),
+    `${ADD_GROUP_TEXT}\n\nAvval raqamingizni ulashing — pastdagi «${MENU.phone}» tugmasini bosing 👇\n` +
+    (withLink ? "Havolangizni shundan keyin darhol tekshiramiz." : "Keyin guruh havolasini yuborasiz."),
   private:
     "🔒 Bu yopiq guruh havolasi. Yopiq guruhni qo'shish uchun avval shu guruhga a'zo Telegram akkauntingizni ulang: /account_qosh — keyin havolani qayta yuboring.",
   notMember:

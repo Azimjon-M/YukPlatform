@@ -55,7 +55,7 @@ function setup({ fail, answer, config: extra = {}, appUrl, linkToken, callLink, 
   return { store, calls, send, message, command, press, webAppData, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources };
 }
 
-const ROLE_QUESTION = /^Iltimos, rolingizni tanlang/;
+const ROLE_QUESTION = /^Iltimos, tanlang/;
 
 const texts = (calls, method = "sendMessage") => calls.filter((c) => c.method === method).map((c) => c.payload.text);
 
@@ -65,7 +65,7 @@ test("/start: avval «Iltimos, rolingizni tanlang», keyin haydovchiga birinchi 
   const { store, calls, command, press } = setup();
   await command("/start");
   const sent = calls.filter((c) => c.method === "sendMessage");
-  assert.match(sent[0].payload.text, /Yuk Eksperti[\s\S]*Yuk beruvchilarga[\s\S]*Haydovchilarga/);
+  assert.match(sent[0].payload.text, /Yuk Eksperti[\s\S]*@YukExperti/);
   assert.match(sent[1].payload.text, ROLE_QUESTION);
   assert.deepEqual(inlineButtons(sent[1]).map((b) => b.callback_data), ["r:haydovchi", "r:yuk_beruvchi"]);
   assert.equal(store.getDriver(42).role, null);
@@ -75,10 +75,10 @@ test("/start: avval «Iltimos, rolingizni tanlang», keyin haydovchiga birinchi 
   assert.deepEqual(menuCalls(), []);
 
   await press("r:haydovchi");
-  assert.equal(texts(calls, "editMessageText").at(-1), "🚚 Haydovchiman — yuk qidiraman ✅", "belgi oxirida");
+  assert.equal(texts(calls, "editMessageText").at(-1), "🚚 Men haydovchiman — yuk kerak ✅", "belgi oxirida");
   assert.equal(store.getDriver(42).role, "haydovchi");
   // Rol tanlangach (2026-11-19: saralash olib tashlandi) — rejim so'ralmaydi, darhol ⚡ Tezkor, mashinasiz
-  assert.ok(texts(calls).some((t) => /✅ Rejim: <b>🌐 Hamma guruhlar<\/b>[\s\S]*transport yoki viloyat[\s\S]*Guruh qo'shish/.test(t)));
+  assert.ok(texts(calls).some((t) => /✅ <b>Tayyor!<\/b>[\s\S]*Hamma guruhlar[\s\S]*🎛 Filtr/.test(t)));
   assert.deepEqual(store.getDriver(42).profile.feed, { mode: "tezkor", sources: [] });
   assert.equal(store.getDriver(42).profile.vehicle, null);
   assert.equal(store.getDriver(42).active, true);
@@ -108,10 +108,10 @@ test("tugmalar bilan to'liq ro'yxatdan o'tish (eski saralangan oqimi) va /pauza"
   assert.equal(driver.profile.routeAt, null);
   // Tartib (Azimjon, 2026-11-10): «Saqlandi» → raqam (ixtiyoriy, bir marta) → javobdan keyin «Qayerdan?»
   assert.equal(texts(calls).at(-2), "✅ Saqlandi.", "sozlamalar ro'yxatisiz — raqam savoli ekrandan chiqib ketmasin");
-  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\n\nRaqamingizni ulashsangiz:\n✅ Botni o'chirib qayta yoqsangiz/);
+  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\n✅ Sizni doim taniymiz/);
   assert.deepEqual(lastMarkup(calls).keyboard.flat().map((b) => b.text), [PHONE.share, PHONE.later]);
   await message(PRIVATE, PHONE.later);
-  assert.match(texts(calls).at(-2), /Mayli[\s\S]*«📱 Raqam ulashish» tugmasi[\s\S]*Endi qayerdan qayerga/);
+  assert.match(texts(calls).at(-2), /Mayli[\s\S]*«📱 Raqam ulashish»[\s\S]*Endi qayerdan qayerga/);
   assert.equal(buttons(calls.filter((c) => c.method === "sendMessage").at(-2).payload.reply_markup)[0].text, MENU.loads, "menyu qaytdi");
   assert.match(texts(calls).at(-1), /Qayerdan yuk olasiz/);
   // «Hamma joydan» endi ko'rsatilmaydi, lekin chatda qolgan eski tugmasi ishlayveradi
@@ -128,7 +128,7 @@ test("tugmalar bilan to'liq ro'yxatdan o'tish (eski saralangan oqimi) va /pauza"
   await command("/davom");
   assert.equal(store.getDriver(42).active, true);
   await message(PRIVATE, "salom");
-  assert.match(texts(calls).at(-1), /menyudan tanlang/);
+  assert.match(texts(calls).at(-1), /tugmalardan birini bosing/);
 });
 
 test("sig'imni matn bilan yozish, noto'g'ri bo'lsa qayta so'raydi", async () => {
@@ -295,8 +295,7 @@ test("pastki menyu: rol tanlanmaguncha yo'q, rol tanlangach Mini App tugmasi, sa
   calls.length = 0;
   await press("r:haydovchi");
   // 2026-11-19: rejim so'ralmaydi — darhol ⚡ Tezkor (keyin raqam savoli)
-  assert.match(texts(calls)[0], /^🚚 Haydovchisiz\./);
-  assert.match(texts(calls)[1], /✅ Rejim: <b>🌐 Hamma guruhlar<\/b>/);
+  assert.match(texts(calls)[0], /^✅ <b>Tayyor!<\/b>/, "alohida «Haydovchisiz» xabari yo'q");
   // Eski (profilsiz) saralangan oqimi — ichkarida qoldi
   store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
   calls.length = 0;
@@ -347,7 +346,7 @@ test("pastki menyudagi «🔄 Rolni almashtirish» — /rol bilan bir xil: hozir
   const roleMsg = calls.filter((c) => c.method === "sendMessage").at(-1);
   assert.deepEqual(inlineButtons(roleMsg).map((b) => b.callback_data), ["r:haydovchi", "r:yuk_beruvchi"]);
   assert.ok(!roleMsg.payload.reply_markup?.remove_keyboard, "rol so'rovi pastki menyuni o'chirmaydi");
-  assert.match(roleMsg.payload.text, /Hozir siz: <b>🚚 Haydovchi[\s\S]*alohida saqlanadi/);
+  assert.match(roleMsg.payload.text, /Hozir siz: <b>🚚 Haydovchi[\s\S]*yo'qolmaydi/);
   await press("r:yuk_beruvchi");
   assert.equal(store.getDriver(42).role, "yuk_beruvchi");
   const rows = () => lastMarkup(calls).keyboard.map((row) => row.map((b) => b.text));
@@ -725,10 +724,9 @@ test("yuk beruvchi: rol → «Yuk berish»; ro'yxat shart emas — «🚚 Bo'sh 
   // Azimjon, 2026-11-12 (yangi): «bot chatiga yuk haqida ma'lumotni yozib tushsam ham bo'lishligini 1-o'rinda va bold
   // qilib yozib ber» — loadIntro endi «yozib yuboring» (bold) ni formadan OLDIN qo'yadi (tartib index bilan tekshiriladi)
   const introMsg = texts(calls).at(-1);
-  assert.match(introMsg, /^📦 Yuk beruvchisiz\.[\s\S]*<b>Shu chatga yuk haqida ma'lumotni yozib yuboring<\/b> — masalan:\n<b>Andijondan Toshkentga[\s\S]*\n«⚙️ Sozlamalar» — ixtiyoriy: yo'nalish va mashina tanlasangiz/);
-  // Bu stendda miniapp yo'q (form=false) — forma qatori va raqamlash umuman bo'lmasligi kerak
-  assert.ok(!introMsg.includes("forma (1 daqiqa)"), "web forma manzili yo'q — 2️⃣ qatori yo'q");
-  assert.ok(!introMsg.includes("1️⃣") && !introMsg.includes("2️⃣"), "forma bo'lmasa raqam ham yo'q");
+  assert.match(introMsg, /^📦 <b>Yukingizni shu chatga yozib yuboring<\/b>[\s\S]*Masalan:\n<b>Andijondan Toshkentga/);
+  // Bu stendda miniapp yo'q (form=false) — forma qatori yo'q
+  assert.ok(!introMsg.includes("forma"), "web forma manzili yo'q — forma qatori yo'q");
   assert.equal(store.getDriver(42).draft, null);
   // Eski kutish 3 tugma edi ([📦 Yuk berish] / [🚚 Ro'yxatdan o'tish] / [🔄 Rol + ❓ Yordam]) — endi ro'yxatsiz yuk
   // beruvchi ham TO'LIQ menyuni oladi (Azimjon, 2026-11-12); «🚚 Ro'yxatdan o'tish» tugmasi yo'q.
@@ -869,15 +867,11 @@ test("raqam: eski foydalanuvchidan /start da bir marta so'raladi; faqat o'z kont
   await command("/start");
   assert.equal(
     texts(calls).at(-1),
-    "📱 <b>Telefon raqamingizni ulashasizmi?</b>\n\n" +
-      "Raqamingizni ulashsangiz:\n" +
-      "✅ Botni o'chirib qayta yoqsangiz ham ma'lumotlaringiz saqlanib qoladi\n" +
-      "✅ Ilovaga kirsangiz — sizni darhol taniymiz, joyidan davom etaverasiz\n" +
-      "✅ Qaytadan ro'yxatdan o'tish shart emas\n" +
-      "✅ «➕ Guruh qo'shish» ochiladi — siz yuk guruhi yoki kanali qo'sha olasiz va ulardagi mos e'lonlar ham shu yerga keladi.\n\n" +
-      "🔒 Raqamingiz boshqa foydalanuvchilarga ko'rsatilmaydi. Xohlasangiz, istalgan payt /ochirish bilan o'chirasiz.\n\n" +
-      "👇 Pastdagi «📱 Raqam ulashish» tugmasini bosing — Telegram bir marta tasdiqlashni so'raydi.\n" +
-      "<i>Ulashish ixtiyoriy.</i>",
+    "📱 <b>Telefon raqamingizni ulashasizmi?</b>\n" +
+      "✅ Sizni doim taniymiz — sozlamalar yo'qolmaydi\n" +
+      "✅ O'z guruhingizni qo'sha olasiz\n" +
+      "🔒 Raqamingiz hech kimga ko'rsatilmaydi\n\n" +
+      "👇 Pastdagi «📱 Raqam ulashish» tugmasini bosing. Xohlamasangiz — «⏭ Keyinroq».",
     "afzalliklar ro'yxati (2026-11-13) + «Guruh qo'shish» faqat raqam ulashganlarga",
   );
   const asked = lastMarkup(calls);
@@ -931,22 +925,18 @@ test("/start matni: bot haqida Azimjon matni, keyin menyu; menyuda «Ilovalar» 
   store.saveDriver(42, { role: "haydovchi", active: true, phoneAskedAt: 1 });
   await command("/start");
   // Hali ro'yxatdan o'tmagan — menyuda ham, matnda ham faqat 3 tugma; boshida — bot haqida Azimjon matni (2026-11-10)
-  const early = texts(calls).find((t) => /Pastdagi menyu/.test(t));
+  const early = texts(calls).find((t) => /Pastdagi tugmalar/.test(t));
   assert.equal(
     early,
     "Assalomu alaykum!\n\n" +
-      "🚛 <b>Yuk Eksperti</b> — Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz. Shuningdek, yirik guruhlar " +
-      "yoki o'zingiz belgilagan guruhlardan e'lonlarni yo'nalishingiz va transportingizga mos e'lonni shaxsiy xabaringizga yuboramiz.\n\n" +
-      "🤖 Botdan foydalanishda qiynalsangiz — AI yordamchimiz @YukExperti ga yozing, u yordam beradi.\n\n" +
-      "<b>Pastdagi menyu:</b>\n" +
+      "<b>Pastdagi tugmalar</b> (siz: 🚚 Haydovchi):\n" +
       "🚚 Ro'yxatdan o'tish — sizga qanday e'lonlar yo'naltirishimiz haqida\n" +
-      "🔄 Rolni almashtirish — haydovchi va yuk beruvchi\n\n" +
-      "Siz: 🚚 Haydovchisiz.\n" +
-      "Menyuni yozish qatorining o'ng tomonidagi belgi orqali ochib-yopiladi, umuman yo'qolsa — /start ni bosing.\n" +
-      "Telefon ilovalari — /ilovalar.",
+      "🔄 Rolni almashtirish — haydovchi yoki yuk egasi\n\n" +
+      "Tugmalar yo'qolsa — /start ni bosing.\n" +
+      "❓ Tushunmasangiz — @YukExperti ga yozing, yordam beradi.",
   );
   // Keyingi xabar (2026-11-19): rejim so'ralmaydi — darhol ⚡ Tezkor saqlanadi va to'liq menyu
-  assert.match(texts(calls).at(-1), /✅ Rejim: <b>🌐 Hamma guruhlar<\/b>/);
+  assert.match(texts(calls).at(-1), /✅ <b>Tayyor!<\/b>/);
   assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
   const menuOf = calls.filter((c) => c.method === "sendMessage" && c.payload.reply_markup?.keyboard).at(-1).payload.reply_markup;
   assert.equal(menuOf.keyboard[0][0].text, MENU.feed);
@@ -955,19 +945,19 @@ test("/start matni: bot haqida Azimjon matni, keyin menyu; menyuda «Ilovalar» 
   store.saveDriver(42, { profile: PROFILE });
   calls.length = 0;
   await command("/start");
-  const text = texts(calls).find((t) => /Pastdagi menyu/.test(t));
-  assert.match(text, /^Assalomu alaykum!\n\n🚛 <b>Yuk Eksperti<\/b> — Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz\. Shuningdek, yirik guruhlar/);
+  const text = texts(calls).find((t) => /Pastdagi tugmalar/.test(t));
+  assert.match(text, /^Assalomu alaykum!\n\n<b>Pastdagi tugmalar<\/b>/);
   assert.doesNotMatch(text, /vositachisiz|Bundan tashqari/, "2026-11-10 gacha bo'lgan matn yo'q");
-  assert.match(text, /📱 Raqam ulashish — raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham/);
+  assert.match(text, /📱 Raqam ulashish — sizni doim taniymiz/);
   assert.doesNotMatch(text, /qo'ng'iroq qilasiz/);
   assert.doesNotMatch(text, /📱 Ilovalar/);
-  assert.match(text, /\/ilovalar/);
+  assert.match(text, /\/start/);
 
   // Raqam yo'q — menyudagi tugma oddiy: bosilsa avval afzalliklar, keyin request_contact tugmasi (2026-11-13)
   const phoneButton = buttons(lastMarkup(calls)).find((b) => b.text === MENU.phone);
   assert.ok(!phoneButton.request_contact);
   await message(PRIVATE, MENU.phone);
-  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\n\nRaqamingizni ulashsangiz:/);
+  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\n✅ Sizni doim taniymiz/);
   assert.deepEqual(lastMarkup(calls).keyboard.flat(), [{ text: PHONE.share, request_contact: true }, { text: PHONE.later }]);
   await message(PRIVATE, undefined, contact({ user_id: 42 }));
   assert.equal(store.getDriver(42).phone, "+998901234567");
@@ -978,8 +968,8 @@ test("/start matni: bot haqida Azimjon matni, keyin menyu; menyuda «Ilovalar» 
   assert.ok(!buttons(lastMarkup(calls)).some((b) => b.text === MENU.phone || b.text === MENU.myPhone));
   calls.length = 0;
   await command("/start");
-  const withPhone = texts(calls).find((t) => /Pastdagi menyu/.test(t));
-  assert.match(withPhone, /\n➕ Guruh qo'shish — siz yuk guruhi yoki kanali qo'sha olasiz va ulardagi mos e'lonlar ham shu yerga keladi\.\n/);
+  const withPhone = texts(calls).find((t) => /Pastdagi tugmalar/.test(t));
+  assert.match(withPhone, /\n➕ Guruh qo'shish — o'z yuk guruhingiz yoki kanalingizni qo'shing — undagi e'lonlar ham shu yerga keladi\.\n/);
   assert.doesNotMatch(withPhone, /📱 Raqam ulashish/);
   await message(PRIVATE, MENU.myPhone);
   assert.match(texts(calls).at(-1), /Sizning raqamingiz: <b>\+998 90 123 45 67/);
@@ -995,18 +985,15 @@ test("/start matni rol tanlanmaganda (Azimjon matni) va yuk beruvchida ham to'g'
   assert.equal(
     texts(calls)[0],
     "Assalomu alaykum!\n\n" +
-      "🚛 <b>Yuk Eksperti</b> — Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz. Shuningdek, yirik guruhlar " +
-      "yoki o'zingiz belgilagan guruhlardan e'lonlarni yo'nalishingiz va transportingizga mos e'lonni shaxsiy xabaringizga yuboramiz.\n\n" +
-      "🤖 Botdan foydalanishda qiynalsangiz — AI yordamchimiz @YukExperti ga yozing, u yordam beradi.\n\n" +
-      "📦 Yuk beruvchilarga — yukingizga mos transportlar;\n" +
-      "🚚 Haydovchilarga — transportingizga mos yuklar.",
+      "🚛 <b>Yuk Eksperti</b> — guruhlardagi yuk e'lonlarini shu yerga, darhol yuboradi. Yuk egasi esa yukini to'g'ridan-to'g'ri haydovchiga beradi.\n\n" +
+      "❓ Tushunmasangiz — @YukExperti ga yozing, yordam beradi.",
   );
-  assert.equal(texts(calls)[1], "Iltimos, rolingizni tanlang 👇");
+  assert.equal(texts(calls)[1], "Iltimos, tanlang 👇");
   calls.length = 0;
   store.saveDriver(42, { role: "yuk_beruvchi", active: true, phoneAskedAt: 1 });
   await command("/start");
   // Yuk beruvchida ham — o'sha bot haqidagi matn (rolga qarab alohida matn 2026-11-10 dan yo'q)
-  assert.match(texts(calls)[0], /^Assalomu alaykum!\n\n🚛 <b>Yuk Eksperti<\/b> — Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz\. Shuningdek,[\s\S]*Siz: 📦 Yuk beruvchisiz\./);
+  assert.match(texts(calls)[0], /^Assalomu alaykum!\n\n<b>Pastdagi tugmalar<\/b> \(siz: 📦 Yuk beruvchi\)/);
 });
 
 test("bot tavsifi («Bu bot nima qila oladi?») — Azimjon matni, Telegram chekidan (512) qisqa; o'zgarmagan bo'lsa qayta yuborilmaydi", async () => {
@@ -1016,8 +1003,7 @@ test("bot tavsifi («Bu bot nima qila oladi?») — Azimjon matni, Telegram chek
   const description = calls.find((c) => c.method === "setMyDescription").payload.description;
   assert.equal(
     description,
-    "🚛 Yuk Eksperti — Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz. Shuningdek, yirik guruhlar " +
-      "yoki o'zingiz belgilagan guruhlardan e'lonlarni yo'nalishingiz va transportingizga mos e'lonni shaxsiy xabaringizga yuboramiz.\n\n" +
+    "🚛 Yuk Eksperti — guruhlardagi yuk e'lonlarini shu yerga, darhol yuboradi. Yuk egasi esa yukini to'g'ridan-to'g'ri haydovchiga beradi.\n\n" +
       "📢 Kanal: @Yuk_Ekspert\n💬 Guruh: @Yuk_Ekspert_chat\n\n" +
       "Boshlash uchun /start ni bosing!",
   );
@@ -1036,7 +1022,7 @@ test("raqam: «Keyinroq» — menyu qaytadi va bot boshqa so'ramaydi", async () 
   assert.deepEqual(store.getDriver(42).profile.fromAreas, ["toshkent"], "yo'nalish qoldi");
   assert.match(texts(calls).at(-1), /ulashasizmi/);
   await message(PRIVATE, PHONE.later);
-  assert.match(texts(calls).at(-1), /Mayli[\s\S]*«📱 Raqam ulashish» tugmasi bilan/);
+  assert.match(texts(calls).at(-1), /Mayli[\s\S]*«📱 Raqam ulashish»/);
   assert.doesNotMatch(texts(calls).at(-1), /qayerdan qayerga/, "yo'nalishi bor — «Qayerdan?» so'ralmaydi");
   assert.equal(buttons(lastMarkup(calls))[0].text, MENU.loads);
   // Sozlamalarni yana saqlasa ham, /start bossa ham — so'ramaydi
@@ -1060,7 +1046,7 @@ test("avtomatik pauza tugmalari: «✅ Ha, davom etsin» — davom etadi; «▶�
   await press("idle:resume");
   const user = store.getDriver(42);
   assert.deepEqual([user.active, user.pausedBy], [true, null]);
-  assert.match(texts(calls).at(-1), /Yuk yuborish yoqildi/);
+  assert.match(texts(calls).at(-1), /Yoqildi — yuklar yana keladi/);
   assert.deepEqual(
     store.driverDetails(42).events.slice(0, 2).map((e) => [e.type, e.detail]),
     [["resumed", null], ["paused", { by: "idle" }]],
@@ -1316,12 +1302,12 @@ test("guruh qo'shish: raqamsizga — avval raqam; raqami borga — tushuntirish,
   await message(PRIVATE, MENU.addGroup);
   assert.equal(
     texts(calls).at(-1),
-    "➕ Guruh qo'shish — siz yuk guruhi yoki kanali qo'sha olasiz va ulardagi mos e'lonlar ham shu yerga keladi.\n\n" +
-      "Bu imkoniyat — raqamini ulashganlar uchun. Pastdagi «📱 Raqam ulashish» tugmasini bosing — keyin guruh havolasini yuborasiz.",
+    "➕ Guruh qo'shish — o'z yuk guruhingiz yoki kanalingizni qo'shing — undagi e'lonlar ham shu yerga keladi.\n\n" +
+      "Avval raqamingizni ulashing — pastdagi «📱 Raqam ulashish» tugmasini bosing 👇\nKeyin guruh havolasini yuborasiz.",
   );
   assert.deepEqual(buttons(lastMarkup(calls))[0], { text: PHONE.share, request_contact: true });
   await message(PRIVATE, "https://t.me/Yangi_Guruh");
-  assert.match(texts(calls).at(-1), /raqamini ulashganlar uchun[\s\S]*yuborgan havolangizni shundan keyin darhol tekshiramiz/, "havola ham raqamsiz qabul qilinmaydi");
+  assert.match(texts(calls).at(-1), /Avval raqamingizni ulashing[\s\S]*Havolangizni shundan keyin darhol tekshiramiz/, "havola ham raqamsiz qabul qilinmaydi");
   assert.equal(store.findSource("@Yangi_Guruh"), null);
 
   store.saveDriver(42, { phone: "+998900000001" });
@@ -1331,7 +1317,7 @@ test("guruh qo'shish: raqamsizga — avval raqam; raqami borga — tushuntirish,
   assert.equal(texts(calls).at(-1), byCommand, "/guruh_qoshish = menyudagi tugma");
   assert.match(
     texts(calls).at(-1),
-    /^<b>➕ Guruh qo'shish<\/b> — siz yuk guruhi yoki kanali qo'sha olasiz va ulardagi mos e'lonlar ham shu yerga keladi\.\n\nYuk e'lonlari chiqadigan <b>ochiq<\/b> Telegram guruh yoki kanal[\s\S]*kamida 5 ta yuk e'loni/,
+    /^<b>➕ Guruh qo'shish<\/b> — o'z yuk guruhingiz yoki kanalingizni qo'shing — undagi e'lonlar ham shu yerga keladi\.\n\n👇 Guruh yoki kanal havolasini[\s\S]*kamida 5 ta yuk e'loni/,
   );
   assert.doesNotMatch(texts(calls).at(-1), /biladigan/);
   assert.doesNotMatch(texts(calls).at(-1), /Siz qo'shgan guruhlar/);
@@ -1403,7 +1389,7 @@ test("guruh qo'shish uchun raqam ulashsa — yo'nalish savoli emas, guruh qo'shi
   await command("/guruh_qoshish");
   await message(PRIVATE, undefined, contact({ user_id: 42 }));
   assert.equal(store.getDriver(42).phone, "+998901234567");
-  assert.match(texts(calls).at(-1), /^Raqamingiz saqlandi! ✅\n\n<b>➕ Guruh qo'shish<\/b> — siz yuk guruhi yoki kanali qo'sha olasiz/);
+  assert.match(texts(calls).at(-1), /^Raqamingiz saqlandi! ✅\n\n<b>➕ Guruh qo'shish<\/b> — o'z yuk guruhingiz yoki kanalingizni qo'shing/);
   assert.ok(buttons(lastMarkup(calls)).some((b) => b.text === MENU.addGroup), "menyuda endi «➕ Guruh qo'shish»");
   assert.equal(route(), 0);
 
@@ -1420,7 +1406,7 @@ test("guruh qo'shish uchun raqam ulashsa — yo'nalish savoli emas, guruh qo'shi
   store.saveDriver(42, { phone: null });
   await command("/guruh_qoshish");
   await message(PRIVATE, PHONE.later);
-  assert.match(texts(calls).at(-1), /^Mayli\./);
+  assert.match(texts(calls).at(-1), /^Mayli 👍/);
   assert.equal(route(), 0);
 
   // 4) Raqam so'ralgach boshqa ish qildi (/yordam) — keyin menyudan ulashsa, odatdagidek (yo'nalish savoli)
@@ -1475,11 +1461,10 @@ test("«📦 Yuk berish» matni (forma bor): chatga yozish 1️⃣ va bold, form
   const { calls, message } = shipperSetup(null, { config: { miniappUrl: MINIAPP } });
   await message(PRIVATE, MENU.giveLoad); // eski stildagi oddiy tugma bosilgandek (forma Mini App'da ochiladi, chatda matn yo'q)
   const intro = texts(calls).at(-1);
-  assert.match(intro, /^📦 <b>Yuk berish<\/b> — yukingiz mos haydovchilarga darhol boradi/);
-  assert.ok(intro.includes("1️⃣ <b>Shu chatga yuk haqida ma'lumotni yozib yuboring</b> — masalan:\n<b>Andijondan Toshkentga 20 tonna un bor, tent fura kerak, 3 mln, ertaga. 90 123 45 67</b>"),
-    "1️⃣ qatori bold va misol ham bold");
-  assert.ok(intro.endsWith("\n2️⃣ Yoki pastdagi «📦 Yuk berish» tugmasi orqali forma (1 daqiqa)."), "forma 2️⃣ — oddiy qator");
-  assert.ok(intro.indexOf("yozib yuboring") < intro.indexOf("forma (1 daqiqa)"), "chatga yozish formadan OLDIN");
+  assert.match(intro, /^📦 <b>Yukingizni shu chatga yozib yuboring<\/b> — mos haydovchilar o'zlari qo'ng'iroq qiladi/);
+  assert.ok(intro.includes("Masalan:\n<b>Andijondan Toshkentga 20 tonna un bor, tent fura kerak, 3 mln, ertaga. 90 123 45 67</b>"), "misol bold");
+  assert.ok(intro.endsWith("\nYoki pastdagi «📦 Yuk berish» tugmasi — forma."), "forma — ikkinchi yo'l");
+  assert.ok(intro.indexOf("yozib yuboring") < intro.indexOf("forma"), "chatga yozish formadan OLDIN");
   assert.ok(!intro.includes("<i>"), "eski <i> kursiv ishlatilmaydi");
 });
 
@@ -1575,7 +1560,7 @@ test("yuk beruvchi: tushunilmadi / bo'sh mashina / boshqa yo'nalish / AI band / 
   driver.store.saveDriver(42, { role: "haydovchi", profile: PROFILE });
   await driver.message(PRIVATE, "Andijondan Toshkentga 20 tonna");
   assert.deepEqual(driver.parsed, []);
-  assert.equal(texts(driver.calls).at(-1), "Pastdagi menyudan tanlang 👇");
+  assert.equal(texts(driver.calls).at(-1), "Pastdagi tugmalardan birini bosing 👇");
 });
 
 test("«📦 Yuk berish» tugmasi: forma bor — Mini App (?v=yuk); formadan kelgan yuk (sendData) — tekshirilib navbatga", async () => {
@@ -1612,7 +1597,7 @@ test("«📦 Yuk berish» tugmasi: forma bor — Mini App (?v=yuk); formadan kel
 test("/account_qosh: rolsiz — /start; ro'yxatdan o'tmagan haydovchi — avval ro'yxat; aks holda Mini App «akkaunt» tugmasi", async () => {
   const { store, calls, command } = setup({ appUrl: () => "https://yuk.example.uz/" });
   await command("/account_qosh");
-  assert.equal(texts(calls).at(-1), "Iltimos, rolingizni tanlang 👇");
+  assert.equal(texts(calls).at(-1), "Iltimos, tanlang 👇");
 
   store.saveDriver(42, { role: "haydovchi", active: true, phoneAskedAt: 1 });
   calls.length = 0;
@@ -1641,7 +1626,7 @@ test("yuk beruvchi menyudagi «📱 Raqam ulashish» ni bossa — yuk emas, raqa
   const { store, calls, message } = setup();
   store.saveDriver(42, { role: "yuk_beruvchi" });
   await message(PRIVATE, MENU.phone);
-  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\n\nRaqamingizni ulashsangiz:/);
+  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi\?<\/b>\n✅ Sizni doim taniymiz/);
   assert.deepEqual(lastMarkup(calls).keyboard.flat(), [{ text: PHONE.share, request_contact: true }, { text: PHONE.later }]);
 });
 
@@ -1658,22 +1643,22 @@ test("rejim: yangi haydovchi darhol «🌐 Hamma guruhlar» (filtrsiz), menyuda 
   assert.equal(active, true);
   assert.equal(profile.vehicle, null);
   assert.deepEqual(profile.feed, { mode: "tezkor", sources: [] });
-  assert.ok(texts(calls).some((t) => /Rejim: <b>🌐 Hamma guruhlar<\/b>[\s\S]*Transport: <b>Hammasi<\/b>[\s\S]*Qayerdan: <b>Hamma joy<\/b>[\s\S]*quruq gap tashlanadi/.test(t)));
+  assert.ok(texts(calls).some((t) => /✅ <b>Tayyor!<\/b>[\s\S]*Mashina: <b>Hammasi<\/b>[\s\S]*Qayerdan: <b>Hamma joy<\/b>[\s\S]*Hamma guruhlar/.test(t)));
   assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi/, "raqam bir marta so'raladi");
   await message(PRIVATE, PHONE.later);
   assert.deepEqual(menuRows(calls), [[MENU.feed, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings]]);
   assert.equal(store.activeUsers("haydovchi").length, 1, "mashinasiz ham faol");
   await message(PRIVATE, MENU.loads);
-  assert.match(texts(calls).at(-1), /«🌐 Hamma guruhlar» rejimidasiz/);
+  assert.match(texts(calls).at(-1), /darhol shu yerga keladi \(🌐 Hamma guruhlar\)/);
   // Rejim oynasi — uch filtr tugmasi va «✅ Tayyor» (eski rejim tugmalari yo'q)
   await message(PRIVATE, MENU.feed);
   const picker = calls.filter((c) => c.method === "sendMessage").at(-1);
-  assert.match(picker.payload.text, /Qaysi e'lonlar kelsin[\s\S]*Quruq gap[\s\S]*Transport: <b>Hammasi[\s\S]*Qayerdan: <b>Hamma joy[\s\S]*Guruhlar: <b>Hamma guruhlar[\s\S]*Guruh qo'shish/);
+  assert.match(picker.payload.text, /Qaysi yuklar kelsin[\s\S]*Mashina: <b>Hammasi[\s\S]*Qayerdan: <b>Hamma joy[\s\S]*Guruhlar: <b>Hamma guruhlar/);
   assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["ft:open", "fm:hududim", "fm:tezkor", "fm:guruhlarim", "fm:done"]);
   assert.deepEqual(inlineButtons(picker).slice(2, 4).map((b) => b.text), ["✅ 🌐 Hamma guruhlar", "📌 Guruh tanlash"]);
   // «✅ Tayyor» — oyna o'sha xabarning o'zida yakuniy matnga aylanadi
   await press("fm:done");
-  assert.match(texts(calls, "editMessageText").at(-1), /✅ Rejim: <b>🌐 Hamma guruhlar<\/b>/);
+  assert.match(texts(calls, "editMessageText").at(-1), /✅ <b>Tayyor!<\/b>/);
 });
 
 test("rejim: eski «⚡ Tezkorni o'chirish» tugmasi (menyu va oyna) — tushuntiriladi, rejim o'zgarmaydi", async () => {
@@ -1681,7 +1666,7 @@ test("rejim: eski «⚡ Tezkorni o'chirish» tugmasi (menyu va oyna) — tushunt
   store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
   await message(PRIVATE, MENU.fastOff);
   assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
-  assert.ok(texts(calls).some((t) => /Tezkorlik endi hamma rejimda bor/.test(t)));
+  assert.ok(texts(calls).some((t) => /Yuklar endi doim darhol keladi/.test(t)));
   await press("fm:off");
   assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
   assert.equal(menuRows(calls)[0][0], MENU.feed, "birinchi tugma — «🎛 Rejim»");
@@ -1693,7 +1678,7 @@ test("rejim: «📍 Qayerdan» — viloyatlar ixtiyoriy (bo'sh — hamma joy); s
   await press("fm:hududim");
   // Ro'yxat rejim oynasining o'zida ochiladi (yangi xabar emas)
   const picker = calls.filter((c) => c.method === "editMessageText").at(-1);
-  assert.match(picker.payload.text, /Qaysi viloyat\(lar\)dan/);
+  assert.match(picker.payload.text, /Yuk qayerdan ketsin/);
   assert.ok(inlineButtons(picker).some((b) => b.callback_data === "fr:t:samarqand"));
   await press("fr:t:samarqand");
   await press("fr:t:buxoro");
@@ -1722,14 +1707,14 @@ test("rejim: «🚚 Transport» — to'rt tur, ixtiyoriy; boshqa filtr va guruhl
   store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "guruhlarim", sources: ["@TutGruz"], regions: ["buxoro"] } } });
   await press("ft:open");
   const picker = calls.filter((c) => c.method === "editMessageText").at(-1);
-  assert.match(picker.payload.text, /Qaysi transport/);
+  assert.match(picker.payload.text, /Mashinangiz qaysi/);
   assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["ft:t:fura", "ft:t:isuzu", "ft:t:bongo", "ft:t:labo", "ft:all", "ft:ok"]);
   await press("ft:t:isuzu");
   assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "✅ Tanlandi: Isuzu");
   await press("ft:t:labo");
   await press("ft:ok");
   assert.deepEqual(store.getDriver(42).profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"], regions: ["buxoro"], trucks: ["isuzu", "labo"] });
-  assert.match(calls.filter((c) => c.method === "editMessageText").at(-1).payload.text, /Transport: <b>Isuzu, Labo \/ Damas<\/b>/);
+  assert.match(calls.filter((c) => c.method === "editMessageText").at(-1).payload.text, /Mashina: <b>Isuzu, Labo \/ Damas<\/b>/);
   // Eski xabardagi «⬅️ Orqaga» ham saqlaydi (2026-11-19: haydovchi tanlab «Orqaga» bosdi — tanlov yo'qolgan edi)
   await press("ft:open");
   await press("ft:t:fura");
@@ -1758,7 +1743,7 @@ test("rejim: «📌 Guruhlar» — ro'yxatdan tanlash, kamida bitta; saqlangach 
   await press("r:haydovchi");
   await press("fm:guruhlarim");
   const picker = calls.filter((c) => c.method === "editMessageText").at(-1); // rejim oynasining o'zida
-  assert.match(picker.payload.text, /Qaysi guruh va kanallardan/);
+  assert.match(picker.payload.text, /Qaysi guruhlardan/);
   const data = inlineButtons(picker).map((b) => b.callback_data);
   assert.ok(data.includes("fg:t:@TutGruz") && data.includes("fg:t:@Yuk_markazi"));
   assert.ok(!data.includes("fg:t:@Ochirilgan_guruh"), "o'chirilgan guruh ro'yxatda yo'q");
@@ -1779,13 +1764,15 @@ test("rejim: «📌 Guruhlar» — ro'yxatdan tanlash, kamida bitta; saqlangach 
   await press("fg:ok");
   assert.deepEqual(store.getDriver(42).profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"] });
   const back = calls.filter((c) => c.method === "editMessageText").at(-1);
-  assert.match(back.payload.text, /Guruhlar: <b>tanlangan 1 ta guruh<\/b>/);
+  assert.match(back.payload.text, /Guruhlar: <b>tanlangan 1 ta<\/b>/);
   assert.deepEqual(inlineButtons(back).filter((b) => b.callback_data.startsWith("fm:") && b.callback_data !== "fm:done" && b.callback_data !== "fm:hududim").map((b) => b.text), ["🌐 Hamma guruhlar", "✅ 📌 Tanlangan: 1 ta"]);
   await press("fm:done");
-  assert.match(texts(calls, "editMessageText").at(-1), /Tanlagan 1 ta guruhingizdagi/);
+  assert.match(texts(calls, "editMessageText").at(-1), /Tayyor![\s\S]*Guruhlar: <b>tanlangan 1 ta<\/b>/);
   await message(PRIVATE, PHONE.later);
-  assert.deepEqual(menuRows(calls), [[MENU.groups, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings], [MENU.feed]]);
-  // «📌 Guruhlarim» — tanlov o'sha holatda ochiladi
+  assert.deepEqual(menuRows(calls), [[MENU.feed, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings]], "guruh rejimida ham bir xil menyu");
+  // Eski menyudagi «📌 Guruhlarim» va «🎛 Rejim» ham ishlaydi; guruhlar — tanlov o'sha holatda ochiladi
+  await message(PRIVATE, "🎛 Rejim");
+  assert.match(calls.filter((c) => c.method === "sendMessage").at(-1).payload.text, /Qaysi yuklar kelsin/);
   await message(PRIVATE, MENU.groups);
   const again = inlineButtons(calls.filter((c) => c.method === "sendMessage").at(-1));
   assert.match(again.find((b) => b.callback_data === "fg:t:@TutGruz").text, /^✅/);

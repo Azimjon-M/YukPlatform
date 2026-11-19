@@ -8,6 +8,9 @@
 import { Keyboard } from "grammy";
 import { FEED_MODES, encodeProfile, feedMode, profileReady, roleOf, usesRawFeed } from "@yuk/shared";
 
+// Eski nomlar (foydalanuvchi telefonidagi eski menyudan kelishi mumkin) — bot.js ularni ham ushlaydi
+export const OLD_MENU = { feed: "🎛 Rejim" };
+
 export const MENU = {
   giveLoad: "📦 Yuk berish", // yuk beruvchida birinchi qator: web forma (Mini App) yoki — forma yo'q bo'lsa — oddiy tugma (shipperLoads.js)
   loads: "📋 Mos yuklar",
@@ -22,7 +25,7 @@ export const MENU = {
   myPhone: "📱 Raqamim", // menyuda yo'q: 2026-11-07 da bir necha daqiqa bor edi — eski menyuda bosilsa /raqam
   apps: "📱 Ilovalar", // menyuda yo'q (eski menyular uchun ushlanadi) — /ilovalar
   role: "🔄 Rolni almashtirish",
-  feed: "🎛 Rejim", // haydovchi: yuklarni olish rejimi (feed.js, 2026-11-14) — /rejim
+  feed: "🎛 Filtr", // haydovchi: qaysi yuklar kelsin (feed.js; 2026-11-19 gacha «🎛 Rejim» — eski menyuda bosilsa ham ishlaydi, OLD_MENU) — /rejim
   fastOff: "⚡ Tezkorni o'chirish", // tezkor rejimda birinchi tugma → saralanganga qaytadi (Azimjon, 2026-11-18: «bir marta yoqsa, keyin o'chmaydigan bo'libdi»)
   groups: "📌 Guruhlarim", // «📌 Mening guruhlarim» rejimlarida — qaysi guruhlardan (feed.js groupStep)
   help: "❓ Yordam",
@@ -146,7 +149,9 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   const modeId = feedMode(driver.profile);
   const mode = FEED_MODES[modeId];
   // 2026-11-19: saralash olib tashlandi, hamma tezkor — «⚡ Tezkorni o'chirish» yo'q (o'chirsa qaytadigan rejim qolmadi)
-  const first = mode.sorted ? matchesLabel(driver) : mode.groups ? MENU.groups : MENU.feed;
+  // 2026-11-19 (soddalashtirish): hamma tezkor rejimda birinchi tugma — «🎛 Filtr» (guruhlar ham shu oynada), alohida
+  // «📌 Guruhlarim» qatori yo'q
+  const first = mode.sorted ? matchesLabel(driver) : MENU.feed;
   const keyboard = loadRow(new Keyboard()).text(first).text(paused ? MENU.resume : MENU.pause).row();
   // Rolni almashtirish (haydovchi ↔ yuk beruvchi) — /rol bilan bir xil. Odamda bugun yuk, ertaga bo'sh mashina bo'lishi
   // mumkin, /rol ni esa hamma ham topavermaydi. Rol tanlanmagan bo'lsa tugma yo'q
@@ -158,7 +163,7 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   else keyboard.text(MENU.phone).row();
   settingsButton(keyboard.text(MENU.help));
   // Rejim tugmalari: birinchi qatorda bo'lmaganlari — shu yerda, ikkitadan
-  const extra = [mode.groups && first !== MENU.groups ? MENU.groups : null, first !== MENU.feed ? MENU.feed : null].filter(Boolean);
+  const extra = [first !== MENU.feed ? MENU.feed : null].filter(Boolean);
   if (extra.length) {
     keyboard.row();
     for (const text of extra) keyboard.text(text);

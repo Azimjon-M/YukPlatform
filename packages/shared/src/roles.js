@@ -10,13 +10,13 @@ export const ROLES = {
   haydovchi: {
     icon: "🚚",
     name: "Haydovchi",
-    choice: "🚚 Haydovchiman — yuk qidiraman",
+    choice: "🚚 Men haydovchiman — yuk kerak", // 2026-11-19: soddaroq (o'qishi qiyin, yoshi kattalar uchun ham)
     gets: "yuk bor e'lonlari (mashinangiz va yo'nalishingizga mos)",
   },
   yuk_beruvchi: {
     icon: "📦",
     name: "Yuk beruvchi",
-    choice: "📦 Yuk beruvchiman — mashina qidiraman",
+    choice: "📦 Menda yuk bor — mashina kerak",
     gets: "bo'sh mashina e'lonlari (yo'nalishingiz bo'yicha)",
   },
 };

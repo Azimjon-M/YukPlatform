@@ -14,20 +14,20 @@ const nounOf = (user) => NOUN[roleOf(user)] ?? NOUN.haydovchi;
 
 export const IDLE_BUTTONS = { ok: "idle:ok", resume: "idle:resume" };
 
+// 2026-11-19 (soddalashtirish): qisqa savol + bitta tugma
 export function idleWarningText(user) {
   return [
-    `👋 Botga 24 soatdan beri kirmadingiz. Sizga ${nounOf(user)} kelishda davom etsinmi?`,
+    `👋 Bir kundan beri kirmadingiz. ${nounOf(user)[0].toUpperCase()}${nounOf(user).slice(1)} kelaversinmi?`,
     "",
-    "Yana 24 soat kirmasangiz, keraksiz xabarlar bilan bezovta qilmaslik uchun yuborish avtomatik to'xtatiladi (pauza). " +
-      "Davom etishi uchun pastdagi tugmani bosing.",
+    "Javob bermasangiz, ertaga yuborish o'zi to'xtaydi. Davom etsin desangiz — tugmani bosing 👇",
   ].join("\n");
 }
 
 export function idlePausedText(user) {
   return [
-    `⏸ Botga 48 soatdan beri kirmaganingiz uchun ${nounOf(user)} yuborish to'xtatildi (pauza).`,
+    `⏸ 2 kundan beri kirmaganingiz uchun ${nounOf(user)} yuborish to'xtatildi.`,
     "",
-    "Sozlamalaringiz joyida. Qayta yoqish uchun pastdagi «▶️ Davom ettirish» tugmasini bosing.",
+    "Sozlamalaringiz joyida. Qayta yoqish — tugmani bosing 👇",
   ].join("\n");
 }
 

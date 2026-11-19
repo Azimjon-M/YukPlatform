@@ -37,7 +37,7 @@ test("24 soat kirmasa — ogohlantirish (bir marta), 48 soatda — pauza va xaba
   clock.advance(HOUR);
   assert.deepEqual(await watcher.runOnce(), { warned: 1, paused: 0 });
   assert.deepEqual(sent.map((m) => [m.chatId, m.buttons]), [[42, [IDLE_BUTTONS.ok]]]);
-  assert.match(sent[0].text, /24 soatdan beri kirmadingiz[\s\S]*yuklar[\s\S]*Yana 24 soat/);
+  assert.match(sent[0].text, /Bir kundan beri kirmadingiz\. Yuklar kelaversinmi\?[\s\S]*ertaga/);
   assert.equal(store.getDriver(42).idleWarnedAt, 124 * HOUR);
 
   clock.advance(10 * 60 * 1000);
@@ -48,7 +48,7 @@ test("24 soat kirmasa — ogohlantirish (bir marta), 48 soatda — pauza va xaba
   const user = store.getDriver(42);
   assert.deepEqual([user.active, user.pausedBy], [false, "idle"]);
   assert.equal(store.activeUsers("haydovchi").length, 0, "endi yuk bormaydi");
-  assert.match(sent.at(-1).text, /48 soatdan beri kirmaganingiz uchun yuklar yuborish to'xtatildi/);
+  assert.match(sent.at(-1).text, /2 kundan beri kirmaganingiz uchun yuklar yuborish to'xtatildi/);
   assert.deepEqual(sent.at(-1).buttons, [IDLE_BUTTONS.resume]);
 
   clock.advance(48 * HOUR);
@@ -84,11 +84,11 @@ test("yuk beruvchiga — «bo'sh mashinalar»; botni bloklagan — pauza (blokla
   clock.advance(25 * HOUR);
   assert.deepEqual(await watcher.runOnce(), { warned: 1, paused: 0 });
   assert.deepEqual(sent.map((m) => m.chatId), [7]);
-  assert.match(sent[0].text, /bo'sh mashinalar/);
+  assert.match(sent[0].text, /bo'sh mashinalar/i);
   assert.deepEqual([store.getDriver(8).active, store.getDriver(8).pausedBy, store.getDriver(8).idleWarnedAt], [false, "blocked", null]);
 });
 
 test("xabar matnlari", () => {
-  assert.match(idleWarningText({ role: "haydovchi", profile: TRUCK }), /yuklar kelishda davom etsinmi/);
-  assert.match(idlePausedText({ role: "yuk_beruvchi", profile: {} }), /bo'sh mashinalar yuborish to'xtatildi[\s\S]*Davom ettirish/);
+  assert.match(idleWarningText({ role: "haydovchi", profile: TRUCK }), /Yuklar kelaversinmi/);
+  assert.match(idlePausedText({ role: "yuk_beruvchi", profile: {} }), /bo'sh mashinalar yuborish to'xtatildi[\s\S]*tugmani bosing/);
 });

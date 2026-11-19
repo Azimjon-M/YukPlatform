@@ -53,7 +53,7 @@ import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, REGION_CALLBACK, TRUCK_
 import { SENDER_TEXT, escapeHtml, formatLoad, formatRaw, formatTruck } from "./format.js";
 import { IDLE_BUTTONS } from "./idle.js";
 import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
-import { MENU, PHONE, mainMenu, matchesLabel, miniAppUrl, phoneKeyboard, settingsLabel } from "./menu.js";
+import { MENU, OLD_MENU, PHONE, mainMenu, matchesLabel, miniAppUrl, phoneKeyboard, settingsLabel } from "./menu.js";
 import { createGroupPoster } from "./groupTopics.js";
 import { createNoticeLoop } from "./notices.js";
 import { ANY, applyRoute, chosenText, fromStep, toStep, validArea } from "./route.js";
@@ -68,9 +68,8 @@ const LOADS_LIMIT = 5000; // 24 soatda ~4 000 yuk — hammasidan sanaladi (store
 // Bot haqida — Azimjon yozgan matn (2026-11-10). Bot tavsifi ham, rol tanlanmagandagi /start ham shu bilan boshlanadi.
 // «o'zingiz belgilagan guruhlar» — menyudagi «➕ Guruh qo'shish» (raqam ulashganlarda; userSources.js)
 const NAME = "Yuk Eksperti";
-const ABOUT =
-  "Yuk beruvchidan yukni to'g'ridan-to'g'ri olib, haydovchilarga yetkazamiz. Shuningdek, yirik guruhlar yoki o'zingiz " +
-  "belgilagan guruhlardan e'lonlarni yo'nalishingiz va transportingizga mos e'lonni shaxsiy xabaringizga yuboramiz.";
+// 2026-11-19 (Azimjon: «kaltaroq, soddaroq … o'qimagan haydovchi ham, yoshi o'tgan ham tushunsin») — qisqartirildi
+const ABOUT = "guruhlardagi yuk e'lonlarini shu yerga, darhol yuboradi. Yuk egasi esa yukini to'g'ridan-to'g'ri haydovchiga beradi.";
 
 // Bot profilidagi matnlar (botni birinchi ochganda "Bu bot nima qila oladi?" o'rnida chiqadi; Telegram cheki — 512 belgi)
 // Kanal va guruh havolalari (Azimjon, 2026-11-13: «Bot biosigaham kanalimiz va guruh linklarini qo'sh»)
@@ -84,7 +83,7 @@ export const SHORT_DESCRIPTION = `Yukni to'g'ridan-to'g'ri haydovchiga.\n${LINKS
 // Rolni almashtirishdan oldin (/rol, «🔄 Rolni almashtirish»)
 // Ro'yxatdan o'tishdagi oxirgi qadamdan oldin (forma va raqamdan keyin) — «Qayerdan?» shu matndan keyin keladi
 const ROUTE_NEXT = "Endi qayerdan qayerga yuk kerakligini tanlang 👇";
-const ROLE_SWITCH_NOTE ="Har rolning sozlamalari alohida saqlanadi — qaytib kelsangiz, qaytadan kiritish shart emas.";
+const ROLE_SWITCH_NOTE = "Kerakligini tanlang 👇 Sozlamalaringiz yo'qolmaydi.";
 
 // Nega raqam so'raymiz — so'rashda, /raqam da va /start dagi menyu tavsifida bir xil ma'no
 // (raqam keyin ilovaga kirishda ham kerak bo'ladi — Azimjon, 2026-11-07; 2026-11-10 da uning so'zlari bilan qayta yozildi).
@@ -97,15 +96,12 @@ const GROUP_UNLOCK = ADD_GROUP_TEXT;
 // Raqam so'rovi (Azimjon, 2026-11-13: «modal ichidagi kontentni chiroyli qilsak … ijobiy tarafdagi kontent kerak»).
 // Telegram'ning «Telefon raqamingizni ulashmoqchimisiz?» oynasi matnini o'zgartirib bo'lmaydi — shuning uchun undan
 // OLDIN shu xabar chiqadi: menyudagi «📱 Raqam ulashish» ham endi avval shuni ko'rsatadi, Telegram oynasi — keyingi bosishda.
+// 2026-11-19: qisqartirildi (3 ta foyda o'rniga 2, bitta harakat)
 const PHONE_WHY =
-  "Raqamingizni ulashsangiz:\n" +
-  "✅ Botni o'chirib qayta yoqsangiz ham ma'lumotlaringiz saqlanib qoladi\n" +
-  "✅ Ilovaga kirsangiz — sizni darhol taniymiz, joyidan davom etaverasiz\n" +
-  "✅ Qaytadan ro'yxatdan o'tish shart emas\n" +
-  `✅ «${MENU.addGroup}» ochiladi — ${ADD_GROUP_ABOUT}\n\n` +
-  "🔒 Raqamingiz boshqa foydalanuvchilarga ko'rsatilmaydi. Xohlasangiz, istalgan payt /ochirish bilan o'chirasiz.\n\n" +
-  `👇 Pastdagi «${PHONE.share}» tugmasini bosing — Telegram bir marta tasdiqlashni so'raydi.\n` +
-  "<i>Ulashish ixtiyoriy.</i>";
+  "✅ Sizni doim taniymiz — sozlamalar yo'qolmaydi\n" +
+  "✅ O'z guruhingizni qo'sha olasiz\n" +
+  "🔒 Raqamingiz hech kimga ko'rsatilmaydi\n\n" +
+  `👇 Pastdagi «${PHONE.share}» tugmasini bosing. Xohlamasangiz — «${PHONE.later}».`;
 
 // Hisob o'chirilgach (bot /ochirish; web'dagi o'chirishda — apps/api public.js DELETED_TEXT, ma'nosi bir xil)
 const ACCOUNT_DELETED_TEXT = "✅ Hisobingiz o'chirildi. Endi sizga hech narsa yuborilmaydi.";
@@ -141,12 +137,12 @@ const INTRO = `🚛 <b>${NAME}</b> — ${ABOUT}`;
 // operator akkaunt — unga yozilganda Claude javob beradi, muammoni egasiga tiket qilib yetkazadi (collector opsResponder.js)
 const SUPPORT_USERNAME = (process.env.SUPPORT_USERNAME ?? "YukExperti").replace(/^@/, "");
 const SUPPORT_LINE = SUPPORT_USERNAME
-  ? `🤖 Botdan foydalanishda qiynalsangiz — AI yordamchimiz @${SUPPORT_USERNAME} ga yozing, u yordam beradi.`
+  ? `❓ Tushunmasangiz — @${SUPPORT_USERNAME} ga yozing, yordam beradi.`
   : null;
 const introLines = () => [INTRO, ...(SUPPORT_LINE ? ["", SUPPORT_LINE] : [])];
 
 // Rol so'rash (ostida ikki tugma: r:haydovchi / r:yuk_beruvchi). Avval «Siz kimsiz?» edi — Azimjon: qo'pol
-const ROLE_QUESTION = "Iltimos, rolingizni tanlang 👇";
+const ROLE_QUESTION = "Iltimos, tanlang 👇";
 
 // Rolga qarab so'zlar: nima keladi, sozlamalarda nima so'raladi.
 // chosen — rol tanlangach (sozlamalar hali yo'q): haydovchinikini Azimjon yozgan (2026-11-10), yuk beruvchiniki — unga o'xshatib
@@ -158,7 +154,7 @@ const ROLE_TEXT = {
     one: "yuk",
     many: "yuklar",
     matches: "qayerdan qayerga — tanlaysiz: oxirgi 24 soatdagi mos yuklar chiqadi, yangilari ham shu yo'nalishda keladi",
-    settings: "transport va qayerda ishlashingiz",
+    settings: "hamma sozlamalar bitta sahifada",
     setup: "transportingizni",
   },
   yuk_beruvchi: {
@@ -166,7 +162,7 @@ const ROLE_TEXT = {
     // Sozlamalar nima beradi — yuk beruvchida u IXTIYORIY (Azimjon, 2026-11-12: ro'yxatdan o'tish umuman shart emas,
     // «1 daqiqalik forma» deb majbur qilinmaydi). «🚚 Ro'yxatdan o'tish» so'zi yuk beruvchida endi ishlatilmaydi.
     // Shaxsiy avtomatik xabarlar uchun profil kerak (store.activeUsers `profile IS NOT NULL`) — matn shuni ma'qul ko'radi.
-    register: "ixtiyoriy: yo'nalish va mashina tanlasangiz, mos bo'sh mashinalar botga shaxsiy xabar bo'lib keladi",
+    register: "ixtiyoriy: qanday mashina kerakligini tanlasangiz, mos bo'sh mashinalar shu yerga keladi",
     one: "bo'sh mashina",
     many: "bo'sh mashinalar",
     matches: "oxirgi 24 soatdagi mos bo'sh mashinalar",
@@ -178,19 +174,14 @@ const ROLE_TEXT = {
 function helpText(driver) {
   const role = roleOf(driver);
   if (!role) {
-    return [
-      ...introLines(),
-      "",
-      `${ROLES.yuk_beruvchi.icon} Yuk beruvchilarga — yukingizga mos transportlar;`,
-      `${ROLES.haydovchi.icon} Haydovchilarga — transportingizga mos yuklar.`,
-    ].join("\n");
+    return introLines().join("\n");
   }
   const t = ROLE_TEXT[role];
   // Menyudagi tartibda (menu.js mainMenu). Ro'yxatdan o'tmaguncha menyuda faqat 3 tugma — ro'yxat ham shular.
   // Matnlar — Azimjon (2026-11-10; ro'yxatdan o'tmagan haydovchining /start ekrani bo'yicha, umumiy qatorlar hammaga)
-  const roleLine = `${MENU.role} — haydovchi va yuk beruvchi`;
+  const roleLine = `${MENU.role} — haydovchi yoki yuk egasi`;
   // Yuk beruvchida birinchi qator — «📦 Yuk berish» (menu.js)
-  const loadLine = role === "yuk_beruvchi" ? [`${MENU.giveLoad} — yukingizni haydovchilarga yuborish: forma yoki shu yerga oddiy xabar`] : [];
+  const loadLine = role === "yuk_beruvchi" ? [`${MENU.giveLoad} — yukingizni haydovchilarga yuborish (yoki shu chatga yozing)`] : [];
   // Sozlamalar qatori: profil bo'lsa — nima tanlangani, bo'lmasa — nima uchun kerakligi. Yuk beruvchida u qator
   // «ixtiyoriy» ni aytadi (t.register), haydovchida — «1 daqiqalik forma» (/start oxirida)
   const settingsLine = driver?.profile
@@ -206,32 +197,29 @@ function helpText(driver) {
   const feedLines = isShipper
     ? []
     : [
-        ...(mode.groups ? [`${MENU.groups} — qaysi guruh va kanallardan yuk e'lonlari darhol kelishi`] : []),
-        `${MENU.feed} — qaysi e'lonlar kelsin: 🚚 transport turi, 📍 qayerdan, 📌 qaysi guruhlardan (hozir: ${feedLabel(driver?.profile)})`,
+        `${MENU.feed} — qaysi yuklar kelsin: mashina, joy, guruh`,
       ];
   const menuLines = driver?.profile || isShipper
     ? [
-        ...(isShipper || mode.sorted ? [`${matchesLabel(driver)} — ${t.matches}`] : []),
-        ...(isShipper ? [] : [`${MENU.pause} / ${MENU.resume} — yuborishni to'xtatish va yoqish`]),
+        // Menyu tartibida: birinchi tugma (haydovchida — «🎛 Filtr»), keyin pauza…
+        ...(isShipper || mode.sorted ? [`${matchesLabel(driver)} — ${t.matches}`] : feedLines),
+        ...(isShipper ? [] : [`${MENU.pause} — yuk kelishini to'xtatish (${MENU.resume} — qayta yoqish)`]),
         roleLine,
         driver.phone && !isShipper
           ? ADD_GROUP_TEXT
-          : `${MENU.phone} — raqamingiz bilan sizni taniymiz: botni o'chirib qayta yoqsangiz yoki ilovaga kirsangiz ham, ma'lumotlaringiz saqlanib qoladi va joyidan davom etasiz`,
+          : `${MENU.phone} — sizni doim taniymiz, sozlamalar yo'qolmaydi`,
         settingsLine,
-        ...feedLines,
+        ...(mode.sorted ? feedLines : []),
       ]
     : [settingsLine, roleLine];
+  // 2026-11-19: qisqa — har tugma bitta qator; bot haqidagi matn faqat /start da (rol tanlanmaganda)
   return [
-    ...introLines(),
-    "",
-    "<b>Pastdagi menyu:</b>",
+    `<b>Pastdagi tugmalar</b> (siz: ${ROLES[role].icon} ${ROLES[role].name}):`,
     ...loadLine,
     ...menuLines,
     "",
-    `Siz: ${ROLES[role].icon} ${ROLES[role].name}siz.`, // «Haydovchisiz» / «Yuk beruvchisiz»
-    "Menyuni yozish qatorining o'ng tomonidagi belgi orqali ochib-yopiladi, umuman yo'qolsa — /start ni bosing.",
-    // /ochirish bu yerda yo'q (Azimjon matni) — u «Menu» buyruqlari ro'yxatida va raqam so'rash/saqlash xabarlarida bor
-    "Telefon ilovalari — /ilovalar.",
+    "Tugmalar yo'qolsa — /start ni bosing.",
+    ...(SUPPORT_LINE ? [SUPPORT_LINE] : []),
   ].join("\n");
 }
 
@@ -675,7 +663,7 @@ export function createBot({
     const text = driver.phone
       ? `📱 Sizning raqamingiz: <b>${escapeHtml(formatContactPhone(driver.phone))}</b>\n` +
         `Almashtirish uchun pastdagi «${PHONE.change}», o'chirish uchun «${PHONE.remove}» tugmasini bosing.`
-      : `📱 <b>Telefon raqamingizni ulashasizmi?</b>\n\n${PHONE_WHY}`;
+      : `📱 <b>Telefon raqamingizni ulashasizmi?</b>\n${PHONE_WHY}`;
     await bot.api.sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: phoneKeyboard(Boolean(driver.phone)) });
   }
 
@@ -710,13 +698,14 @@ export function createBot({
     // Yuk beruvchi (2026-11-10): darhol «📦 Yuk berish» — forma yoki oddiy xabar; bo'sh mashinalar uchun ro'yxatdan o'tish ixtiyoriy
     if (role === "yuk_beruvchi") {
       const t = ROLE_TEXT[role];
-      await ctx.reply(`${t.chosen}\n\n${loadIntro({ form: Boolean(loadFormUrl()) })}\n\n«${settingsLabel(driver)}» — ${t.register}.`, html(driver));
+      // 2026-11-19: faqat «yukingizni yozing» — sozlamalar haqida gap yo'q (ixtiyoriy, /yordam da bor)
+      await ctx.reply(loadIntro({ form: Boolean(loadFormUrl()) }), html(driver));
       return;
     }
     // Haydovchi, sozlamalar hali yo'q (2026-11-14): avval rejim — «mana shunaqa rejimlar bor» (feed.js). Saralangan
     // tanlansa — ro'yxatdan o'tishning 2 yo'li (registerPaths), tezkor/guruhlarim — mashinasiz, darhol
     // 2026-11-19 (Azimjon: «oddiy haydovchiga default tezkor rejimi, hamma tezkor rejimda!»): rejim so'ralmaydi — darhol tezkor
-    await ctx.reply(ROLE_TEXT[role].chosen, html(driver));
+    // 2026-11-19: alohida «🚚 Haydovchisiz…» xabari yo'q (u eskirgan menyu bilan kelardi) — darhol «✅ Tayyor!» (feedSavedText)
     await pickMode(ctx, NEW_DRIVER_FEED_MODE, { auto: true });
   }
 
@@ -825,7 +814,7 @@ export function createBot({
     const driver = rememberUser(ctx);
     if (roleOf(driver) !== "haydovchi") return openModes(ctx);
     const feed = feedOf(driver.profile);
-    if (!FEED_MODES[feed.mode].groups) return showModes(ctx, driver, { intro: `${MENU.groups} — «📌 Mening guruhlarim» rejimida. Avval rejimni tanlang:` });
+    if (!FEED_MODES[feed.mode].groups) return showModes(ctx, driver);
     const draft = { step: "groups", mode: feed.mode, sources: [...feed.sources], page: 0, at: Date.now() };
     feedDrafts.set(ctx.chat.id, draft);
     await showGroups(ctx, draft);
@@ -896,7 +885,7 @@ export function createBot({
     const driver = rememberUser(ctx);
     if (roleOf(driver) !== "haydovchi") return showStart(ctx);
     if (ctx.callbackQuery) await ctx.editMessageReplyMarkup().catch(() => {});
-    await ctx.reply("Tezkorlik endi hamma rejimda bor. Kamroq e'lon kerak bo'lsa — «🎛 Rejim»: 🚚 transport turi, 📍 qayerdan yoki 📌 faqat o'z guruhlaringiz; vaqtincha to'xtatish — «⏸ Pauza».", menu(driver));
+    await ctx.reply(`Yuklar endi doim darhol keladi. Kamroq kerak bo'lsa — «${MENU.feed}», to'xtatish — «${MENU.pause}».`, menu(driver));
     return showModes(ctx, driver);
   }
 
@@ -908,7 +897,7 @@ export function createBot({
     // shuning uchun yuk beruvchida ham pauza profilsiz qabul qilinadi (profil faqat shaxsiy avtomatik xabarlar uchun)
     if (!driver.profile && roleOf(driver) !== "yuk_beruvchi") return openSettings(ctx);
     const updated = store.saveDriver(ctx.chat.id, { active });
-    await ctx.reply(active ? "▶️ Yuk yuborish yoqildi." : `⏸ Yuk yuborish to'xtatildi. Qayta yoqish: «${MENU.resume}»`, menu(updated));
+    await ctx.reply(active ? "▶️ Yoqildi — yuklar yana keladi." : `⏸ To'xtatildi — yuk kelmaydi.\nQayta yoqish — «${MENU.resume}».`, menu(updated));
   }
 
   // «📋 Mos yuklar» (haydovchi) yoki «🚚 Bo'sh mashinalar» (yuk beruvchi) — eski menyu tugmasi bosilsa ham hozirgi rol bo'yicha.
@@ -928,7 +917,7 @@ export function createBot({
       const mode = FEED_MODES[feedMode(driver.profile)];
       // Tezkor / guruhlarim: ro'yxat kerak emas — yuklar o'zi darhol keladi
       if (!mode.sorted) {
-        await ctx.reply(`Siz «${mode.icon} ${mode.name}» rejimidasiz: yuk e'lonlari o'zi darhol shu yerga keladi. Almashtirish — «${MENU.feed}».`, menu(driver));
+        await ctx.reply(`Yuk e'lonlari o'zi darhol shu yerga keladi (${mode.icon} ${mode.name}). O'zgartirish — «${MENU.feed}».`, menu(driver));
         return;
       }
       await ctx.reply(`Avval ${t.setup} kiriting: «${settingsLabel(driver)}».`, menu(driver));
@@ -1142,7 +1131,7 @@ export function createBot({
   // «⏭ Keyinroq» / «↩️ O'zgartirmaslik» — asosiy menyu qaytadi, bot boshqa so'ramaydi
   privateChat.hears([PHONE.later, PHONE.keep], async (ctx) => {
     const driver = rememberUser(ctx);
-    const text = driver.phone ? "Raqamingiz o'zgarmadi." : `Mayli. Xohlasangiz, keyin pastdagi «${MENU.phone}» tugmasi bilan ulashasiz.`;
+    const text = driver.phone ? "Raqamingiz o'zgarmadi." : `Mayli 👍 Keyin xohlasangiz — «${MENU.phone}».`;
     // Guruh qo'shish uchun so'ralgan edi — faqat menyu (yo'nalish savolisiz)
     if (takeGroupIntent(ctx.chat.id)) return ctx.reply(text, menu(driver));
     await afterPhone(ctx, driver, text);
@@ -1289,7 +1278,7 @@ export function createBot({
   privateChat.command("ilovalar", showApps);
   privateChat.hears(MENU.role, switchRolePrompt);
   privateChat.hears(MENU.help, showHelp);
-  privateChat.hears(MENU.feed, openModes);
+  privateChat.hears([MENU.feed, OLD_MENU.feed], openModes);
   privateChat.hears(MENU.fastOff, turnFastOff);
   privateChat.command("rejim", openModes);
   privateChat.hears(MENU.groups, openGroups);
@@ -1724,7 +1713,7 @@ export function createBot({
     // Haydovchi «✍️ Shu chatga yozish» ni bosgan (profilsiz) — bu matnni mashina tavsifi deb o'qiymiz
     if (!driver.draft && roleOf(driver) === "haydovchi" && !driver.profile?.vehicle && regTextActive(ctx.chat.id)) return readRegText(ctx, driver);
     if (!driver.draft) {
-      await ctx.reply("Pastdagi menyudan tanlang 👇", menu(driver));
+      await ctx.reply("Pastdagi tugmalardan birini bosing 👇", menu(driver));
       return;
     }
     const { draft, error } = applyText(driver.draft, ctx.message.text);

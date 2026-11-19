@@ -28,11 +28,12 @@ const EXAMPLE = "Andijondan Toshkentga 20 tonna un bor, tent fura kerak, 3 mln, 
 // bo'lishligini 1-o'rinda va bold qilib yozib ber» — chatga yozish yo'li BIRINCHI va QALIN, web forma ikkinchi va
 // oddiy qator. Manzil bo'lmasa (form=false) 2️⃣ qatori umuman yo'q, 1️⃣ raqami ham tushiriladi.
 export function loadIntro({ form = true } = {}) {
+  // 2026-11-19 (soddalashtirish): bitta harakat — yozib yuborish; forma — ikkinchi yo'l
   return [
-    `📦 <b>Yuk berish</b> — yukingiz mos haydovchilarga darhol boradi, ular sizga o'zlari qo'ng'iroq qilishadi.`,
+    `📦 <b>Yukingizni shu chatga yozib yuboring</b> — mos haydovchilar o'zlari qo'ng'iroq qiladi.`,
     "",
-    `${form ? "1️⃣ " : ""}<b>Shu chatga yuk haqida ma'lumotni yozib yuboring</b> — masalan:\n<b>${EXAMPLE}</b>`,
-    form ? `\n2️⃣ Yoki pastdagi «${LOAD_BUTTON}» tugmasi orqali forma (1 daqiqa).` : null,
+    `Masalan:\n<b>${EXAMPLE}</b>`,
+    form ? `\nYoki pastdagi «${LOAD_BUTTON}» tugmasi — forma.` : null,
   ]
     .filter(Boolean)
     .join("\n");
