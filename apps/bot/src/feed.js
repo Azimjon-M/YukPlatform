@@ -103,8 +103,8 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", ki
       { text: p < pages - 1 ? "➡️" : "·", data: `fg:p:${Math.min(pages - 1, p + 1)}` },
     ]);
   }
-  keyboard.push([{ text: "✅ Saqlash", data: "fg:ok" }]);
-  keyboard.push([{ text: "⬅️ Orqaga", data: "fg:back" }]);
+  keyboard.push([{ text: "✅ Saqlash va orqaga", data: "fg:ok" }]);
+  keyboard.push([{ text: "⬅️ Saqlamasdan orqaga", data: "fg:back" }]);
   return { text: lines.join("\n"), keyboard, page: p };
 }
 
@@ -120,8 +120,8 @@ export function regionStep({ chosen = [] } = {}) {
   const keyboard = [];
   for (let i = 0; i < buttons.length; i += 2) keyboard.push(buttons.slice(i, i + 2));
   keyboard.push([{ text: `${chosen.length ? "▫️" : "✅"} Hamma joy (filtrsiz)`, data: "fr:all" }]);
-  keyboard.push([{ text: "✅ Saqlash", data: "fr:ok" }]);
-  keyboard.push([{ text: "⬅️ Orqaga", data: "fr:back" }]);
+  // Bitta chiqish tugmasi — doim saqlaydi (2026-11-19: «⬅️ Orqaga» saqlamasdi, haydovchi tanlovi yo'qoldi deb o'yladi)
+  keyboard.push([{ text: "✅ Saqlash va orqaga", data: "fr:ok" }]);
   return { text: lines.join("\n"), keyboard };
 }
 
@@ -135,8 +135,8 @@ export function truckStep({ chosen = [] } = {}) {
   ];
   const keyboard = TRUCK_FILTERS.map((t) => [{ text: `${chosen.includes(t.id) ? "✅" : "▫️"} ${t.icon} ${t.name}`, data: `ft:t:${t.id}` }]);
   keyboard.push([{ text: `${chosen.length ? "▫️" : "✅"} Hammasi (filtrsiz)`, data: "ft:all" }]);
-  keyboard.push([{ text: "✅ Saqlash", data: "ft:ok" }]);
-  keyboard.push([{ text: "⬅️ Orqaga", data: "ft:back" }]);
+  // Bitta chiqish tugmasi — doim saqlaydi (2026-11-19: «⬅️ Orqaga» saqlamasdi, haydovchi tanlovi yo'qoldi deb o'yladi)
+  keyboard.push([{ text: "✅ Saqlash va orqaga", data: "ft:ok" }]);
   return { text: lines.join("\n"), keyboard };
 }
 

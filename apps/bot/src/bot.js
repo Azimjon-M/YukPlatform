@@ -22,6 +22,8 @@ import {
   feedMode,
   choiceMode,
   feedLabel,
+  regionTitle,
+  truckFilterTitle,
   feedOf,
   isOwnContact,
   isPro,
@@ -1324,16 +1326,16 @@ export function createBot({
     if (roleOf(driver) !== "haydovchi" || draft?.step !== "regions") return staleList(ctx, driver);
     draft.at = Date.now();
     const data = ctx.callbackQuery.data;
-    if (data === "fr:ok") return saveAndBack(ctx, driver, { regions: draft.regions });
-    await ctx.answerCallbackQuery();
-    if (data === "fr:back") {
-      feedDrafts.delete(ctx.chat.id);
-      return showModes(ctx, driver, { edit: true });
-    }
-    if (data === "fr:all") draft.regions = [];
-    else {
+    // Eski xabardagi «⬅️ Orqaga» ham saqlaydi
+    if (data === "fr:ok" || data === "fr:back") return saveAndBack(ctx, driver, { regions: draft.regions });
+    if (data === "fr:all") {
+      draft.regions = [];
+      await ctx.answerCallbackQuery({ text: "Hamma joydan" });
+    } else {
       const id = ctx.match[1];
-      draft.regions = draft.regions.includes(id) ? draft.regions.filter((r) => r !== id) : [...draft.regions, id];
+      const had = draft.regions.includes(id);
+      draft.regions = had ? draft.regions.filter((r) => r !== id) : [...draft.regions, id];
+      await ctx.answerCallbackQuery({ text: `${had ? "▫️ Olib tashlandi" : "✅ Tanlandi"}: ${regionTitle(id)}` });
     }
     return showRegions(ctx, draft, { edit: true });
   });
@@ -1353,16 +1355,15 @@ export function createBot({
     const draft = feedDraft(ctx.chat.id);
     if (draft?.step !== "trucks") return staleList(ctx, driver);
     draft.at = Date.now();
-    if (data === "ft:ok") return saveAndBack(ctx, driver, { trucks: draft.trucks });
-    await ctx.answerCallbackQuery();
-    if (data === "ft:back") {
-      feedDrafts.delete(ctx.chat.id);
-      return showModes(ctx, driver, { edit: true });
-    }
-    if (data === "ft:all") draft.trucks = [];
-    else {
+    if (data === "ft:ok" || data === "ft:back") return saveAndBack(ctx, driver, { trucks: draft.trucks });
+    if (data === "ft:all") {
+      draft.trucks = [];
+      await ctx.answerCallbackQuery({ text: "Hamma transport" });
+    } else {
       const id = ctx.match[1];
-      draft.trucks = draft.trucks.includes(id) ? draft.trucks.filter((t) => t !== id) : [...draft.trucks, id];
+      const had = draft.trucks.includes(id);
+      draft.trucks = had ? draft.trucks.filter((t) => t !== id) : [...draft.trucks, id];
+      await ctx.answerCallbackQuery({ text: `${had ? "▫️ Olib tashlandi" : "✅ Tanlandi"}: ${truckFilterTitle(id)}` });
     }
     return showTrucks(ctx, draft, { edit: true });
   });

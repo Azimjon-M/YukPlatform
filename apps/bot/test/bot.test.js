@@ -1722,16 +1722,22 @@ test("rejim: «🚚 Transport» — to'rt tur, ixtiyoriy; boshqa filtr va guruhl
   await press("ft:open");
   const picker = calls.filter((c) => c.method === "editMessageText").at(-1);
   assert.match(picker.payload.text, /Qaysi transport/);
-  assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["ft:t:fura", "ft:t:isuzu", "ft:t:bongo", "ft:t:labo", "ft:all", "ft:ok", "ft:back"]);
+  assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["ft:t:fura", "ft:t:isuzu", "ft:t:bongo", "ft:t:labo", "ft:all", "ft:ok"]);
   await press("ft:t:isuzu");
+  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "✅ Tanlandi: Isuzu");
   await press("ft:t:labo");
   await press("ft:ok");
   assert.deepEqual(store.getDriver(42).profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"], regions: ["buxoro"], trucks: ["isuzu", "labo"] });
   assert.match(calls.filter((c) => c.method === "editMessageText").at(-1).payload.text, /Transport: <b>Isuzu, Labo \/ Damas<\/b>/);
-  // «⬅️ Orqaga» — saqlanmaydi
+  // Eski xabardagi «⬅️ Orqaga» ham saqlaydi (2026-11-19: haydovchi tanlab «Orqaga» bosdi — tanlov yo'qolgan edi)
   await press("ft:open");
-  await press("ft:all");
+  await press("ft:t:fura");
   await press("ft:back");
+  assert.deepEqual(store.getDriver(42).profile.feed.trucks, ["fura", "isuzu", "labo"]);
+  await press("ft:open");
+  await press("ft:t:fura");
+  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "▫️ Olib tashlandi: Fura");
+  await press("ft:ok");
   assert.deepEqual(store.getDriver(42).profile.feed.trucks, ["isuzu", "labo"]);
   // Guruhlar rejimidan «🌐 Hamma guruhlardan olish» — filtrlar qoladi
   await press("fm:tezkor");
