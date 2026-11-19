@@ -483,8 +483,11 @@ test("QR / havola: raqamsiz boshlanadi, worker o'zi yangi QR va «tasdiqlandi» 
   assert.deepEqual([started.step, started.qrUrl, started.phone], ["qr", "tg://login?token=AAA", null]);
   assert.equal(workers.spawned[0].sent[0].type, "qr");
   assert.equal(workers.spawned[0].sent[0].phone, undefined, "raqam yo'q");
-  workers.spawned[0].emit("message", { type: "qr", url: "tg://login?token=BBB" });
+  assert.equal(started.qrRefreshIn, null, "worker vaqt bermadi — sanagich yo'q");
+  workers.spawned[0].emit("message", { type: "qr", url: "tg://login?token=BBB", refreshInMs: 28_000 });
   assert.equal(tgLogin.current(558).qrUrl, "tg://login?token=BBB", "QR yangilandi");
+  const left = tgLogin.current(558).qrRefreshIn;
+  assert.ok(left > 27_000 && left <= 28_000, `QR yangilanguncha ~28 s (${left})`);
   workers.spawned[0].emit("message", { type: "done", user: USER });
   const done = tgLogin.current(558);
   assert.deepEqual([done.step, done.qrUrl, done.user.username], ["done", null, "yuk_ikki"]);

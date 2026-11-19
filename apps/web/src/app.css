@@ -1511,3 +1511,17 @@ circle.truck-near {
   justify-content: center;
   text-decoration: none;
 }
+
+/* QR yangilanguncha sanash (TgAccounts.jsx QrStep) */
+.tg-qr-timer {
+  margin: 4px 0 10px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.tg-qr-timer.soon {
+  color: var(--error);
+}

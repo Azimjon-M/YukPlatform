@@ -118,6 +118,8 @@ export function createTgLogin({
       phone: login.phone,
       step: login.step, // sending | code | qr | checking | password | done | failed
       qrUrl: login.step === "qr" ? login.qrUrl : null, // tg://login?token=… — QR shu matndan chiziladi (~30 s da yangilanadi; havola sifatida Telegram uni qabul qilmaydi)
+      // QR yangilanguncha qolgan ms (so'rov paytidagi; ilova o'z soatidan sanaydi — server bilan soat farqi muhim emas)
+      qrRefreshIn: login.step === "qr" && login.qrRefreshAt ? Math.max(0, login.qrRefreshAt - now()) : null,
       via: login.via, // kod qayerga ketdi: app | sms | call | email | …
       next: login.next, // «Kodni qayta yuborish» bosilsa qayerga ketadi (sms | call | …; null — boshqa yo'l yo'q)
       resendIn: login.resendAt ? Math.max(0, Math.ceil((login.resendAt - now()) / 1000)) : 0, // shuncha soniyadan keyin qayta yuborish mumkin
@@ -207,7 +209,7 @@ export function createTgLogin({
         log(`Telegram kod yuborildi: «${target.name}» → ${reply.via ?? "?"}${reply.next ? ` (qayta yuborilsa — ${reply.next})` : ""}`);
         break;
       case "qr":
-        Object.assign(target, { step: "qr", qrUrl: reply.url ?? null });
+        Object.assign(target, { step: "qr", qrUrl: reply.url ?? null, qrRefreshAt: reply.refreshInMs > 0 ? now() + reply.refreshInMs : null });
         break;
       case "password":
         Object.assign(target, { step: "password", hint: reply.hint ?? null });

@@ -120,10 +120,12 @@ export function createLoginSession({ telegram, send }) {
         retries = 0;
         return send({ type: "password", hint: result.hint ?? null });
       }
-      await send({ type: "qr", url: result.url, expires: result.expires ?? null });
       const left = result.expires ? result.expires * 1000 - Date.now() - 2000 : QR_REFRESH_MS;
+      const waitMs = Math.min(QR_REFRESH_MS, Math.max(QR_MIN_WAIT_MS, left));
+      // refreshInMs — QR qachon yangilanadi (Mini App ekranda soniyalarni sanaydi)
+      await send({ type: "qr", url: result.url, expires: result.expires ?? null, refreshInMs: waitMs });
       await new Promise((resolve) => {
-        const timer = setTimeout(resolve, Math.min(QR_REFRESH_MS, Math.max(QR_MIN_WAIT_MS, left)));
+        const timer = setTimeout(resolve, waitMs);
         wake = () => {
           clearTimeout(timer);
           resolve();
