@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { ADMIN_TG, MY_TG } from "./api.js";
-import { confirmAction, haptic, inTelegram, openLink } from "./telegram.js";
+import { confirmAction, haptic, inTelegram, openLink, useMainButtonLock } from "./telegram.js";
 import { Notice, Spinner } from "./ui.jsx";
 import { ACTIVE_STEPS, accountError, accountLabel, accountStatus, accountWho, codeWhere, scanText, suggestAccountName } from "./tgAccounts.js";
 
@@ -315,6 +315,10 @@ export function TgAccounts({ onAuthLost, mine = false }) {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [load]);
+
+  // Akkaunt ulash formasi yoki kirish qadami (kod, 2FA parol, QR) ochiq — pastdagi Telegram «Saqlash» tugmasi yashirinadi:
+  // uni bosib parol o'rniga sozlamalar saqlanib, Mini App yopilib qolardi (2026-11-19)
+  useMainButtonLock(Boolean(form) || ACTIVE_STEPS.has(data?.login?.step));
 
   // QR kutilayotganda tezroq: yangi QR va «tasdiqlandi» darhol ko'rinsin
   const waitingQr = data?.login?.step === "qr";

@@ -1,5 +1,5 @@
 // Telegram Mini App bilan aloqa (telegram-web-app.js). Oddiy brauzerda ochilsa, ilova sayt bo'lib ishlaydi.
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 // Kutubxona oddiy brauzerda ham Telegram.WebApp ni yaratadi (platform "unknown", initData bo'sh)
 const tg = window.Telegram?.WebApp ?? null;
@@ -96,17 +96,38 @@ export function useBackButton(onBack, visible = true) {
 }
 
 // Telegram'ning pastdagi katta tugmasi (MainButton). visible=false — yashiriladi
+// Qulf (2026-11-19 hodisa: akkaunt ulashda 2FA parolini yozib, klaviatura ustidagi «✅ Saqlash» bosildi — sozlamalar saqlanib,
+// Mini App yopildi, parol esa yuborilmadi). Sahifada boshqa forma (akkaunt ulash) ochiq turganda useMainButtonLock(true) —
+// pastdagi Telegram tugmasi yashiriladi, foydalanuvchi forma ichidagi tugmani bosadi
+let mainButtonLocks = 0;
+const lockListeners = new Set();
+const lockChanged = () => lockListeners.forEach((listener) => listener());
+const subscribeLock = (listener) => (lockListeners.add(listener), () => lockListeners.delete(listener));
+const lockedNow = () => mainButtonLocks > 0;
+export function useMainButtonLock(active) {
+  useEffect(() => {
+    if (!active) return undefined;
+    mainButtonLocks++;
+    lockChanged();
+    return () => {
+      mainButtonLocks--;
+      lockChanged();
+    };
+  }, [active]);
+}
+
 export function useMainButton(text, onClick, visible = true) {
+  const locked = useSyncExternalStore(subscribeLock, lockedNow, lockedNow);
   useEffect(() => {
     if (!inTelegram) return undefined;
     const button = tg.MainButton;
-    button.setParams({ text, is_visible: visible, is_active: true });
+    button.setParams({ text, is_visible: visible && !locked, is_active: true });
     button.onClick(onClick);
     return () => {
       button.offClick(onClick);
       button.hide();
     };
-  }, [text, onClick, visible]);
+  }, [text, onClick, visible, locked]);
 }
 
 // Mini App'ni yopish (Telegram ichida). Saytda hech narsa qilmaydi → false
