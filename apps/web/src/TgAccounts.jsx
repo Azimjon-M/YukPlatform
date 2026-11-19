@@ -34,25 +34,7 @@ function QrImage({ text }) {
 // qabul qilmaydi (fishingdan himoya) — Android (LaunchActivity, AuthAnotherClientUrl) ham, iOS (UrlLoginHint) ham havola
 // bosilsa faqat «Sozlamalar → Qurilmalar → QR'ni skanerlang» deydi. Shuning uchun QR'ni BOSHQA qurilma skanerlaydi.
 // Azimjon sinadi: kompyuterdagi Mini App'dagi QR'ni telefon skanerladi — ishladi.
-// QR yangilanguncha soniyalar (2026-11-19, Azimjon: «QR tanlanganda 30 s ekranda sanasang»). Server qolgan ms ni beradi
-// (qrRefreshIn) — har yangi javobda shu qurilma soatidan qayta hisoblanadi; 0 bo'lsa — yangi QR kelyapti
-function useCountdown(ms, key) {
-  const [deadline, setDeadline] = useState(null);
-  const [nowMs, setNowMs] = useState(Date.now());
-  useEffect(() => {
-    if (ms == null) return setDeadline(null);
-    setDeadline(Date.now() + ms);
-  }, [ms, key]);
-  useEffect(() => {
-    if (deadline == null) return undefined;
-    const timer = setInterval(() => setNowMs(Date.now()), 250);
-    return () => clearInterval(timer);
-  }, [deadline]);
-  return deadline == null ? null : Math.max(0, Math.ceil((deadline - nowMs) / 1000));
-}
-
 function QrStep({ login, onCancel }) {
-  const left = useCountdown(login.qrRefreshIn ?? null, login.qrUrl);
   return (
     <div className="section tg-acc">
       <h2>📷 Kodsiz kirish — QR'ni skanerlang</h2>
@@ -61,11 +43,6 @@ function QrStep({ login, onCancel }) {
         bosib, shu QR kodni skanerlang.
       </p>
       {login.qrUrl && <QrImage text={login.qrUrl} />}
-      {left != null && (
-        <p className={`tg-qr-timer${left <= 5 ? " soon" : ""}`} aria-live="polite">
-          {left > 0 ? `⏱ ${left} s — shu vaqt ichida skanerlang` : "🔄 Yangi QR tayyorlanyapti…"}
-        </p>
-      )}
       <p className="hint">QR har ~30 soniyada o'zi yangilanadi. Tasdiqlangach shu yerda «✅ qo'shildi» chiqadi (2FA bo'lsa — parol so'raladi).</p>
       <p className="hint">
         QR'ni boshqa qurilma skanerlaydi: bu sahifani kompyuterda (Telegram Desktop) yoki boshqa telefonda oching. Telefon bitta bo'lsa —
