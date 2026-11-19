@@ -1824,6 +1824,21 @@ test("tezkor xabar (deliverRaw): asl matn, telefonlar, «📄 Asl e'lon» va e'l
   assert.deepEqual(links, [{ postId: 77, phone: 0, chatId: 42 }]);
 });
 
+test("tezkor xabar: 3 s kutish paytida «🎛 Filtr» ochilsa yoki pauza bosilsa — yuborilmaydi", async () => {
+  const { store, calls, deliverRaw, message } = setup({});
+  store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true });
+  const post = { id: 78, source: "@TutGruz", link: "https://t.me/TutGruz/6", text: "Toshkentdan Samarqandga 20 t un bor\n90 000 00 01", postedAt: Date.now() };
+  assert.equal((await deliverRaw(42, post, { phones: [] })).ok, true);
+  const sentCount = () => calls.filter((c) => c.method === "sendMessage" && /un bor/.test(c.payload.text)).length;
+  const waiting = deliverRaw(42, { ...post, id: 79 }, { phones: [] }); // oraliq tufayli kutadi
+  await message(PRIVATE, "🎛 Filtr");
+  assert.equal((await waiting).ok, false);
+  store.saveDriver(42, { active: false }); // pauza ham
+  await message(PRIVATE, "/start"); // band holatini bo'shatmaydi, lekin pauza baribir to'xtatadi
+  assert.equal((await deliverRaw(42, { ...post, id: 80 }, { phones: [] })).ok, false);
+  assert.equal(sentCount(), 1, "Filtr oynasidan keyin e'lon kelmadi");
+});
+
 test("«💬 Lichkasi» tugmasi: username'i yo'q, bot taniydigan odamga — ID bo'yicha; begonaga va username bo'lsa — tugma yo'q", async () => {
   const { loadButtons } = await import("../src/bot.js");
   const urls = (kb) => (kb ? kb.inline_keyboard.flat().map((b) => b.url ?? b.web_app?.url) : []);

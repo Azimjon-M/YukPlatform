@@ -1809,6 +1809,10 @@ export function createBot({
     if (Date.now() < blocked) return { ok: false, error: `429: ${Math.ceil((blocked - Date.now()) / 1000)} s kutish` };
     const waitMs = (rawLastAt.get(chatId) ?? 0) + RAW_CHAT_GAP_MS - Date.now();
     if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    // Kutish paytida (≤ 3 s) odam «🎛 Filtr» ni ochgan yoki pauza bosgan bo'lishi mumkin (2026-11-19 tiket: Filtr oynasidan
+    // keyin e'lon keldi) — shuning uchun yuborishning o'zidan oldin yana tekshiramiz
+    if (isBusy(chatId)) return { ok: false, error: "band: sozlash oynasi ochiq" };
+    if (store.getDriver(chatId)?.active === false) return { ok: false, error: "pauza" };
     rawLastAt.set(chatId, Date.now());
     const outcome = await deliverRawNow(chatId, rawPost, opts);
     const retry = Number(/retry after (\d+)/i.exec(outcome?.error ?? "")?.[1]);
