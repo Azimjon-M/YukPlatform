@@ -1651,7 +1651,29 @@ export function createBot({
 
   // «⚡ Tezkor» / «📌 Mening guruhlarim» (pipeline.js createWorker deps.deliverRaw): e'lonning ASL matni, AI'siz.
   // Tugmalar yukdagidek: «📄 Asl e'lon» + «📞 Telefon qilish» (raqamlar — e'lon matnidan, @yuk/parser extractPhones)
-  async function deliverRaw(chatId, rawPost, { phones = [] } = {}) {
+  // Bitta chatga sur'at (2026-11-19): saralash o'chiq — tezkor yo'lda bir haydovchiga daqiqasiga ~30 ta e'lon; to'plangan
+  // e'lonlar bir zumda ketsa Telegram 429 «retry after 527» bilan chatni ~9 daqiqaga yopib qo'ydi (haydovchi hech narsa
+  // olmaydi). Endi: bir chatga xabarlar orasida kamida RAW_CHAT_GAP_MS; 429 bo'lsa — Telegram aytgan vaqtgacha bu chatga
+  // urinilmaydi (har urinish blokni uzaytirishi mumkin), o'sha paytdagi e'lonlar o'tkazib yuboriladi (eskirgan bo'ladi)
+  const RAW_CHAT_GAP_MS = 1_100;
+  const rawLastAt = new Map(); // chatId → oxirgi yuborilgan vaqt
+  const rawBlockedUntil = new Map(); // chatId → 429 tugaydigan vaqt
+  async function deliverRaw(chatId, rawPost, opts = {}) {
+    const blocked = rawBlockedUntil.get(chatId) ?? 0;
+    if (Date.now() < blocked) return { ok: false, error: `429: ${Math.ceil((blocked - Date.now()) / 1000)} s kutish` };
+    const waitMs = (rawLastAt.get(chatId) ?? 0) + RAW_CHAT_GAP_MS - Date.now();
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    rawLastAt.set(chatId, Date.now());
+    const outcome = await deliverRawNow(chatId, rawPost, opts);
+    const retry = Number(/retry after (\d+)/i.exec(outcome?.error ?? "")?.[1]);
+    if (retry > 0) {
+      rawBlockedUntil.set(chatId, Date.now() + retry * 1000);
+      log(`Telegram ${chatId} chatiga ${retry} s yozishni chekladi — shu vaqt tezkor e'lonlar unga yuborilmaydi`);
+    }
+    return outcome;
+  }
+
+  async function deliverRawNow(chatId, rawPost, { phones = [] } = {}) {
     const post = withSender(rawPost);
     const mode = FEED_MODES[feedMode(store.getDriver(chatId)?.profile)];
     const { text } = formatRaw(post, { phones, label: mode.groups ? "📌 Guruhingizdan" : "⚡ Tezkor" });
