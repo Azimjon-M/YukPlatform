@@ -997,3 +997,27 @@ test("deps.held: sozlash oynasi ochiq haydovchiga tezkor e'lon yuborilmaydi, bos
   assert.ok(!got.includes(7), "band — yo'q");
   assert.ok(got.includes(1) && got.includes(9));
 });
+
+test("tezkor navbat (2026-11-19 tiket): navbatda turganda pauza bosilsa — qolganlari yuborilmaydi; haydovchilar bir-birini kutmaydi", async () => {
+  const { store, deps, post } = rawSetup();
+  deps.sortingOff = true;
+  deps.pool = noAi;
+  const sent = [];
+  deps.deliverRaw = async (chatId, p) => {
+    if (chatId === 7) {
+      await new Promise((r) => setTimeout(r, 60)); // sekin chat
+      if (p.messageId === 1) store.saveDriver(7, { active: false, why: "user" }); // birinchisi ketayotganda pauza bosdi
+    }
+    sent.push([chatId, p.messageId, Date.now()]);
+    return { ok: true };
+  };
+  post("@g", 1, LOAD_TEXT);
+  post("@g", 2, LOAD_TEXT.replace("0001", "0021"));
+  post("@g", 3, LOAD_TEXT.replace("0001", "0031"));
+  const started = Date.now();
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(sent.filter(([c]) => c === 7).map(([, id]) => id), [1], "pauzadan keyin — yo'q");
+  assert.deepEqual(sent.filter(([c]) => c === 1).map(([, id]) => id), [1, 2, 3]);
+  // Boshqa haydovchining 3 ta e'loni sekin chatni kutmagan
+  assert.ok(Math.max(...sent.filter(([c]) => c === 1).map(([, , t]) => t)) - started < 50, "1-haydovchi 7-ni kutmadi");
+});

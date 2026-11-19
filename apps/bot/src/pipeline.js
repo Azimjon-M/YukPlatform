@@ -289,7 +289,11 @@ export function createWorker(
   // rawPending — yuborish navbatidagi tezkor xabarlar (e'lon id → chat id'lar). handleParsed ularni «olgan» deb biladi:
   // aks holda qoidaviy parser 3 ms da tushungan e'lon tezkor xabar yetib bormasdan saralangan ko'rinishda ham ketardi
   const rawPending = new Map();
-  let rawChain = Promise.resolve(); // tezkor xabarlar zanjiri — saralangan yuborishdan alohida, uni kutmaydi
+  // Har haydovchining O'Z navbati (2026-11-19): avval bitta umumiy zanjir edi — bot.js bir chatga 1,1 s oraliq qo'ygani uchun
+  // bir haydovchining navbati hammanikini ushlab, 2 daqiqalik tirbandlik bo'lgan (pauzadan keyin ham 111 ta e'lon ketgan)
+  const rawQueues = new Map(); // chatId → oxirgi yuborish va'dasi
+  const rawAll = new Set(); // hali tugamagan yuborishlar (runOnce / stop kutadi)
+  const RAW_STALE_MS = 5 * 60_000; // navbatda shundan ko'p turib qolgan e'lon endi yuborilmaydi
   let rawCount = 0;
   const rawSentTo = (postId) => new Set([...(store.postDeliveredTo?.(postId) ?? []), ...(rawPending.get(postId) ?? [])]);
   const handleDeps = { ...deps, rawSentTo };
@@ -332,26 +336,46 @@ export function createWorker(
     const phones = extractPhones(post.text);
     const closed = isClosedSource(post.source);
     const plan = { kind: "yuk", source: closed ? post.source : null, owner: closed ? (store.sourceOwner?.(post.source) ?? null) : null };
-    rawChain = rawChain.then(async () => {
-      let count = 0;
-      for (const user of targets) {
-        if (controller.signal.aborted) break;
-        try {
-          if (!planAllows(user, plan)) continue; // yopiq guruh — faqat Pro
-          if (deps.held?.(user.chatId)) continue; // sozlash oynasi ochiq (bot.js isBusy) — shu e'lon unga yuborilmaydi
-          if (deps.canReceive && !(await deps.canReceive(user))) continue;
-          const outcome = await deps.deliverRaw(user.chatId, post, { phones });
-          const ok = outcome === true || outcome?.ok === true;
-          store.addPostDelivery?.({ postId: post.id, chatId: user.chatId, ok, error: ok ? null : (outcome?.error ?? null) });
-          if (ok) count++;
-        } catch (error) {
-          log(`#${post.id}: tezkor xabar yuborilmadi (${user.chatId}) — ${error.description ?? error.message}`);
+    let count = 0;
+    let left = targets.length;
+    const queuedAt = now();
+    const sendTo = async (user) => {
+      if (controller.signal.aborted) return;
+      try {
+        if (!planAllows(user, plan)) return; // yopiq guruh — faqat Pro
+        if (deps.held?.(user.chatId)) return; // sozlash oynasi ochiq (bot.js isBusy) — shu e'lon unga yuborilmaydi
+        if (now() - queuedAt > RAW_STALE_MS) return; // navbatda eskirdi
+        // Navbatda turgan paytda holati o'zgargan bo'lishi mumkin (2026-11-19 tiket: pauzadan keyin ham kelaverdi) —
+        // yuborishdan oldin bazadan yangisini o'qiymiz: pauza, hisob o'chirilgan, rol yoki rejim/guruh/viloyat o'zgargan
+        const fresh = store.getDriver?.(user.chatId) ?? user;
+        if (!fresh || fresh.active === false || fresh.deletedAt != null || fresh.role !== "haydovchi") return;
+        if (!wantedFn(fresh.profile, post.source)) return;
+        if (FEED_MODES[feedMode(fresh.profile)].regions && !regionWanted(fresh.profile, originsOf())) return;
+        if (deps.canReceive && !(await deps.canReceive(fresh))) return;
+        const outcome = await deps.deliverRaw(user.chatId, post, { phones });
+        const ok = outcome === true || outcome?.ok === true;
+        store.addPostDelivery?.({ postId: post.id, chatId: user.chatId, ok, error: ok ? null : (outcome?.error ?? null) });
+        if (ok) count++;
+      } catch (error) {
+        log(`#${post.id}: tezkor xabar yuborilmadi (${user.chatId}) — ${error.description ?? error.message}`);
+      } finally {
+        rawPending.get(post.id)?.delete(user.chatId);
+        if (--left === 0) {
+          rawPending.delete(post.id);
+          rawCount += count;
+          if (count) log(`#${post.id} ${post.source}: ⚡ ${count} ta haydovchiga asl matn bilan (AI'siz, ${Math.round((now() - (post.queuedAt ?? post.postedAt)) / 1000)} s)`);
         }
       }
-      rawPending.delete(post.id);
-      rawCount += count;
-      if (count) log(`#${post.id} ${post.source}: ⚡ ${count} ta haydovchiga asl matn bilan (AI'siz, ${Math.round((now() - (post.queuedAt ?? post.postedAt)) / 1000)} s)`);
-    });
+    };
+    for (const user of targets) {
+      const job = (rawQueues.get(user.chatId) ?? Promise.resolve()).then(() => sendTo(user));
+      rawQueues.set(user.chatId, job);
+      rawAll.add(job);
+      job.finally(() => {
+        rawAll.delete(job);
+        if (rawQueues.get(user.chatId) === job) rawQueues.delete(user.chatId);
+      });
+    }
   }
 
   // Tez yo'l: navbatga yangi tushgan e'lonlar qoidaviy parserdan o'tadi (~2 ms). Ishonchlisi — darhol yuborishga,
@@ -517,7 +541,7 @@ export function createWorker(
   async function runOnce({ fillWaitMs: fill = 0, liveWaitMs: live = fill } = {}) {
     expire();
     const quickCount = quick();
-    await rawChain;
+    while (rawAll.size) await Promise.allSettled([...rawAll]);
     if (quickCount) await delivery;
     const lease = pool.acquire();
     if (!lease) return quickCount;
