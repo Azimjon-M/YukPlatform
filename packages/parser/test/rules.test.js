@@ -292,3 +292,9 @@ test("fastLook: bo'sh mashina, yo'lovchi taksi, sotuv va suhbat — «quruq gap�
   assert.equal(chatter("Navoiydan Buxoro Kogonga yengil yuk bor fura kerak, past yuki bo'lsa ham mayli 90 000 00 09"), false);
   assert.equal(chatter("Qo'qondan Toshkentga 3 tonna yuk bor"), false, "telefonsiz, lekin yuk belgisi bor (ovozli xabar)");
 });
+
+test("fastLook: «qayerdan» bir qatorda, «qayerga» keyingi qatorda — ikkinchi qatordagi viloyat «qayerdan» emas", async () => {
+  const { fastLook } = await import("../src/rules/index.js");
+  assert.deepEqual(fastLook("Toshkent Oʻrtasaroydan\nBuxoro Qorakoʻlga 10 tonna yuk bor Mineral oʻgʻit 90 000 00 01").origins, ["toshkent_sh"]);
+  assert.equal(fastLook("Fargonaga yengil pochta bolsa olamiz 90 000 00 02").chatter, true);
+});

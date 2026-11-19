@@ -232,6 +232,8 @@ export const FREE_TRUCK_PATTERNS = [
   /yuk\w*\s+(?:ol[ai]miz|olaman|olami|olamz|ortamiz|qidir|izla)/,
   // «yuk bo'lsa (olamiz / aytinglar)», «yuklar bulsa», «yuk borlar»
   /yuk(?:lar\w*|la|ing\w*)?\s+(?:bo'?l?sa|bulsa|busa|bosa|bolsa|borlar)/,
+  // «pochta bo'lsa olamiz», «… bo'lsa olamiz / beringlar»
+  /(?:bo'?l?sa|bulsa|busa|bosa|bolsa)\s+(?:ol[ai]miz|olaman|olamz|ber(?:inglar|ila|orasi\w*))/,
   // «yuk kerak» (yuk so'ralyapti; «yuk mashina kerak» emas)
   /(?:^|[\s,.!])yuk\s+(?:kerak|kk|kere)(?![a-z'])/,
   // «bo'shadik», «bo'shaymiz», «bo'shmiz»

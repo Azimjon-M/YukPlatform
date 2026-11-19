@@ -678,10 +678,14 @@ function originsOf(lines) {
   let complete = false; // blokda yo'nalish to'liq — keyingi yolg'iz joy boshqa narsa (bozor, mo'ljal), yangi juftlik esa yangi yuk
   let unknown = false;
   for (const line of lines) {
+    readLine(line);
+    // Telefon qatori yukni (blokni) yopadi — o'sha qatorning o'zi o'qilgandan keyin
     if (line.tokens.some((t) => t.type === "phone")) {
       awaiting = false;
       complete = false;
     }
+  }
+  function readLine(line) {
     // «Toshkent Sergeli», «Samarqand Urgutdan» — viloyat + undagi joy: kengi tashlanadi
     const all = line.mentions.filter((m) => m.entry).sort((a, b) => a.index - b.index);
     const ms = all.filter((m, i) => !(all[i + 1] && !m.role && all[i + 1].index === m.end + 1 && contains(m.entry, all[i + 1].entry)));
@@ -701,7 +705,7 @@ function originsOf(lines) {
       (line.mentions.some((m) => m.ambiguous) && line.words.some((w) => w.used === "ambiguous" && stems(w.text).some((x) => x.role === "from")) ? { index: -1 } : null);
     if (!ms.length) {
       if (stranger && !awaiting && !complete) unknown = true;
-      continue;
+      return;
     }
     const froms = ms.filter((m) => m.role === "from");
     const tos = ms.filter((m) => m.role === "to");
@@ -727,7 +731,8 @@ function originsOf(lines) {
       awaiting = false;
       complete = true;
     } else if (tos.length) {
-      const before = loose.filter((m) => m.index < tos[0].index);
+      // Blokda «qayerdan» allaqachon bor («Toshkent O'rtasaroydan ⏎ Buxoro Qorako'lga») — bu qatordagi joylar qayerga
+      const before = complete || awaiting ? [] : loose.filter((m) => m.index < tos[0].index);
       for (const m of before) add(m);
       awaiting = false;
       complete = complete || before.length > 0;
