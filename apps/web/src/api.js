@@ -221,6 +221,8 @@ export function tgAccountsApi(base) {
     cancel: (id) => request("DELETE", login(id)),
     // faqat /pub/me: shu sahifani boshqa qurilmada ochish uchun 1 soatlik token → { token, ttl }
     desktopLink: () => request("POST", `${base}/desktop-link`),
+    // «🔎 Auto scan» — akkauntning hali manba bo'lmagan guruhlari tekshiriladi → { scan }
+    scan: (name) => request("POST", `${base}/${encodeURIComponent(name)}/scan`),
   };
 }
 export const ADMIN_TG = tgAccountsApi("/pub/admin/tg-accounts");

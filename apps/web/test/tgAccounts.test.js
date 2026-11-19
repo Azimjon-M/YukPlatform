@@ -45,3 +45,17 @@ test("scanText: akkaunt guruhlarini tekshirish natijasi bir qatorda", async () =
     "🔎 12 ta guruh tekshirildi · 3 tasi manbaga olindi (2 tasi sinovda) · 9 tasi yuk guruhi emas · yana 30 tasi navbatda",
   );
 });
+
+test("myScanView: o'z akkauntidagi «🔎 Auto scan» holati oddiy so'zlar bilan", async () => {
+  const { myScanView } = await import("../src/tgAccounts.js");
+  const base = { checked: 0, pending: 0, trial: 0, ok: 0, failed: 0, rejected: 0, errors: 0, running: false };
+  assert.equal(myScanView(null), null);
+  assert.deepEqual(myScanView(base), { running: false, lines: [] });
+  const running = myScanView({ ...base, running: true, checked: 3, pending: 12, trial: 1 });
+  assert.equal(running.running, true);
+  assert.match(running.lines[0], /tekshirilyapti: 3 tasi tayyor, yana 12 tasi navbatda/);
+  assert.match(running.lines[1], /1 tasida yuk e'lonlari bor/);
+  const done = myScanView({ ...base, checked: 15, ok: 2, rejected: 13 });
+  assert.match(done.lines[0], /Tekshiruv tugadi: 15 ta/);
+  assert.match(done.lines.at(-1), /13 tasi yuk guruhi emas/);
+});

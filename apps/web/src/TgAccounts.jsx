@@ -9,7 +9,7 @@ import QRCode from "qrcode";
 import { ADMIN_TG, MY_TG } from "./api.js";
 import { confirmAction, haptic, inTelegram, openLink, useMainButtonLock } from "./telegram.js";
 import { Notice, Spinner } from "./ui.jsx";
-import { ACTIVE_STEPS, accountError, accountLabel, accountStatus, accountWho, codeWhere, scanText, suggestAccountName } from "./tgAccounts.js";
+import { ACTIVE_STEPS, accountError, accountLabel, accountStatus, accountWho, codeWhere, myScanView, scanText, suggestAccountName } from "./tgAccounts.js";
 
 const POLL_MS = 10_000; // yangi akkaunt collector'ga ulanganini ko'rish uchun (≤ 30 s)
 const QR_POLL_MS = 3_000; // QR kutilayotganda: yangi QR (~30 s da) va tasdiqlanganini tezroq ko'rish uchun
@@ -57,22 +57,62 @@ function QrStep({ login, onCancel }) {
   );
 }
 
-function AccountRow({ account, mine, onRelogin }) {
+// O'z akkaunti: «🔎 Auto scan» tugmasi va tekshiruv holati (boshqaruv markazidagi «Auto scan» bilan bir xil server ishi)
+function MyAutoScan({ account, onScan }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState(null);
+  const view = myScanView(account.scan);
+  if (account.status !== "ok" || !account.scan) return null;
+  const start = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const { scan } = await onScan(account.name);
+      haptic.success();
+      if (!scan.running && !scan.pending) setNote("Tekshiriladigan yangi guruh yo'q — hammasi allaqachon ko'rilgan.");
+    } catch (e) {
+      haptic.error();
+      setNote(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="tg-scan">
+      {view?.lines.map((line) => (
+        <p key={line} className="small">
+          {line}
+        </p>
+      ))}
+      <button type="button" className="primary tg-add" disabled={busy || view?.running} onClick={start}>
+        {view?.running ? "🔎 Tekshirilyapti…" : busy ? "Boshlanyapti…" : "🔎 Auto scan"}
+      </button>
+      {!view?.running && (
+        <p className="hint tg-under">Akkaunt a'zo bo'lgan guruh va kanallar tekshiriladi: yuk e'lonlari borlari kuzatuvga olinadi va ulardagi e'lonlar sizga keladi.</p>
+      )}
+      {note && <p className="small muted">{note}</p>}
+    </div>
+  );
+}
+
+function AccountRow({ account, mine, onRelogin, onScan }) {
   const status = accountStatus(account);
   const who = accountWho(account);
+  const linked = mine && account.status === "ok";
   return (
     <article className="user">
       <div className="user-head">
         <strong>{mine ? accountWho(account) || "Telegram akkaunt" : accountLabel(account.name)}</strong>
-        <span className={`tag${status.problem ? " tag-bad" : ""}`}>
-          {status.icon} {status.label}
+        <span className={`tag${status.problem ? " tag-bad" : linked ? " tag-good" : ""}`}>
+          {linked ? "✅ Bog'landi" : `${status.icon} ${status.label}`}
         </span>
       </div>
       <p className="muted small">
         {who && !mine ? `${who} · ` : ""}
         {account.dialogs} ta guruh/kanalga a'zo · {account.sources} ta manbani o'qiydi
       </p>
-      {scanText(account.scan) && <p className="muted small">{scanText(account.scan)}</p>}
+      {!mine && scanText(account.scan) && <p className="muted small">{scanText(account.scan)}</p>}
+      {mine && onScan && <MyAutoScan account={account} onScan={onScan} />}
       {status.problem && accountError(account) && <p className="error small">{accountError(account)}</p>}
       {status.hint && <p className="muted small">{status.hint}</p>}
       {status.relogin && (
@@ -446,6 +486,9 @@ export function TgAccounts({ onAuthLost, mine = false }) {
         </div>
       </div>
     );
+  } else if (mine && data.accounts.length > 0) {
+    // Akkaunt ulangan — «➕ Akkaunt qo'shish» ko'rsatilmaydi (Azimjon, 2026-11-19: «qo'shilib bo'lgan»); o'rniga «🔎 Auto scan»
+    panel = null;
   } else if (!data.unavailable) {
     panel = (
       <button type="button" className={mine ? "primary tg-add" : "more"} onClick={() => openForm()}>
@@ -461,7 +504,13 @@ export function TgAccounts({ onAuthLost, mine = false }) {
       ) : (
         <div className="users">
           {data.accounts.map((account) => (
-            <AccountRow key={account.name} account={account} mine={mine} onRelogin={(name) => !active && openForm(name)} />
+            <AccountRow
+              key={account.name}
+              account={account}
+              mine={mine}
+              onRelogin={(name) => !active && openForm(name)}
+              onScan={mine ? (name) => api.scan(name).then((result) => (load(), result)) : null}
+            />
           ))}
         </div>
       )}

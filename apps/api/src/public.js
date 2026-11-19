@@ -766,6 +766,15 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   pub.delete("/me/tg-accounts/login/:id", (req, res) => {
     res.json({ ok: needLogin().cancel(req.params.id, mine(req)) });
   });
+  // «🔎 Auto scan» o'z akkaunti uchun (2026-11-19, Azimjon: «boshqaruv markazidagi Auto scan bilan bir xil ishlasin»):
+  // boshqaruv markazidagi POST /api/tg-accounts/:name/scan bilan bir xil, faqat O'Z qo'shgan akkaunti (boshqaniki — 404)
+  pub.post("/me/tg-accounts/:name/scan", (req, res) => {
+    const account = (store.listTgAccounts?.() ?? []).find((a) => a.name === req.params.name && a.addedBy === mine(req));
+    if (!account) throw httpError(404, "Bunday akkaunt yo'q");
+    if (account.status !== "ok") throw httpError(409, "Akkaunt hozir ishlamayapti — u ulangach tekshiriladi");
+    if (!account.scanRequestedAt) store.requestAccountScan(account.name);
+    res.json({ scan: store.dialogScanSummary(account.name) });
+  });
   // «🔗 Havola orqali» (2026-11-19, Azimjon): telefon bitta — QR'ni o'zi skanerlay olmaydi. Shu sahifani kompyuterda ochadigan
   // 1 soatlik kirish tokeni; manzilni ilova o'zi yasaydi (location.origin + ?v=akkaunt&t=…). Telegram'ning tg://login havolasi
   // emas — uni Telegram havoladan qabul qilmaydi (2026-11-14 sinalgan), shuning uchun QR o'sha kompyuterda chiqadi

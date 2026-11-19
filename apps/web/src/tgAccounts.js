@@ -61,6 +61,24 @@ export function codeWhere(login) {
 }
 
 // Guruhlarini avtomatik tekshirish natijasi (server: store dialogScanSummary) → bir qator matn yoki null
+// Sozlamalardagi o'z akkaunti uchun «🔎 Auto scan» holati (oddiy so'zlar bilan) → { running, lines } | null
+export function myScanView(scan) {
+  if (!scan) return null;
+  const taken = scan.trial + scan.ok + scan.failed;
+  const lines = [];
+  if (scan.running) {
+    lines.push(`🔎 Guruhlaringiz tekshirilyapti: ${scan.checked} tasi tayyor, yana ${scan.pending} tasi navbatda (har 30 soniyada bittadan).`);
+  } else if (scan.checked) {
+    lines.push(`✅ Tekshiruv tugadi: ${scan.checked} ta guruh/kanal ko'rildi.`);
+  } else {
+    return { running: false, lines: [] };
+  }
+  if (taken) lines.push(`📥 ${taken} tasida yuk e'lonlari bor — ular kuzatuvga olindi${scan.trial ? ` (${scan.trial} tasi sinovda)` : ""}.`);
+  if (scan.rejected) lines.push(`▫️ ${scan.rejected} tasi yuk guruhi emas.`);
+  if (scan.errors) lines.push(`⚠️ ${scan.errors} tasini o'qib bo'lmadi.`);
+  return { running: Boolean(scan.running), lines };
+}
+
 export function scanText(scan) {
   if (!scan || (!scan.checked && !scan.pending)) return null;
   const taken = scan.trial + scan.ok + scan.failed;

@@ -1511,3 +1511,23 @@ circle.truck-near {
   justify-content: center;
   text-decoration: none;
 }
+
+/* O'z akkaunti: «✅ Bog'landi» va «🔎 Auto scan» (2026-11-19) */
+.tag-good {
+  background: color-mix(in srgb, #2e9e4f 16%, transparent);
+  color: #2e9e4f;
+}
+
+.tg-scan {
+  margin-top: 10px;
+}
+
+.tg-scan p.small {
+  margin: 0 0 6px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.tg-scan .tg-add {
+  margin-top: 8px;
+}
