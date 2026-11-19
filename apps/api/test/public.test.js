@@ -764,7 +764,7 @@ test("rejim: guruhlar ro'yxati; profilda rejim saqlanadi, begona guruh tushadi; 
   assert.ok(names.includes("@TutGruz") && names.includes("@Yuk_markazi"));
   assert.ok(!names.includes("@Ochiq_emas"), "o'chirilgan guruh ro'yxatda yo'q");
   assert.deepEqual(list.body.chosen, []);
-  assert.equal(list.body.max, 50);
+  assert.equal(list.body.max, 500);
 
   // Tezkor — mashinasiz saqlanadi, yuborish yoqiladi
   const fast = await call("PUT", "/pub/me/profile", { token, body: { profile: { domestic: true, international: false, feed: { mode: "tezkor" } } } });

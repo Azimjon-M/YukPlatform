@@ -191,10 +191,10 @@ test("rejim: «+ saralangan» — mashina shart (xato avval guruhlarda, keyin tr
   assert.deepEqual(fromBot.feedSources, ["@TutGruz"]);
 });
 
-test("rejim: 50 tadan ortiq guruh tanlab bo'lmaydi", () => {
+test("rejim: 500 tadan ortiq guruh tanlab bo'lmaydi", () => {
   let form = selectFeed(formFromProfile(null), "guruhlarim");
-  for (let i = 0; i < 50; i++) form = toggleFeedSource(form, `@guruh_${i}_yuk`).form;
-  assert.match(toggleFeedSource(form, "@yana_bir_guruh").error, /50 ta/);
+  for (let i = 0; i < 500; i++) form = toggleFeedSource(form, `@guruh_${i}_yuk`).form;
+  assert.match(toggleFeedSource(form, "@yana_bir_guruh").error, /500 ta/);
 });
 
 test("«📌 Mening guruhlarim» ro'yxati: yopiq guruh belgisi, Pro'siz — tanlab bo'lmaydi, raqamli id ko'rsatilmaydi", async () => {

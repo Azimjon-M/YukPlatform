@@ -21,6 +21,7 @@ import {
   isAdmin,
   feedMode,
   choiceMode,
+  FEED_SOURCES_MAX,
   feedLabel,
   regionTitle,
   truckFilterTitle,
@@ -792,10 +793,10 @@ export function createBot({
   }
 
   // Ro'yxatdan (viloyat / transport / guruh) «✅ Saqlash» → saqlab, rejim oynasiga qaytish (o'sha xabarning o'zida)
-  async function saveAndBack(ctx, driver, patch) {
+  async function saveAndBack(ctx, driver, patch, toast = "✅ Saqlandi") {
     const saved = saveFeedPatch(ctx, driver, patch);
     if (saved.error) return ctx.answerCallbackQuery({ text: saved.error, show_alert: true });
-    await ctx.answerCallbackQuery({ text: "✅ Saqlandi" });
+    await ctx.answerCallbackQuery({ text: toast });
     feedDrafts.delete(ctx.chat.id);
     return showModes(ctx, saved.driver, { edit: true });
   }
@@ -1377,10 +1378,14 @@ export function createBot({
     const [, name, page, kind] = ctx.match;
     const data = ctx.callbackQuery.data;
     draft.at = Date.now();
-    if (data === "fg:back") {
-      await ctx.answerCallbackQuery();
-      feedDrafts.delete(ctx.chat.id);
-      return showModes(ctx, driver, { edit: true });
+    if (data === "fg:all") {
+      // Ochiq + yopiq (tanlab bo'ladigan) hammasi; hammasi tanlangan bo'lsa — tozalanadi
+      const pickable = store.feedSources(ctx.chat.id, { pro: isPro(driver) }).filter((s) => !s.locked).map((s) => s.name);
+      const keys = new Set(draft.sources.map((n) => n.toLowerCase()));
+      const all = pickable.every((n) => keys.has(n.toLowerCase()));
+      draft.sources = all ? [] : pickable.slice(0, FEED_SOURCES_MAX);
+      await ctx.answerCallbackQuery({ text: all ? "▫️ Hammasi olib tashlandi" : `☑️ ${draft.sources.length} ta guruh tanlandi` });
+      return showGroups(ctx, draft, { edit: true });
     }
     if (kind != null) {
       await ctx.answerCallbackQuery();
@@ -1409,9 +1414,12 @@ export function createBot({
       draft.page = Number(page);
       return showGroups(ctx, draft, { edit: true });
     }
-    // fg:ok
+    // fg:ok (va eski xabardagi fg:back) — saqlab, rejim oynasiga. Hech biri tanlanmagan — «🌐 Hamma guruhlar»
     const sources = store.allowedFeedSources(ctx.chat.id, draft.sources, { pro: isPro(driver) });
-    if (!sources.length) return ctx.answerCallbackQuery({ text: "Kamida bitta guruh yoki kanalni tanlang", show_alert: true });
+    if (!sources.length) {
+      if (draft.mode === "guruhlarim_plus") return ctx.answerCallbackQuery({ text: "Kamida bitta guruh yoki kanalni tanlang", show_alert: true });
+      return saveAndBack(ctx, driver, { mode: "tezkor" }, "Guruh tanlanmadi — 🌐 hamma guruhlardan");
+    }
     // Saqlab, rejim oynasiga qaytamiz (filtrlar o'zgarmaydi; «+ saralangan» va mashinasi bor — butun profil qoladi)
     return saveAndBack(ctx, driver, { mode: draft.mode, sources });
   });

@@ -9,7 +9,7 @@ import { FEED_MODES, FEED_SOURCES_MAX, REGIONS, TRUCK_FILTERS, choiceMode, feedO
 // fm:<rejim> — rejim (tezkor — hamma guruhlar, guruhlarim — ro'yxat ochiladi, hududim — eski tugma: viloyatlar ro'yxati),
 // fm:done — oynani yopish
 export const FEED_CALLBACK = /^fm:(\w+)$/;
-export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|k:(open|closed)|ok|back)$/;
+export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|k:(open|closed)|ok|back|all)$/;
 // «📍 Qaysi viloyatlardan?» (2026-11-19): fr:t:<viloyat> — belgilash, fr:ok — saqlash, fr:back — rejimlarga
 export const REGION_CALLBACK = /^fr:(?:t:([a-z_]+)|ok|back|all)$/;
 // «🚚 Qaysi transport?» (2026-11-19): ft:open — ro'yxat, ft:t:<tur> — belgilash, ft:ok — saqlash, ft:all — hammasi, ft:back
@@ -28,7 +28,6 @@ const modeTitle = (id) => `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`;
 export function modeStep({ profile = null, intro = null } = {}) {
   const feed = feedOf(profile);
   const mode = choiceMode(feed.mode);
-  const groups = FEED_MODES[mode].groups ? `${feed.sources.length} ta guruh` : "Hamma guruhlar";
   const lines = [
     ...(intro ? [intro, ""] : []),
     "🎛 <b>Qaysi e'lonlar kelsin?</b>",
@@ -38,7 +37,7 @@ export function modeStep({ profile = null, intro = null } = {}) {
     "Filtr qo'ymasangiz — hammasi keladi:",
     `🚚 Transport: <b>${trucksText(feed.trucks)}</b>`,
     `📍 Qayerdan: <b>${regionsText(feed.regions)}</b>`,
-    `📌 Guruhlar: <b>${groups}</b>`,
+    `📌 Guruhlar: <b>${FEED_MODES[mode].groups ? `tanlangan ${feed.sources.length} ta guruh` : "Hamma guruhlar"}</b>`,
     "",
     "Transport turi yoki joyi yozilmagan e'lon — har qanday filtrda keladi (yuk o'tkazib yuborilmasin).",
     "➕ O'z guruhingizni qo'shish — «➕ Guruh qo'shish». Sozlash paytida e'lonlar to'xtab turadi.",
@@ -47,10 +46,13 @@ export function modeStep({ profile = null, intro = null } = {}) {
   const keyboard = [
     [{ text: `🚚 Transport: ${short(trucksText(feed.trucks))}`, data: "ft:open" }],
     [{ text: `📍 Qayerdan: ${short(regionsText(feed.regions).replace(/ viloyati/g, ""))}`, data: "fm:hududim" }],
-    [{ text: `📌 Guruhlar: ${groups}`, data: "fm:guruhlarim" }],
+    // Manba — ikki tugmali tanlov (✅ — hozirgisi). «📌» doim ro'yxatni ochadi (tanlovni o'zgartirish uchun)
+    [
+      { text: `${FEED_MODES[mode].groups ? "" : "✅ "}🌐 Hamma guruhlar`, data: "fm:tezkor" },
+      { text: `${FEED_MODES[mode].groups ? `✅ 📌 Tanlangan: ${feed.sources.length} ta` : "📌 Guruh tanlash"}`, data: "fm:guruhlarim" },
+    ],
+    [{ text: "✅ Tayyor", data: "fm:done" }],
   ];
-  if (FEED_MODES[mode].groups) keyboard.push([{ text: "🌐 Hamma guruhlardan olish", data: "fm:tezkor" }]);
-  keyboard.push([{ text: "✅ Tayyor", data: "fm:done" }]);
   return { text: lines.join("\n"), keyboard };
 }
 
@@ -82,7 +84,7 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", ki
     `Tanlaganlaringizdagi har bir yuk e'loni darhol, asl matni bilan keladi. ${rest}`,
     "",
     list.length
-      ? `Tanlandi: <b>${keys.size}</b> ta (ko'pi bilan ${FEED_SOURCES_MAX}). Raqam — kuniga nechta e'lon.`
+      ? `Tanlandi: <b>${keys.size}</b> ta. Raqam — kuniga nechta e'lon.`
       : "Ro'yxat hozircha bo'sh.",
     "Kerakli guruh ro'yxatda yo'q bo'lsa — «➕ Guruh qo'shish» bilan qo'shing: tekshiruvdan o'tsa, shu yerda chiqadi.",
   ];
@@ -95,6 +97,12 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", ki
       { text: `${tab === "closed" ? "● " : ""}🔒 Yopiq · ${closed.length}${count(closed) ? ` (✅${count(closed)})` : ""}`, data: "fg:k:closed" },
     ]);
   }
+  // «Hammasini tanlash» (2026-11-19) — ochiq va yopiq (tanlab bo'ladigan) hamma guruh birdaniga; hammasi tanlangan bo'lsa — tozalash
+  const pickable = list.filter((s) => !s.locked);
+  if (pickable.length) {
+    const allChosen = pickable.every((s) => keys.has(sourceKey(s.name)));
+    keyboard.push([{ text: allChosen ? "▫️ Hammasini olib tashlash" : `☑️ Hammasini tanlash (${pickable.length} ta)`, data: "fg:all" }]);
+  }
   keyboard.push(...shown.map((source) => [{ text: groupLabel(source, keys.has(sourceKey(source.name))), data: `fg:t:${source.name}` }]));
   if (pages > 1) {
     keyboard.push([
@@ -103,8 +111,8 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", ki
       { text: p < pages - 1 ? "➡️" : "·", data: `fg:p:${Math.min(pages - 1, p + 1)}` },
     ]);
   }
+  // Bitta chiqish — doim saqlaydi: guruh tanlangan bo'lsa — «📌 Tanlangan guruhlar», hech biri — «🌐 Hamma guruhlar»
   keyboard.push([{ text: "✅ Saqlash va orqaga", data: "fg:ok" }]);
-  keyboard.push([{ text: "⬅️ Saqlamasdan orqaga", data: "fg:back" }]);
   return { text: lines.join("\n"), keyboard, page: p };
 }
 

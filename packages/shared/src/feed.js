@@ -79,7 +79,8 @@ export const FEED_MODES = {
 };
 
 // Bir haydovchi nechta guruh tanlay oladi (bot va web ro'yxati shundan katta bo'lmaydi)
-export const FEED_SOURCES_MAX = 50;
+// 2026-11-19: 50 → 500 («hammasini tanlash» tugmasi: oddiy foydalanuvchiga ~70, Pro'ga ~85 guruh ko'rinadi)
+export const FEED_SOURCES_MAX = 500;
 
 export const validFeedMode = (mode) => (FEED_MODE_IDS.includes(mode) ? mode : null);
 

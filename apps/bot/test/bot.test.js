@@ -1669,7 +1669,8 @@ test("rejim: yangi haydovchi darhol «🌐 Hamma guruhlar» (filtrsiz), menyuda 
   await message(PRIVATE, MENU.feed);
   const picker = calls.filter((c) => c.method === "sendMessage").at(-1);
   assert.match(picker.payload.text, /Qaysi e'lonlar kelsin[\s\S]*Quruq gap[\s\S]*Transport: <b>Hammasi[\s\S]*Qayerdan: <b>Hamma joy[\s\S]*Guruhlar: <b>Hamma guruhlar[\s\S]*Guruh qo'shish/);
-  assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["ft:open", "fm:hududim", "fm:guruhlarim", "fm:done"]);
+  assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["ft:open", "fm:hududim", "fm:tezkor", "fm:guruhlarim", "fm:done"]);
+  assert.deepEqual(inlineButtons(picker).slice(2, 4).map((b) => b.text), ["✅ 🌐 Hamma guruhlar", "📌 Guruh tanlash"]);
   // «✅ Tayyor» — oyna o'sha xabarning o'zida yakuniy matnga aylanadi
   await press("fm:done");
   assert.match(texts(calls, "editMessageText").at(-1), /✅ Rejim: <b>🌐 Hamma guruhlar<\/b>/);
@@ -1761,18 +1762,25 @@ test("rejim: «📌 Guruhlar» — ro'yxatdan tanlash, kamida bitta; saqlangach 
   const data = inlineButtons(picker).map((b) => b.callback_data);
   assert.ok(data.includes("fg:t:@TutGruz") && data.includes("fg:t:@Yuk_markazi"));
   assert.ok(!data.includes("fg:t:@Ochirilgan_guruh"), "o'chirilgan guruh ro'yxatda yo'q");
-  // Hech narsa tanlamay «Saqlash» — oynacha, saqlanmaydi
+  // Hech narsa tanlamay chiqsa — «🌐 Hamma guruhlar» qoladi
   await press("fg:ok");
-  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "Kamida bitta guruh yoki kanalni tanlang");
-  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor", "o'zgarmadi (rol tanlanganda darhol tezkor)");
+  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "Guruh tanlanmadi — 🌐 hamma guruhlardan");
+  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
+  await press("fm:guruhlarim");
+  // «☑️ Hammasini tanlash» — ochiq va yopiq hammasi; qayta bosilsa — tozalanadi
+  await press("fg:all");
+  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "☑️ 2 ta guruh tanlandi");
+  assert.ok(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).some((b) => b.text === "▫️ Hammasini olib tashlash"));
+  await press("fg:all");
+  assert.ok(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).some((b) => b.text === "☑️ Hammasini tanlash (2 ta)"));
   await press("fg:t:@TutGruz");
   assert.match(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).find((b) => b.callback_data === "fg:t:@TutGruz").text, /^✅ @TutGruz/);
   await press("fg:t:@Ochirilgan_guruh"); // eski/soxta tugma — tanlanmaydi
   await press("fg:ok");
   assert.deepEqual(store.getDriver(42).profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"] });
   const back = calls.filter((c) => c.method === "editMessageText").at(-1);
-  assert.match(back.payload.text, /Guruhlar: <b>1 ta guruh<\/b>/);
-  assert.ok(inlineButtons(back).some((b) => b.callback_data === "fm:tezkor"), "hamma guruhlarga qaytish tugmasi");
+  assert.match(back.payload.text, /Guruhlar: <b>tanlangan 1 ta guruh<\/b>/);
+  assert.deepEqual(inlineButtons(back).filter((b) => b.callback_data.startsWith("fm:") && b.callback_data !== "fm:done" && b.callback_data !== "fm:hududim").map((b) => b.text), ["🌐 Hamma guruhlar", "✅ 📌 Tanlangan: 1 ta"]);
   await press("fm:done");
   assert.match(texts(calls, "editMessageText").at(-1), /Tanlagan 1 ta guruhingizdagi/);
   await message(PRIVATE, PHONE.later);
