@@ -41,9 +41,10 @@ test("scanText: akkaunt guruhlarini tekshirish natijasi bir qatorda", async () =
   assert.equal(scanText(null), null);
   assert.equal(scanText({ checked: 0, pending: 0, trial: 0, ok: 0, failed: 0, rejected: 0 }), null);
   assert.equal(
-    scanText({ checked: 12, pending: 30, trial: 2, ok: 1, failed: 0, rejected: 9 }),
-    "🔎 12 ta guruh tekshirildi · 3 tasi manbaga olindi (2 tasi sinovda) · 9 tasi yuk guruhi emas · yana 30 tasi navbatda",
+    scanText({ running: true, checked: 12, pending: 30, trial: 2, ok: 1, failed: 0, rejected: 9 }),
+    "🔎 Tekshirilyapti (~15 daq qoldi) · 3 ta yuk guruhi topildi",
   );
+  assert.equal(scanText({ running: false, checked: 12, pending: 0, trial: 0, ok: 4, failed: 2, rejected: 6 }), "🔎 4 ta yuk guruhi topildi");
 });
 
 test("myScanView: o'z akkauntidagi «🔎 Auto scan» holati oddiy so'zlar bilan", async () => {
@@ -51,11 +52,13 @@ test("myScanView: o'z akkauntidagi «🔎 Auto scan» holati oddiy so'zlar bilan
   const base = { checked: 0, pending: 0, trial: 0, ok: 0, failed: 0, rejected: 0, errors: 0, running: false };
   assert.equal(myScanView(null), null);
   assert.deepEqual(myScanView(base), { running: false, lines: [] });
-  const running = myScanView({ ...base, running: true, checked: 3, pending: 12, trial: 1 });
+  const running = myScanView({ ...base, running: true, checked: 3, pending: 12, trial: 1, rejected: 2 });
   assert.equal(running.running, true);
-  assert.match(running.lines[0], /tekshirilyapti: 3 tasi tayyor, yana 12 tasi navbatda/);
-  assert.match(running.lines[1], /1 tasida yuk e'lonlari bor/);
-  const done = myScanView({ ...base, checked: 15, ok: 2, rejected: 13 });
-  assert.match(done.lines[0], /Tekshiruv tugadi: 15 ta/);
-  assert.match(done.lines.at(-1), /13 tasi yuk guruhi emas/);
+  assert.match(running.lines[0], /tekshirilyapti — taxminan 6 daqiqa qoldi/);
+  assert.match(running.lines[1], /Hozircha 1 ta yuk guruhi topildi/);
+  assert.equal(myScanView({ ...base, running: true, pending: 1 }).lines[1], "Hozircha yuk guruhi topilmadi.");
+  const done = myScanView({ ...base, checked: 15, ok: 2, failed: 1, rejected: 12, errors: 1 });
+  assert.deepEqual(done.lines, ["✅ Tekshiruv tugadi: 2 ta yuk guruhi topildi — ulardagi e'lonlar sizga keladi."]);
+  assert.ok(!done.lines.join(" ").match(/emas|o'qib/), "yuk guruhi bo'lmaganlar sanalmaydi");
+  assert.deepEqual(myScanView({ ...base, checked: 5, rejected: 5 }).lines, ["✅ Tekshiruv tugadi: yuk guruhi topilmadi."]);
 });

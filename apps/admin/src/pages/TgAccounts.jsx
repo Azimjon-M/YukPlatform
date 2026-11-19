@@ -31,7 +31,7 @@ export function AutoScan({ account, onDone }) {
       const { scan } = await post(`/api/tg-accounts/${encodeURIComponent(account.name)}/scan`);
       notify(
         scan.pending
-          ? `Auto scan boshlandi: ${scan.pending} ta guruh/kanal navbatda — 30 soniyada bittadan tekshiriladi`
+          ? `Auto scan boshlandi — taxminan ${Math.max(1, Math.ceil((scan.pending * 30) / 60))} daqiqa; topilgan yuk guruhlari shu yerda sanaladi`
           : "Tekshiriladigan yangi guruh yo'q (hammasi manba yoki tekshirilgan)",
         "good",
       );

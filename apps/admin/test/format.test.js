@@ -381,12 +381,12 @@ test("scanView: Auto scan holati bir qatorda", async () => {
   assert.deepEqual(scanView({ running: false, checked: 0, pending: 0, trial: 0, ok: 0, failed: 0, rejected: 0, errors: 0 }), { running: false, text: null });
   assert.deepEqual(scanView({ running: true, checked: 4, pending: 30, trial: 2, ok: 0, failed: 0, rejected: 2, errors: 0 }), {
     running: true,
-    text: "🔎 Tekshirilyapti: 4 ta tekshirildi, yana 30 tasi navbatda (30 soniyada bittadan) · 2 tasi manbaga olindi (2 tasi sinovda) · 2 tasi yuk guruhi emas",
+    text: "🔎 Tekshirilyapti (~15 daq qoldi) · 2 ta yuk guruhi topildi (2 tasi sinovda)",
   });
-  assert.equal(
-    scanView({ running: false, checked: 10, pending: 0, trial: 1, ok: 3, failed: 1, rejected: 5, errors: 1 }).text,
-    "🔎 10 ta guruh tekshirilgan · 5 tasi manbaga olindi (1 tasi sinovda), 3 tasi sinovdan o'tdi · 5 tasi yuk guruhi emas · 1 tasini o'qib bo'lmadi",
-  );
+  // faqat yuk guruhlari sanaladi: rad etilgan, o'qilmagan, sinovdan o'tmagan (failed) — ko'rsatilmaydi
+  const done = scanView({ running: false, checked: 10, pending: 0, trial: 1, ok: 3, failed: 1, rejected: 5, errors: 1 }).text;
+  assert.equal(done, "🔎 4 ta yuk guruhi topildi (1 tasi sinovda)");
+  assert.doesNotMatch(done, /emas|tekshiril/);
 });
 
 test("foydalanuvchilar ro'yxati: holat belgisi, filtr, qidiruv, bosh harflar", async () => {

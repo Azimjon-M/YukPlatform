@@ -60,31 +60,35 @@ export function codeWhere(login) {
   return `Telegram kodni ${login.phone} akkauntiga yubordi: ${where}.`;
 }
 
-// Guruhlarini avtomatik tekshirish natijasi (server: store dialogScanSummary) → bir qator matn yoki null
-// Sozlamalardagi o'z akkaunti uchun «🔎 Auto scan» holati (oddiy so'zlar bilan) → { running, lines } | null
+// «🔎 Auto scan» natijasi — FAQAT topilgan yuk guruhlari sanaladi (2026-11-19, Azimjon: «"3 tasi yuk guruhi emas" bu nimasi?
+// bizga yuk guruhlari kerak — faqat yuk guruhlarini sana!»). Yuk guruhi = tekshiruvdan o'tib kuzatuvga olingan (sinovda yoki
+// o'tgan). Navbatdagilar soni o'rniga — taxminan qancha vaqt qolgani (har guruh ~30 s)
+export const scanFound = (scan) => (scan?.trial ?? 0) + (scan?.ok ?? 0);
+export const scanMinutesLeft = (scan) => Math.max(1, Math.ceil(((scan?.pending ?? 0) * 30) / 60));
+
+// Sozlamalardagi o'z akkaunti uchun → { running, lines } | null
 export function myScanView(scan) {
   if (!scan) return null;
-  const taken = scan.trial + scan.ok + scan.failed;
-  const lines = [];
+  const found = scanFound(scan);
   if (scan.running) {
-    lines.push(`🔎 Guruhlaringiz tekshirilyapti: ${scan.checked} tasi tayyor, yana ${scan.pending} tasi navbatda (har 30 soniyada bittadan).`);
-  } else if (scan.checked) {
-    lines.push(`✅ Tekshiruv tugadi: ${scan.checked} ta guruh/kanal ko'rildi.`);
-  } else {
-    return { running: false, lines: [] };
+    return {
+      running: true,
+      lines: [
+        `🔎 Guruhlaringiz tekshirilyapti — taxminan ${scanMinutesLeft(scan)} daqiqa qoldi.`,
+        found ? `📥 Hozircha ${found} ta yuk guruhi topildi — ulardagi e'lonlar sizga keladi.` : "Hozircha yuk guruhi topilmadi.",
+      ],
+    };
   }
-  if (taken) lines.push(`📥 ${taken} tasida yuk e'lonlari bor — ular kuzatuvga olindi${scan.trial ? ` (${scan.trial} tasi sinovda)` : ""}.`);
-  if (scan.rejected) lines.push(`▫️ ${scan.rejected} tasi yuk guruhi emas.`);
-  if (scan.errors) lines.push(`⚠️ ${scan.errors} tasini o'qib bo'lmadi.`);
-  return { running: Boolean(scan.running), lines };
+  if (!scan.checked) return { running: false, lines: [] };
+  return {
+    running: false,
+    lines: [found ? `✅ Tekshiruv tugadi: ${found} ta yuk guruhi topildi — ulardagi e'lonlar sizga keladi.` : "✅ Tekshiruv tugadi: yuk guruhi topilmadi."],
+  };
 }
 
+// Bir qator (admin ro'yxati) yoki null
 export function scanText(scan) {
   if (!scan || (!scan.checked && !scan.pending)) return null;
-  const taken = scan.trial + scan.ok + scan.failed;
-  const parts = [`🔎 ${scan.checked} ta guruh tekshirildi`];
-  if (taken) parts.push(`${taken} tasi manbaga olindi${scan.trial ? ` (${scan.trial} tasi sinovda)` : ""}`);
-  if (scan.rejected) parts.push(`${scan.rejected} tasi yuk guruhi emas`);
-  if (scan.pending) parts.push(`yana ${scan.pending} tasi navbatda`);
-  return parts.join(" · ");
+  const found = `${scanFound(scan)} ta yuk guruhi topildi`;
+  return scan.running ? `🔎 Tekshirilyapti (~${scanMinutesLeft(scan)} daq qoldi) · ${found}` : `🔎 ${found}`;
 }

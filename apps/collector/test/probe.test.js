@@ -189,7 +189,7 @@ test("Auto scan: bosilmaguncha hech narsa tekshirilmaydi; bosilgach «➕ Guruh 
   assert.equal(summary.doneAt != null, true);
   assert.deepEqual([summary.checked, summary.pending, summary.rejected, summary.trial, summary.ok], [3, 0, 1, 1, 1]);
   assert.ok(logs.some((l) => l.includes("«Yopiq yuklar»: akkaunt guruhi tekshirildi — -1001 darhol qo'shildi (yopiq)")));
-  assert.ok(logs.some((l) => l.startsWith("Auto scan tugadi: shu safar 3 ta guruh tekshirildi, 2 tasi sinovga olindi")));
+  assert.ok(logs.some((l) => l.startsWith("Auto scan tugadi: shu safar 2 ta yuk guruhi topildi; jami 2 ta yuk guruhi kuzatuvda")));
 
   // Keyin o'z-o'zidan qayta tekshirilmaydi; yana bosilsa — rad etilgani qayta ko'riladi, manbalarga tegilmaydi
   await run(3);

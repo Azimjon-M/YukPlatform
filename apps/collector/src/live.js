@@ -503,8 +503,7 @@ export async function runLive({
       store.finishAccountScan(scan);
       const summary = store.dialogScanSummary(scan);
       log(
-        `Auto scan tugadi: shu safar ${scanBatch.checked} ta guruh tekshirildi, ${scanBatch.passed} tasi sinovga olindi; ` +
-          `jami ${summary.trial + summary.ok + summary.failed} tasi manbaga olingan, ${summary.rejected} tasi yuk guruhi emas`,
+        `Auto scan tugadi: shu safar ${scanBatch.passed} ta yuk guruhi topildi; jami ${summary.trial + summary.ok} ta yuk guruhi kuzatuvda`,
       );
       scanBatch = { checked: 0, passed: 0 };
       return;
