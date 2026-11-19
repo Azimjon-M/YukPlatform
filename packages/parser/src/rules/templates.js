@@ -32,7 +32,7 @@ export const AD_TAIL = [/^yukbor & glogistics/];
 
 // Yorliqlar: qator boshidagi "Qayerdan:", "Откуда:" ... → shu qatordagi joylar qaysi tomon
 const LABELS = [
-  [/^(?:qayerdan|qaerdan|qayerdam|otkuda|yuklash joyi|yuklanish joyi|yuklash manzili)\s*:/, "from"],
+  [/^(?:(?:yuk\s+)?qayerdan|qaerdan|qayerdam|otkuda|yuklash joyi|yuklanish joyi|yuklash manzili)\s*:?/, "from"],
   [/^(?:qayerga|qaerga|kuda|tushirish joyi|tushirish manzili)\s*:/, "to"],
   [/^(?:yuk turi|yuk nomi)\s*:/, "cargo"],
 ];

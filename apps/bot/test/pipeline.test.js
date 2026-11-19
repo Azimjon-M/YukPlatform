@@ -956,8 +956,9 @@ test("sortingOff: hamma haydovchiga filtrsiz asl matn (chet el, salomlashish, al
   await createWorker(deps, { log: () => {} }).runOnce();
   const got = raw.map(([chatId, id]) => `${id}→${chatId}`).sort();
   // 1, 2 — saralangan rejimdagilar ham hamma guruhdan oladi (3 — faol emas); 7 tezkor, 9 «+saralangan» — hamma guruhdan; 8 guruhlarim — faqat @yuk_guruh2
+  // 3 — salomlashish: joy ham, yuk belgisi ham yo'q — «quruq gap», telefon bo'lsa ham hech kimga (2026-11-19)
   const want = [];
-  for (const id of [1, 2, 3, 4]) for (const c of [1, 2, 7, 9]) want.push(`${id}→${c}`);
+  for (const id of [1, 2, 4]) for (const c of [1, 2, 7, 9]) want.push(`${id}→${c}`);
   for (const c of [1, 2, 7, 8, 9]) want.push(`5→${c}`);
   assert.deepEqual(got, want.sort());
   assert.deepEqual(delivered, [], "saralangan (AI / qoidalar) nusxasi hech kimga ketmaydi");
@@ -982,8 +983,12 @@ test("sortingOff + eski «hududim» profil (endi «📍 Qayerdan» filtri): tanl
   post("@g", 2, "Andijondan Buxoroga 10 tonna yuk bor, isuzu kerak +998900000012");
   post("@g", 3, CHAT_TEXT);
   await createWorker(deps, { log: () => {} }).runOnce();
-  assert.deepEqual(raw.filter(([c]) => c === 10).map(([, id]) => id).sort(), [1, 3]);
-  assert.equal(raw.filter(([c]) => c === 7).length, 3, "filtrsiz — hammasi");
+  post("@g", 4, "Namanganga 3 tonna yuk bor +998900000014"); // qayerdan aytilmagan — hammaga
+  post("@g", 5, "Hasanboydan Buxoroga 5 tonna piyoz bor +998900000015"); // qayerdan aytilgan, lekin biz bilmaydigan joy — viloyat tanlaganga yo'q
+  post("@g", 6, "Наманган - Мурино г. 15 тонна текстиль, реф керак +998900000016"); // strelkasiz «A - B»: chapi — qayerdan
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(raw.filter(([c]) => c === 10).map(([, id]) => id).sort(), [1, 4]);
+  assert.deepEqual(raw.filter(([c]) => c === 7).map(([, id]) => id).sort(), [1, 2, 4, 5, 6], "filtrsiz — quruq gapdan (3) boshqa hammasi");
 });
 
 test("sortingOff + filtrlar (2026-11-19): quruq gap hech kimga; «🚚 Transport» — tanlagan turi va mashinasi yozilmagan e'lon", async () => {

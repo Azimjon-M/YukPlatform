@@ -10,7 +10,11 @@ const CYRILLIC = {
   ї: "i", є: "ye", һ: "h",
 };
 // Turk, turkman, ozarbayjon harflari (e'lonlarda uchraydi: "Şaxrizab", "araç")
-const LATIN = { ş: "sh", ç: "ch", ı: "i", ğ: "g'", ö: "o", ü: "u", ä: "a", ñ: "n", ý: "y", ž: "j", é: "e" };
+// + «o'» va «g'» ning telefon klaviaturasidagi ko'rinishlari: "Qôqon", "qòqon", "Qœqon", "ĝijduvon", "tőnna"
+const LATIN = {
+  ş: "sh", ç: "ch", ı: "i", ğ: "g'", ö: "o", ü: "u", ä: "a", ñ: "n", ý: "y", ž: "j", é: "e",
+  ô: "o'", ò: "o'", ó: "o'", õ: "o'", œ: "o'", ő: "o'", ō: "o'", ĝ: "g'", ǵ: "g'", ġ: "g'",
+};
 const VOWELS = new Set([..."aeiouаеёиоуыэюяўәөүұі"]);
 // Apostrofning hamma turi: ʻ ʼ ’ ‘ ` ´ → '
 const APOSTROPHES = /[ʻʼ’‘`´]/g;
@@ -40,7 +44,7 @@ export function wordKey(word) {
     .replace(/[^a-z0-9]/g, "")
     .replace(/q/g, "k")
     .replace(/x/g, "h")
-    .replace(/w/g, "v")
+    .replace(/w/g, "sh") // telefon yozuvida w = sh: "Towkent", "Riwton", "qarwi" (2026-11-19; ilgari v edi)
     .replace(/dj/g, "j")
     .replace(/([aeiou])y(?=[aeiou])/g, "$1")
     .replace(/(.)\1+/g, "$1");
@@ -48,7 +52,7 @@ export function wordKey(word) {
 
 // Bitta qatorni (toLatin dan o'tgan) bo'laklarga ajratadi. Bo'lak: so'z, son, ajratuvchi (- → / =) yoki [telefon].
 // → [{ type: "word"|"num"|"sep"|"phone", text, start, end }] — start/end: qator ichidagi o'rni
-const TOKEN_RE = /\[telefon\]|\d+(?:[.,]\d+)?|[\p{L}']+|->|=>|[-–—→➡⇒=/|()>]/gu;
+const TOKEN_RE = /\[telefon\]|\d+(?:[.,]\d+)?|[\p{L}']+|->|=>|[-–—→➡⇒➜➔➝➞⟶=/|()>]/gu;
 export function tokenizeLine(line) {
   const tokens = [];
   for (const match of line.matchAll(TOKEN_RE)) {

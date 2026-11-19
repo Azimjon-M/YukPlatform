@@ -254,3 +254,41 @@ test("fastLook (2026-11-19): quruq gap — bot xabari, bo'sh mashina andozasi, t
   assert.deepEqual(fastLook("Andijondan Toshkentga yuk bor +998900000013").trucks, [], "mashina yozilmagan");
   assert.deepEqual(fastLook("Toshkentdan Qo'qonga 30 tonna sement bor +998900000014").trucks, ["fura"], "15 t dan og'ir — fura");
 });
+
+// 2026-11-19, Azimjon: «Farg'onadan» filtri yoqilganda begona va yuk bo'lmagan e'lonlar keldi. Faqat yuk QAYERDAN
+// yuklanishi muhim (strelkaning chapi). Matnlar — o'sha kungi e'lonlardan (raqamlar soxta)
+test("fastLook: «qayerdan» — strelkasiz «A - B», «—>», og'zaki yozuvlar, ro'yxat; qayerga hisobga olinmaydi", async () => {
+  const { fastLook } = await import("../src/rules/index.js");
+  const from = (text) => fastLook(text).origins.sort();
+  assert.deepEqual(from("🇺🇿Хоразм—>🇧🇾 Брест (беларусь)\n📦 Парафин\n🚛 Нужен: 1 тент стандарт\n📞 90 000 00 01"), ["xorazm"]);
+  assert.deepEqual(from("🇺🇿Наманган - Мурино г. 🇷🇺\n📦 Груз : текстиль\n⚖️ Вес : 15 Тонна\n🚛 Авто : Реф\nКонтакт : 90 000 00 02"), ["namangan"]);
+  assert.deepEqual(from("Qôqondan Qarshiga yuk bor 90 000 00 03"), ["fargona"]);
+  assert.deepEqual(from("Towkentan namanganga 25 tona yuk bor tel 90 000 00 04"), ["toshkent_sh"]);
+  assert.deepEqual(from("Oxangaron Qoʻqon Fura kerak 90 000 00 05"), ["toshkent"]);
+  assert.deepEqual(from("Fargona beshboladan Toshkentga yuk bor Yuk : kafel 10 tonnalik Moshina kk 90 000 00 06"), ["fargona"]);
+  assert.deepEqual(from("Buvaydadan Samarqand Urgutga katta isuzuga yuk bor 90 000 00 07"), ["fargona"], "AI yorliqlaridan o'rganilgan joy");
+  // Ro'yxat: har qatorda bitta joy — har yukning birinchisi «qayerdan»
+  assert.deepEqual(from("Angren\nAndijon Qorasuv\nKefel\n4 mln\n90 000 00 08\nFarg'ona\nAndijon Qorasuv\nKefel\n3 mln\n90 000 00 09"), ["fargona", "toshkent"]);
+  // Qayerdan aytilmagan (faqat qayerga) — bo'sh, «noma'lum» emas: hammaga ketadi
+  assert.deepEqual([fastLook("Namanganga 3 tonna yuk bor 90 000 00 10").origins, fastLook("Namanganga 3 tonna yuk bor 90 000 00 10").originUnknown], [[], false]);
+  // Qayerdan aytilgan, lekin biz bilmaydigan joy — viloyat tanlaganlarga yuborilmaydi
+  const stranger = fastLook("Zarchinordan Buxoroga 5 tonna piyoz bor 90 000 00 11");
+  assert.deepEqual([stranger.origins, stranger.originUnknown, stranger.chatter], [[], true, false]);
+});
+
+test("fastLook: bo'sh mashina, yo'lovchi taksi, sotuv va suhbat — «quruq gap»; yuk e'loni esa qoladi", async () => {
+  const { fastLook } = await import("../src/rules/index.js");
+  const chatter = (text) => fastLook(text).chatter;
+  assert.equal(chatter("Шериклар Каршига юрамиз 1 соатларда лахтак юк болса оламиз мшинамиз исузи ярми бош 90 000 00 01"), true);
+  assert.equal(chatter("Qashqadaryo ga yuk olamiz PUSTOY FURA BOR 90 000 00 02"), true);
+  assert.equal(chatter("Toshkentdan Andijonga 5t isuzu bor yuk kerak srochna 90 000 00 03"), true);
+  assert.equal(chatter("Toshkentdan Samarqandga yuramiz odam va pochta olamiz 2 ta kam 90 000 00 04"), true);
+  assert.equal(chatter("Исузу сотилади 2018 йил 90 000 00 05"), true);
+  assert.equal(chatter("Есть желание зарабатывать нормальные деньги пиши мне 90 000 00 06"), true, "joy ham, yuk belgisi ham yo'q");
+  assert.equal(chatter("Assalomu alaykum akalar, Angrenda metan qalay ekan, ochered kattami?"), true, "telefonsiz suhbat");
+  // Yuk e'lonlari
+  assert.equal(chatter("Toshkent sergelidan Buxoroga yuk bor 5 tonnalik pustoy isuzi kerak 90 000 00 07"), false);
+  assert.equal(chatter("Qarshidan Buxoro Romitanga yuk bor 2 ta kamaz yoki 1 ta kamaz pritsep kerak 90 000 00 08"), false, "«2 ta kamaz» — «2 ta kam» emas");
+  assert.equal(chatter("Navoiydan Buxoro Kogonga yengil yuk bor fura kerak, past yuki bo'lsa ham mayli 90 000 00 09"), false);
+  assert.equal(chatter("Qo'qondan Toshkentga 3 tonna yuk bor"), false, "telefonsiz, lekin yuk belgisi bor (ovozli xabar)");
+});

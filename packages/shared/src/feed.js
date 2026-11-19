@@ -123,10 +123,13 @@ export function truckFilterOf(truckClass) {
 }
 
 // «📍 Qayerdan» filtri: e'lon shu haydovchiga mosmi. origins — e'londan topilgan «qayerdan» viloyatlari.
-// Viloyat tanlamagan yoki e'londa joy topilmagan — har doim true (yuk yo'qolmasin)
-export function regionWanted(profile, origins) {
+// Viloyat tanlamagan — har doim true. E'londa «qayerdan» umuman aytilmagan — true (hammaga, Azimjon qoidasi). Lekin
+// «qayerdan» AYTILGAN, faqat biz tanimaydigan joy bo'lsa (unknown: «Hasanboydan Bog'dodga») — viloyat tanlaganlarga
+// yuborilmaydi: u joy tanlangan viloyatda ekani noma'lum (2026-11-19, «Farg'onadan» filtri bilan begona e'lonlar kelgan edi)
+export function regionWanted(profile, origins, { unknown = false } = {}) {
   const { regions } = feedOf(profile);
-  if (!origins?.length || !regions.length) return true;
+  if (!regions.length) return true;
+  if (!origins?.length) return !unknown;
   return origins.some((id) => regions.includes(id));
 }
 
@@ -141,7 +144,7 @@ export function truckWanted(profile, truckClasses) {
 }
 
 // Ikkala filtr birga (tezkor yo'l: fastLook natijasi { origins, trucks })
-export const filtersWanted = (profile, look) => regionWanted(profile, look?.origins) && truckWanted(profile, look?.trucks);
+export const filtersWanted = (profile, look) => regionWanted(profile, look?.origins, { unknown: look?.originUnknown === true }) && truckWanted(profile, look?.trucks);
 
 export const feedMode = (profile) => feedOf(profile).mode;
 // Rejim uchun mashina formasi kerakmi (tezkor va guruhlarimda — yo'q)

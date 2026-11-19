@@ -22,7 +22,9 @@ import {
   CARGO_BEFORE,
   CARGO_WORDS,
   FILLER,
+  CHATTER_PATTERNS,
   FREE_TRUCK_PATTERNS,
+  LOAD_SURE,
   PARTIAL_WORDS,
   PLACE_DETAILS,
   PLACE_NOUNS,
@@ -67,6 +69,8 @@ function stems(word) {
   }
   // Og'zaki "-dan" → "-an" t / n dan keyin: "Urgutan", "Тошкентан", "Romitanan" (= Urgutdan, Toshkentdan, Romitandan)
   if (word.length >= 6 && /[tn]an$/.test(word)) out.push({ stem: word.slice(0, -2), role: "from", suffix: "an" });
+  // "-dan" d bilan tugagan nomda bitta d bilan yoziladi: "Bog'dodan", "Xonobodan", "Samarqandan" (= Bog'doddan…)
+  if (word.length >= 7 && word.endsWith("dan")) out.push({ stem: word.slice(0, -2), role: "from", suffix: "an" });
   // Qozoqcha "-ten" t dan keyin: "Шымкенттен" (= Shymkentdan)
   if (word.length >= 7 && word.endsWith("tten")) out.push({ stem: word.slice(0, -3), role: "from", suffix: "ten" });
   return out;
@@ -422,7 +426,7 @@ function classifyLine(line, lineNo, hint = null) {
     const far = countries.some((m) => !IN_SCOPE_COUNTRIES.has(m.entry.country));
     for (const w of words) if (!w.used && !far && (hint || countries.some((m) => Math.abs(m.index - w.index) <= 2))) w.placeLike = true;
   }
-  return { tokens, words, facts, mentions: sided.mentions, found, lineNo };
+  return { tokens, words, facts, mentions: sided.mentions, found, lineNo, hint };
 }
 
 // Qatorlarni yuk bloklariga ajratadi: e'londa bir nechta yuk bo'lsa, har biri o'z yo'nalishi bilan boshlanadi.
@@ -639,13 +643,115 @@ export function parseByRules(text, { maxUnknown = 2, allowAlternatives = true } 
   // ("...Qorasuv 5ta ⏎ Tent plashadka farqi yoq" — oxirgi qator hammasiga). Faqat HAMMASI doiradan tashqari bo'lsa
   // ishonamiz (bunda e'lon baribir hech kimga ketmaydi)
   if (ready.length > 1 && ready.some((load) => routeInScope(load))) reasons.push("bir nechta yuk");
-  return result(reasons.length === 0, distinct(reasons), "yuk_bor", ready, {
+  const parsed = result(reasons.length === 0, distinct(reasons), "yuk_bor", ready, {
     truckClasses: distinct([...read.flatMap((s) => s.trucks), ...ready.map((l) => l.truckClass).filter(Boolean)]),
     unknown: others.map((t) => t.text),
     suspects: suspects.map((t) => t.text),
     numbers: numberContext,
     segments: segments.length,
   });
+  // Tahlil qilingan qatorlar — fastLook (originsOf) uchun; JSON'ga va solishtirishlarga chiqmaydi
+  Object.defineProperty(parsed, "lines", { value: lines, enumerable: false });
+  return parsed;
+}
+
+// Yuk QAYERDAN yuklanadi — tezkor filtr uchun yagona muhim narsa (2026-11-19, Azimjon: «bizga faqat yuk qayerdan
+// ketishi muhim … strelkaning chap tomoni; qayerga borishiga tupur». «Farg'onadan» filtri yoqilganda «Хоразм—>Брест»,
+// «Наманган - Мурино» kelgan edi). parseByRules yo'nalishni faqat butun e'lon tushunilganda beradi; bu yerda har bir joy
+// nomining O'ZI qaraladi — yuk tuzilishi tushunilmasa ham «qayerdan» topiladi. E'lon — yuklar ro'yxati bo'lishi mumkin,
+// shuning uchun qatorma-qator, har yuk (blok) uchun alohida:
+//   1) -dan / «из» / «Qayerdan:» / strelkaning chapi — qayerdan
+//   2) qo'shimchasiz joylar: -ga li joydan OLDIN turgani («Toshkent Samarqandga»); bir qatorda ikki joyning birinchisi
+//      («Наманган - Мурино», «TOSHKENT CHINOZ»)
+//   3) qatorda yolg'iz qo'shimchasiz joy: blokda hali «qayerdan» yo'q bo'lsa — o'sha («Angren ⏎ Andijon Qorasuv», «Qo'qon
+//      isuzu kerak»); undan keyingi qatordagi joylar — qayerga. Telefon qatori blokni yopadi
+// «Qayerga» faqat bitta maqsadda o'qiladi: boradigan joyni «qayerdan» deb olmaslik uchun.
+// → { origins: [viloyat kodlari], unknown: bool — «qayerdan» aytilgan, lekin biz bilmaydigan joy («Hasanboydan») }
+function originsOf(lines) {
+  const from = new Set();
+  const regionOf = (m) => m.entry.region ?? (m.entry.country && m.entry.country !== HOME_COUNTRY ? "xorij" : null);
+  const add = (m) => {
+    const region = regionOf(m);
+    if (region) from.add(region);
+  };
+  let awaiting = false; // blokda «qayerdan» yolg'iz qatordan olindi — keyingi joy(lar) «qayerga»
+  let complete = false; // blokda yo'nalish to'liq — keyingi yolg'iz joy boshqa narsa (bozor, mo'ljal), yangi juftlik esa yangi yuk
+  let unknown = false;
+  for (const line of lines) {
+    if (line.tokens.some((t) => t.type === "phone")) {
+      awaiting = false;
+      complete = false;
+    }
+    // «Toshkent Sergeli», «Samarqand Urgutdan» — viloyat + undagi joy: kengi tashlanadi
+    const all = line.mentions.filter((m) => m.entry).sort((a, b) => a.index - b.index);
+    const ms = all.filter((m, i) => !(all[i + 1] && !m.role && all[i + 1].index === m.end + 1 && contains(m.entry, all[i + 1].entry)));
+    // Bizda yo'q joy -dan bilan («Hasanboydan», «Jomdan») yoki «Qayerdan:» qatoridagi noma'lum so'z
+    // … shuningdek joy ichidagi nuqta («Mirbozordan», «Farxod bozoridan») va alohida yozilgan «dan» («sergili dan»)
+    const stranger =
+      line.words.find((w, i) => {
+        if (w.used && w.used !== "detail") return false;
+        if (CARGO_WORDS.has(wordKey(w.text))) return false;
+        if (w.placeLike) return line.hint === "from";
+        if (stems(w.text).some((x) => x.role === "from" && x.stem.length >= 4)) return true;
+        const next = line.words[i + 1];
+        return !w.used && w.text.length >= 4 && next && !next.used && next.index === w.index + 1 && LOOSE_SUFFIX[next.text] === "from";
+      }) ??
+      // «Qayerdan: …» qatorida yoki -dan bilan kelgan, lekin qaysi joyligi noaniq nom («Qorako'l», «Uchtepadan»)
+      (line.hint === "from" && !all.length ? { index: -1 } : null) ??
+      (line.mentions.some((m) => m.ambiguous) && line.words.some((w) => w.used === "ambiguous" && stems(w.text).some((x) => x.role === "from")) ? { index: -1 } : null);
+    if (!ms.length) {
+      if (stranger && !awaiting && !complete) unknown = true;
+      continue;
+    }
+    const froms = ms.filter((m) => m.role === "from");
+    const tos = ms.filter((m) => m.role === "to");
+    const loose = ms.filter((m) => m.role !== "from" && m.role !== "to"); // qo'shimchasiz yoki -da
+    if (froms.length) {
+      for (const m of froms) {
+        add(m);
+        // «Farg'ona Yangiqo'rg'ondan»: oldidagi viloyat nomi — shu joyning viloyati (bir nomli joy bir necha viloyatda bor)
+        const prev = all[all.indexOf(m) - 1];
+        if (prev && !prev.role && regionLike(prev.entry) && prev.end + 1 === m.index) add(prev);
+      }
+      awaiting = false;
+      complete = true;
+    } else if (stranger) {
+      // «Farg'ona Beshboladan», «Qo'qon promzonadan»: noma'lum joy oldidagi tanish joy — qayerdan (viloyati / shahri).
+      // «Hasanboydan Bog'dodga»: oldida tanish joy yo'q — qayerdan noma'lum; keyingi tanish joylar qayerga
+      // Tanish joy noma'lum so'zga yopishib turmasa: ikki tanish joy bo'lsa — birinchisi («Samarqand Qo'qon … mo'ljaldan»)
+      const before = loose.filter((m) => m.index < stranger.index);
+      const glued = before.find((m) => m.end + 1 === stranger.index);
+      if (glued) add(glued);
+      else if (before.length) add(before[0]);
+      else unknown = true;
+      awaiting = false;
+      complete = true;
+    } else if (tos.length) {
+      const before = loose.filter((m) => m.index < tos[0].index);
+      for (const m of before) add(m);
+      awaiting = false;
+      complete = complete || before.length > 0;
+    } else if (awaiting) {
+      awaiting = false;
+      complete = true;
+    } else if (loose.length >= 2) {
+      add(loose[0]);
+      complete = true;
+    } else if (!complete) {
+      // «Quyichirchiq. Yozyovon yuk», «Ko'kdala Qo'qon fura kerak»: tanish joy oldida noma'lum so'z — u «qayerdan» bo'lishi
+      // mumkin (bizda yo'q joy), tanish joy esa qayerga. Aniq emas — «qayerdan noma'lum»
+      const m = loose[0];
+      const prev = line.words.find((w) => w.index === m.index - 1);
+      if (prev && !prev.used && prev.text.length >= 5 && !CARGO_WORDS.has(wordKey(prev.text))) {
+        unknown = true;
+        complete = true;
+      } else {
+        add(m);
+        awaiting = true;
+      }
+    }
+  }
+  return { origins: [...from], unknown: unknown && from.size === 0 };
 }
 
 // «Yuk (yoki bo'sh mashina) e'loniga o'xshaydimi» — AI'siz, tezkor: foydalanuvchi qo'shgan guruhning oxirgi xabarlarini
@@ -689,10 +795,21 @@ export function quickLook(text, { scope } = {}) {
 export function fastLook(text) {
   const raw = String(text ?? "");
   const parsed = parseByRules(raw);
-  const origins = distinct(parsed.loads.map((l) => l.fromRegion).filter(Boolean));
+  const { origins, unknown: originUnknown } = parsed.lines ? originsOf(parsed.lines) : { origins: [], unknown: false };
   const trucks = parsed.truckClasses ?? [];
-  if (parsed.service) return { chatter: true, origins, trucks };
+  if (parsed.service) return { chatter: true, origins, originUnknown, trucks };
   const latin = toLatin(raw);
-  const chatter = FREE_TRUCK_PATTERNS.some((re) => re.test(latin)) || (!parsed.loads.some(hasPlace) && extractPhones(raw).length === 0);
-  return { chatter, origins, trucks };
+  // Joy bormi: yuk tuzilishi tushunilmagan bo'lsa ham, matnda biror joy nomi tanilgan bo'lsa — bor
+  const placed = parsed.loads.some(hasPlace) || (parsed.lines ?? []).some((l) => l.mentions.some((m) => m.entry));
+  const phone = extractPhones(raw).length > 0;
+  // Telefonsiz matn: joy ham bo'lmasa yoki yuk belgisi (yuk bor, kerak, tonna narxi…) bo'lmasa — suhbat (ovozli xabar matni:
+  // «Angrenda metan qalay ekan, ochered kattami?»)
+  const noSignal = parsed.reasons.includes(NO_LOAD_SIGNAL);
+  // Joy nomi yo'q matn (telefoni bo'lsa ham) faqat aniq yuk belgisi bilan o'tadi: «yuk bor», «fura kerak», mashina turi yoki
+  // og'irlik. Aks holda — reklama («…зарабатывать … пиши мне»), «<tel> shu nomerda ekan», ehtiyot qism savdosi
+  const sure = LOAD_SURE.test(latin) || trucks.length > 0 || (parsed.lines ?? []).some((l) => l.facts.some((f) => f.weightT != null));
+  const idle = placed ? !phone && noSignal : !sure || (!phone && noSignal);
+  const freeTruck = !LOAD_SURE.test(latin) && FREE_TRUCK_PATTERNS.some((re) => re.test(latin));
+  const chatter = freeTruck || CHATTER_PATTERNS.some((re) => re.test(latin)) || idle;
+  return { chatter, origins, originUnknown, trucks };
 }

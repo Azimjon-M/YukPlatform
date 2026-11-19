@@ -2,6 +2,7 @@
 // Asosi @yuk/shared (regions.js) — AI ham, bot ham shu ro'yxatni ishlatadi. Bu yerda faqat qoidalarga kerak
 // qo'shimchalar: viloyat nomining yozilishlari, davlat nomlari, AI'siz topish qiyin bo'lgan qisqartmalar.
 import { COUNTRIES, REGIONS, TASHKENT_DISTRICTS } from "@yuk/shared";
+import { LEARNED_PLACES } from "./learnedPlaces.js";
 import { allowedTypos, editDistance, wordKey } from "./text.js";
 
 // Viloyat nomlari: e'londa "Surxondaryodan", "Qashqadaryoga" — shahar emas, viloyat (AI ham shahar yozmaydi).
@@ -143,6 +144,16 @@ for (const [country, words] of Object.entries(COUNTRY_WORDS)) {
 // Bir so'zli kalitlar fuzzy qidiruv uchun (bo'sh joysiz)
 const KEYS = [...INDEX.keys()].filter((key) => key.length >= 6);
 
+// O'rganilgan nomlar (learnedPlaces.js): faqat ANIQ moslik, fuzzy ro'yxatiga kirmaydi (imlo xatosi qidiruvini chalkashtirmasin);
+// asosiy lug'atda bor kalit ustun
+const LEARNED = new Map();
+// YUK_NO_LEARNED=1 — scripts/learn-places.mjs ro'yxatni qayta yasayotganda (o'rganilganlar yana nomzod bo'lishi uchun)
+for (const [form, region, city] of process.env.YUK_NO_LEARNED === "1" ? [] : LEARNED_PLACES) {
+  const key = wordKey(form);
+  if (!key || INDEX.has(key) || LEARNED.has(key)) continue;
+  LEARNED.set(key, { name: city ?? null, region, country: UZ, place: null, kind: city ? "city" : "region", learned: true });
+}
+
 // So'z (yoki ikki-uch so'z birga) joy nomimi → yozuv | null.
 // exact — faqat aniq (imlo kaliti bo'yicha) moslik; aks holda 6+ harfli so'zda 1–2 ta xatoga ruxsat
 // (bir xil masofada ikki xil joy chiqsa — noaniq, null).
@@ -152,6 +163,8 @@ export function findPlace(text, { exact = false } = {}) {
   if (!key) return null;
   const list = INDEX.get(key);
   if (list) return list.length === 1 ? { entry: list[0], typo: 0, ambiguous: false } : { entry: null, typo: 0, ambiguous: true };
+  const learned = LEARNED.get(key);
+  if (learned) return { entry: learned, typo: 0, ambiguous: false };
   if (exact) return null;
   const max = allowedTypos(key);
   if (!max) return null;

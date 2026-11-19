@@ -30,7 +30,7 @@ export function lookOf(text) {
   try {
     return fastLook(text);
   } catch {
-    return { chatter: false, origins: [], trucks: [] };
+    return { chatter: false, origins: [], originUnknown: false, trucks: [] };
   }
 }
 

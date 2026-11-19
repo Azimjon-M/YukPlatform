@@ -151,3 +151,16 @@ test("filtrlar (2026-11-19): qayerdan va transport — ixtiyoriy, har ikki rejim
   assert.equal(filtersWanted(both, { origins: [], trucks: [] }), true);
   assert.equal(feedLabel(both), "🌐 Hamma guruhlar · 🚚 Fura · 📍 Buxoro viloyati");
 });
+
+test("regionWanted: «qayerdan» aytilmagan — hammaga; aytilgan, lekin noma'lum joy — viloyat tanlaganlarga yo'q (2026-11-19)", async () => {
+  const { regionWanted, filtersWanted } = await import("../src/feed.js");
+  const fargona = { feed: { mode: "tezkor", sources: [], regions: ["fargona"] } };
+  const anyone = { feed: { mode: "tezkor", sources: [] } };
+  assert.equal(regionWanted(fargona, []), true, "qayerdan yo'q — universal");
+  assert.equal(regionWanted(fargona, [], { unknown: true }), false);
+  assert.equal(regionWanted(anyone, [], { unknown: true }), true, "filtrsiz haydovchiga hammasi");
+  assert.equal(regionWanted(fargona, ["fargona", "toshkent"], { unknown: true }), true);
+  assert.equal(filtersWanted(fargona, { origins: [], originUnknown: true, trucks: [] }), false);
+  assert.equal(filtersWanted(fargona, { origins: ["xorazm"], trucks: [] }), false);
+  assert.equal(filtersWanted(fargona, { origins: ["fargona"], trucks: [] }), true);
+});

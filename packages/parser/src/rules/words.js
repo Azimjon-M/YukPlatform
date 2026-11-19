@@ -219,4 +219,53 @@ export const SERVICE_PATTERNS = [
 
 // Bo'sh mashina e'loni — haydovchiga kerak emas (u yuk qidiryapti). Faqat aniq andozalar: parserning «bo'sh mashina» belgisi
 // ko'p haqiqiy yukni ham ushlaydi (2026-11-19: 415 tadan yarmiga yaqini yuk e'loni edi), shuning uchun u ishlatilmaydi
-export const FREE_TRUCK_PATTERNS = [/targo\.uz'da yangi transport/, /yangi bo'sh transport/, /hozir bo'sh/];
+// 2026-11-19 (Azimjon: «Farg'ona» filtri bilan ham «Каршига юрамиз … лахтак юк болса оламиз», «PUSTOY FURA BOR» keldi):
+// haydovchining o'zi yozgan «yuk qidiryapman» e'lonlari. Har andoza AI yorliqlangan 11 000 e'londa o'lchangan — «yuk» deb
+// yorliqlanganlariga tushganlarining deyarli hammasi AI xatosi edi (aslida bo'sh mashina). Lotinlashtirilgan, kichik harfda
+const TRUCK_OWN = "fura|isuz\\w*|kamaz|labo|gazel\\w*|sprinter\\w*|damas|porter|chakman|bongo|faf|plashadka|shalanda|tentofka|tentovka";
+const TRUCK_NAMES = "fura|isuz\\w*|kamaz|labo|mashina|moshina|tent|ref|gazel\\w*|sprinter\\w*|damas|porter|chakman|bongo|faf";
+export const FREE_TRUCK_PATTERNS = [
+  /targo\.uz'da yangi transport/,
+  /yangi bo'sh transport/,
+  /hozir bo'sh/,
+  // «yuk olamiz», «yuk olaman», «yuk ortamiz», «yuk qidiryapmiz»
+  /yuk\w*\s+(?:ol[ai]miz|olaman|olami|olamz|ortamiz|qidir|izla)/,
+  // «yuk bo'lsa (olamiz / aytinglar)», «yuklar bulsa», «yuk borlar»
+  /yuk(?:lar\w*|la|ing\w*)?\s+(?:bo'?l?sa|bulsa|busa|bosa|bolsa|borlar)/,
+  // «yuk kerak» (yuk so'ralyapti; «yuk mashina kerak» emas)
+  /(?:^|[\s,.!])yuk\s+(?:kerak|kk|kere)(?![a-z'])/,
+  // «bo'shadik», «bo'shaymiz», «bo'shmiz»
+  /(?:bo'?sh|bush)(?:a(?:dik|dim|ymiz|yman|ganmiz)|miz|man)(?![a-z'])/,
+  // «pustoy fura bor», «bo'sh isuzu bor» («pustoy isuzu kerak» — yuk, unga tegilmaydi)
+  new RegExp(`(?:pustoy|bo'?sh|bush)\\s+(?:${TRUCK_NAMES})\\s+(?:bor|turibdi|turipti)(?![a-z'])`),
+  // «isuzu bor», «5 ta plashadka bor», «labo bor» — keyin «yuk bor» kelmasa («1 fura yuk bor» — yuk)
+  new RegExp(`(?:^|[^a-z'])(?:${TRUCK_OWN})\\s+bor(?![a-z'])(?![^]*?(?:yuk|gruz)\\w*\\s+bor)`),
+  // «mashinamiz isuzu», «moshinam labo»
+  /(?:mashina|moshina|mashin|moshin)(?:miz|m)(?![a-z'])/,
+  // «olib ketamiz», «opketamiz»
+  /(?:olib\s+ket(?:amiz|aman|averamiz)|opketamiz)/,
+  // yo'lga chiqyapti: «Qarshiga yuramiz», «yo'lga chiqamiz», «qaytamiz»
+  /(?:yuramiz|yuraman|yo'?lga\s+chi[qk]|qaytamiz|qaytaman)(?![a-z'])/,
+];
+
+// «Quruq gap»ning boshqa turlari (tezkor filtr, fastLook): sotuv e'lonlari, yo'lovchi taksi va h.k. — pastda to'ldiriladi
+export const CHATTER_PATTERNS = [
+  // Yo'lovchi taksi: «odam va pochta olamiz», «2 ta kam», «1 ta yo'lovchi kam» («2 ta kamaz» emas)
+  /yo'?lovchi/,
+  /odam\s+(?:va\s+)?pochta|pochta\s+(?:va\s+)?odam/,
+  /\d\s*ta\s+(?:odam\s+)?kam(?![a-z'])|kam\s*damiz/,
+  /(?:^|[^a-z'])(?:taksi|taxi)(?![a-z'])/,
+  /\d\s*kishi|kishiga\s+joy|manzildan\s+manzil/,
+  /(?:avto\w*|moshina|mashina)\s*:?\s*(?:kobalt|cobalt|cobolt|jentra|gentra|neksiya|nexia|malibu|tracker|treker|lasetti|lacetti|epika|captiva)(?![a-z'])/,
+  // Sotuv e'lonlari: «Isuzu sotiladi», «sotaman», «продам», «sotiladigan lavlagi bor»
+  /(?:sotiladi(?:gan)?|sotaman|sotamiz|sotuvda|prodam|prodayu|prodayotsya)(?![a-z'])/,
+  // Guruh botlari va reklama: to'lov boti, haydovchi profili, «guruhda yozish uchun», yuk tashish xizmati reklamasi
+  /to'?lov\s+bot|haydovchi\s+profili|guruh(?:da|ga)\s+yozish\s+uchun/,
+  /yuk\s+tashish\s+xizmati|yetkazib\s+beramiz|xizmatlarimizni\s+taklif|garantiya\s*\+?\s*servis/,
+  // Ish e'loni: «shofyor kerak ishlatishga», «haydovchi kerak»
+  /(?:shaf[iy]?y?[oe]r|shofy?[oe]r|shopir|haydovchi|voditel)\s+(?:kerak|kk|kere|kerek)(?![a-z'])/,
+];
+
+// Yuk e'lonining aniq belgisi: «yuk bor», «fura kerak». Bu bor matnda bo'sh mashina andozasi ishlamaydi — yuklar ro'yxatidagi
+// bitta «…yuk kerak» qatori butun e'lonni tashlab yubormasin (AI yorliqlangan e'lonlarda o'lchangan)
+export const LOAD_SURE = /(?:yuk|gruz)\w*\s+bor(?![a-z'])|(?:fura|isuz\w*|kamaz|labo|mashina|moshina|tent|ref|chakman|plashadka|shalanda)\w*\s+(?:kerak|kk|kere|kerek)(?![a-z'])/;
