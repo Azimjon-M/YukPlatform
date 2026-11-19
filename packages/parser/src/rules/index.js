@@ -345,6 +345,20 @@ function classifyLine(line, lineNo, hint = null) {
     }
   }
 
+  // 3b) Tanish joy OLDIDAGI noma'lum so'z — xato yozilgan joy nomi bo'lishi mumkin: «Namagan samarqanga yuk bor»
+  // (2026-11-19: tanilmagani uchun «qayerdan yo'q» bo'lib, viloyat tanlagan haydovchiga ham ketgan edi). Qo'shimchasiz so'zda
+  // imlo xatosiga odatda ruxsat yo'q (oddiy so'z joyga aylanib qolmasin) — bu yerda esa yonida joy turgani dalil. 6+ harf, 1 xato
+  for (const m of [...mentions]) {
+    if (!m.entry) continue;
+    const prev = words.find((w) => w.index === m.index - 1);
+    if (!prev || prev.used || CARGO_WORDS.has(wordKey(prev.text)) || looksLikeVehicle(prev.text) || inSet(FILLER, prev.text)) continue;
+    const hit = findPlace(prev.text, { exact: false });
+    if (!hit?.entry || hit.typo !== 1 || sameEntry(hit.entry, m.entry)) continue;
+    prev.used = "place";
+    mentions.push({ entry: hit.entry, role: null, typo: 1, line: lineNo, index: prev.index, end: prev.index });
+  }
+  mentions.sort((a, b) => a.index - b.index);
+
   // 4) joy aniqlovchilari: "Navoiydan (Xatirchi)", "Mirobod bozoridan" — yo'nalishni o'zgartirmaydi, AI ham faqat izohga yozadi
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];

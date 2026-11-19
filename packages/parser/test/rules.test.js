@@ -320,3 +320,10 @@ test("fastLook: o'rgatilgan model — yuk haqidagi suhbat, ijara, ish e'loni «q
   const { score } = look("Farg'onadan Dexqonobotga Yem 5 tonna kichkina esuzi kerak 90 000 00 02");
   assert.ok(score > 0.9, `ehtimol 0…1 (${score})`);
 });
+
+test("fastLook: tanish joy oldidagi xato yozilgan joy nomi ham «qayerdan» («Namagan samarqanga»)", async () => {
+  const { fastLook } = await import("../src/rules/index.js");
+  assert.deepEqual(fastLook("Namagan samarqanga yuk bor 5 tona ertalabga 90 000 00 01").origins, ["namangan"]);
+  // oddiy so'z joyga aylanmaydi
+  assert.deepEqual(fastLook("Qoplik sement Samarqandga 5 tonna yuk bor 90 000 00 02").origins, []);
+});
