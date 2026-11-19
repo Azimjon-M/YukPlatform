@@ -786,22 +786,25 @@ export function createBot({
       await ctx.editMessageText("Bu tugma eskirgan.").catch(() => {});
       return showStart(ctx);
     }
-    // Inline tugmadan kelgan bo'lsa — rejim oynasini yopamiz («⚡ Tezkorni o'chirish» menyu tugmasidan kelganda tahrirlanadigan xabar yo'q)
-    if (ctx.callbackQuery && !auto) await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[mode].icon} ${FEED_MODES[mode].name} ✅`).catch(() => {});
+    // Viloyat / guruh tanlovi rejim oynasining O'ZIDA ochiladi (2026-11-19: avval oyna «🎛 Rejim: … ✅» ga aylanib, ro'yxat
+    // yangi xabar bo'lib kelardi, «✅ Tayyor» dan keyin yana «🎛 Rejim: … ✅» — chatda ikki marta). «✅» — faqat saqlanganda
+    const inPlace = Boolean(ctx.callbackQuery) && !auto;
     if (FEED_MODES[mode].regions) {
       // «📍 Mening hududimdan» — viloyatlar tanlovi (oldin tanlagani bo'lsa — o'sha holatda)
       const feed = feedOf(driver.profile);
       const draft = { mode, regions: [...(feed.regions ?? [])], at: Date.now() };
       feedDrafts.set(ctx.chat.id, draft);
-      return showRegions(ctx, draft);
+      return showRegions(ctx, draft, { edit: inPlace });
     }
     if (FEED_MODES[mode].groups) {
       // Shu yoki boshqa guruh rejimida edi (guruhlarim ↔ + saralangan) — tanlovi qoladi; boshqa rejimdan — bo'sh
       const feed = feedOf(driver.profile);
       const draft = { mode, sources: FEED_MODES[feed.mode].groups ? [...feed.sources] : [], page: 0, at: Date.now() };
       feedDrafts.set(ctx.chat.id, draft);
-      return showGroups(ctx, draft);
+      return showGroups(ctx, draft, { edit: inPlace });
     }
+    // Inline tugmadan kelgan bo'lsa — rejim oynasini yopamiz (menyu tugmasidan kelganda tahrirlanadigan xabar yo'q)
+    if (inPlace) await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[mode].icon} ${FEED_MODES[mode].name} ✅`).catch(() => {});
     const feed = { mode, sources: [] };
     if (mode === "saralangan") {
       // Profili yo'q yangi haydovchi — rejim standart saralangan, profil forma bilan yaratiladi
@@ -1309,7 +1312,7 @@ export function createBot({
     if (!sources.length) return ctx.answerCallbackQuery({ text: "Kamida bitta guruh yoki kanalni tanlang", show_alert: true });
     await ctx.answerCallbackQuery({ text: "✅ Saqlandi" });
     feedDrafts.delete(ctx.chat.id);
-    await ctx.editMessageReplyMarkup().catch(() => {});
+    await ctx.editMessageText(`🎛 Rejim: ${FEED_MODES[draft.mode].icon} ${FEED_MODES[draft.mode].name} ✅`).catch(() => {});
     const feed = { mode: draft.mode, sources };
     // «+ saralangan» va mashinasi bor — butun profil qoladi; aks holda mashinasiz profil (mashinasi bo'lsa — saqlanadi)
     const profile = driver.profile?.vehicle && draft.mode === "guruhlarim_plus" ? { ...driver.profile, feed } : rawProfile(feed, driver.profile);

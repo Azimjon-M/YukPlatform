@@ -1690,7 +1690,8 @@ test("rejim: «📍 Mening hududimdan» — viloyatlar ro'yxati, kamida bitta; s
   const { store, calls, press } = setup({ config: { miniappUrl: MINIAPP } });
   store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
   await press("fm:hududim");
-  const picker = calls.filter((c) => c.method === "sendMessage").at(-1);
+  // Ro'yxat rejim oynasining o'zida ochiladi (yangi xabar emas)
+  const picker = calls.filter((c) => c.method === "editMessageText").at(-1);
   assert.match(picker.payload.text, /Qaysi viloyat\(lar\)dan/);
   assert.ok(inlineButtons(picker).some((b) => b.callback_data === "fr:t:samarqand"));
   await press("fr:ok");
@@ -1701,10 +1702,12 @@ test("rejim: «📍 Mening hududimdan» — viloyatlar ro'yxati, kamida bitta; s
   assert.match(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).find((b) => b.callback_data === "fr:t:samarqand").text, /^✅/);
   await press("fr:ok");
   assert.deepEqual(store.getDriver(42).profile.feed, { mode: "hududim", sources: [], regions: ["samarqand"] });
+  const allText = [...texts(calls), ...texts(calls, "editMessageText")];
+  assert.equal(allText.filter((t) => t === "🎛 Rejim: 📍 Mening hududimdan ✅").length, 1, "«✅» — bir marta");
   assert.ok(texts(calls).some((t) => /Rejim: <b>📍 Mening hududimdan<\/b>[\s\S]*viloyatlaringizdan \(Samarqand viloyati\) ketadigan/.test(t)));
   // Qayta ochilsa — tanlov o'sha holatda
   await press("fm:hududim");
-  assert.match(inlineButtons(calls.filter((c) => c.method === "sendMessage").at(-1)).find((b) => b.callback_data === "fr:t:samarqand").text, /^✅/);
+  assert.match(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).find((b) => b.callback_data === "fr:t:samarqand").text, /^✅/);
 });
 
 test("rejim: «📌 Mening guruhlarim» — ro'yxatdan tanlash, kamida bitta; saqlangach menyuda «📌 Guruhlarim»", async () => {
@@ -1714,7 +1717,7 @@ test("rejim: «📌 Mening guruhlarim» — ro'yxatdan tanlash, kamida bitta; sa
   store.addSource("@Ochirilgan_guruh", { enabled: false });
   await press("r:haydovchi");
   await press("fm:guruhlarim");
-  const picker = calls.filter((c) => c.method === "sendMessage").at(-1);
+  const picker = calls.filter((c) => c.method === "editMessageText").at(-1); // rejim oynasining o'zida
   assert.match(picker.payload.text, /Qaysi guruh va kanallardan/);
   const data = inlineButtons(picker).map((b) => b.callback_data);
   assert.ok(data.includes("fg:t:@TutGruz") && data.includes("fg:t:@Yuk_markazi"));
