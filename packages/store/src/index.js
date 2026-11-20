@@ -11,7 +11,7 @@ import { createAdminQueries } from "./admin.js";
 import { createUserSourceQueries } from "./userSources.js";
 import { userEvents } from "./history.js";
 import { createAiQueries } from "./ai.js";
-import { AUTO_PRO_SQL, createTgAccountQueries } from "./tgAccounts.js";
+import { AUTO_PRO_SQL, createTgAccountQueries, hashPhone } from "./tgAccounts.js";
 import { createFeedQueries, migrateFeed } from "./feed.js";
 
 export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR } from "./lock.js";
@@ -508,6 +508,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
   migrateFeed(db);
   // Qidiruv: fold(matn) LIKE fold(so'rov) — kirill/lotin va katta-kichik harf farqi yo'q (@yuk/shared searchText.js)
   db.function("fold", { deterministic: true }, (value) => (value == null ? null : foldText(value)));
+  // Akkaunt egasini raqam bo'yicha topish (tgAccounts.js OWNS_ACCOUNT_SQL): tg_accounts.phone_hash bilan bir xil xesh
+  db.function("tg_phone_hash", { deterministic: true }, (value) => (value == null ? null : hashPhone(value)));
 
   const q = {
     insertPost: db.prepare(

@@ -731,8 +731,8 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const perAccount = {};
     for (const s of store.listSources()) if (s.account) perAccount[s.account] = (perAccount[s.account] ?? 0) + 1;
     res.json({
-      accounts: (store.listTgAccounts?.() ?? [])
-        .filter((a) => a.addedBy === mine(req))
+      // O'zi qo'shgani yoki akkauntning o'zi shu odam (ID / username / raqam — store tgAccountsOf)
+      accounts: (store.tgAccountsOf?.(mine(req)) ?? (store.listTgAccounts?.() ?? []).filter((a) => a.addedBy === mine(req)))
         .map((a) => ({
           name: a.name,
           firstName: a.firstName,
@@ -769,7 +769,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   // «🔎 Auto scan» o'z akkaunti uchun (2026-11-19, Azimjon: «boshqaruv markazidagi Auto scan bilan bir xil ishlasin»):
   // boshqaruv markazidagi POST /api/tg-accounts/:name/scan bilan bir xil, faqat O'Z qo'shgan akkaunti (boshqaniki — 404)
   pub.post("/me/tg-accounts/:name/scan", (req, res) => {
-    const account = (store.listTgAccounts?.() ?? []).find((a) => a.name === req.params.name && a.addedBy === mine(req));
+    const account = (store.tgAccountsOf?.(mine(req)) ?? []).find((a) => a.name === req.params.name);
     if (!account) throw httpError(404, "Bunday akkaunt yo'q");
     if (account.status !== "ok") throw httpError(409, "Akkaunt hozir ishlamayapti — u ulangach tekshiriladi");
     if (!account.scanRequestedAt) store.requestAccountScan(account.name);

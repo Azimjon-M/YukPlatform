@@ -22,7 +22,15 @@ export function hashPhone(phone) {
 // raqamini ulashgan VA Mini App'dan kamida bitta Telegram akkauntini bog'lagan (sessiyasi bekor qilinmagan / dublikat emas).
 // Bazaga yozilmaydi — har safar hisoblanadi: raqamni o'chirsa yoki akkaunt chiqib ketsa, o'zi tushadi.
 // plan ustuni — boshqaruv markazidan qo'lda berilgani
-export const AUTO_PRO_SQL = `(drivers.phone IS NOT NULL AND EXISTS (SELECT 1 FROM tg_accounts t WHERE t.added_by = drivers.chat_id
+// Akkaunt kimniki (2026-11-20, Azimjon: «men QR/kod orqali kimnidir qo'shdim, ammo u bot bilan ishlamagan. Qachondir u
+// botni ishga tushirsa, undagi sozlamalarda akkaunt ulashilgan chiqishi kerak. @username ni ham hisobga ol … @username yoki
+// raqami ulashilganlarda bo'lsa, ulashilgan bo'lib qolsin»): kim qo'shgan (added_by) YOKI akkauntning o'zi shu odam —
+// Telegram ID (user_id), username yoki raqam (phone_hash — tg_phone_hash(drivers.phone), index.js ro'yxatdan o'tkazadi) mos.
+// Masalan asosiy akkaunt terminaldan ulangan (added_by yo'q), lekin uning egasi botda — endi u ham «✅ Bog'landi» ko'radi
+export const OWNS_ACCOUNT_SQL = `(t.added_by = drivers.chat_id OR t.user_id = CAST(drivers.chat_id AS TEXT)
+  OR (drivers.username IS NOT NULL AND t.username IS NOT NULL AND lower(t.username) = lower(drivers.username))
+  OR (drivers.phone IS NOT NULL AND t.phone_hash IS NOT NULL AND t.phone_hash = tg_phone_hash(drivers.phone)))`;
+export const AUTO_PRO_SQL = `(drivers.phone IS NOT NULL AND EXISTS (SELECT 1 FROM tg_accounts t WHERE ${OWNS_ACCOUNT_SQL}
   AND COALESCE(t.status, 'ok') NOT IN ('logged_out', 'duplicate')))`;
 
 const REFRESH_KEY = "tg_dialogs_request";
@@ -98,6 +106,16 @@ export function createTgAccountQueries(db, now) {
         `INSERT INTO tg_accounts (name, phone_hash, updated_at) VALUES (?, ?, ?)
          ON CONFLICT (name) DO UPDATE SET phone_hash = COALESCE(excluded.phone_hash, tg_accounts.phone_hash), updated_at = excluded.updated_at`,
       ).run(name, phoneHash, now());
+    },
+
+    // Shu foydalanuvchiniki bo'lgan akkauntlar (OWNS_ACCOUNT_SQL: qo'shgani yoki ID / username / raqam mos)
+    tgAccountsOf(chatId) {
+      const counts = new Map(db.prepare("SELECT account, COUNT(*) AS n FROM tg_dialogs GROUP BY account").all().map((r) => [r.account, r.n]));
+      return db
+        // LEFT JOIN: foydalanuvchi yozuvi bo'lmasa ham (qo'shgan odam) — added_by bo'yicha topiladi
+        .prepare(`SELECT t.* FROM tg_accounts t LEFT JOIN drivers ON drivers.chat_id = ? WHERE t.added_by = ? OR (drivers.chat_id IS NOT NULL AND ${OWNS_ACCOUNT_SQL}) ORDER BY t.name`)
+        .all(Number(chatId), Number(chatId))
+        .map((row) => ({ ...accountRow(row), dialogs: counts.get(row.name) ?? 0 }));
     },
 
     listTgAccounts() {

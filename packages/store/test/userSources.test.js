@@ -145,3 +145,25 @@ test("mergePost: ovozli xabar davomi — birga yangi e'lon, oldingisi yopiladi; 
   assert.equal(store.mergePost(b.id, { source: "@g", messageId: 4, text: "qo'shimcha", postedAt: 4 }), null, "yuk allaqachon topilgan");
   store.close();
 });
+
+test("akkaunt kimniki (2026-11-20): qo'shgan YOKI akkauntning o'zi — Telegram ID, username yoki raqam mos; avto-Pro ham shunga qarab", async () => {
+  const { openStore, hashPhone } = await import("../src/index.js");
+  const store = openStore({ file: ":memory:" });
+  store.saveTgAccount("asosiy", { userId: "982", username: "Ali_Logist", status: "ok" }); // terminaldan — added_by yo'q
+  store.saveTgAccount("qr-1", { userId: "777", username: null, status: "ok" });
+  store.setTgAccountPhoneHash("qr-1", hashPhone("+998 90 111 22 33"));
+  store.setTgAccountOwner("boshqa-1", 5);
+  store.saveTgAccount("boshqa-1", { userId: "555", status: "ok" });
+  store.saveDriver(982, { role: "haydovchi", active: true }); // ID bo'yicha
+  store.saveDriver(10, { role: "haydovchi", active: true, username: "ali_logist" }); // username bo'yicha (katta-kichik harf farqsiz)
+  store.saveDriver(11, { role: "haydovchi", active: true, phone: "+998901112233" }); // raqam bo'yicha
+  store.saveDriver(12, { role: "haydovchi", active: true, phone: "+998909999999", username: "begona" });
+  const names = (id) => store.tgAccountsOf(id).map((a) => a.name).sort();
+  assert.deepEqual(names(982), ["asosiy"]);
+  assert.deepEqual(names(10), ["asosiy"]);
+  assert.deepEqual(names(11), ["qr-1"]);
+  assert.deepEqual(names(12), []);
+  assert.deepEqual(names(5), ["boshqa-1"], "qo'shgan — yozuvi bo'lmasa ham");
+  assert.equal(store.getDriver(11).autoPro, true, "raqami bor + akkaunt uniki → avto-Pro");
+  assert.equal(store.getDriver(982).autoPro, false, "raqam ulashmagan — avto-Pro yo'q");
+});

@@ -287,8 +287,7 @@ export function createApp({
     const details = store.driverDetails(Number(req.params.chatId));
     if (!details) throw httpError(404, "Haydovchi topilmadi");
     // Mini App'dan ulagan Telegram akkauntlari — «🔎 Auto scan» shu yerdan ham (2026-11-13)
-    const tgAccounts = (store.listTgAccounts?.() ?? [])
-      .filter((a) => a.addedBy === Number(req.params.chatId))
+    const tgAccounts = (store.tgAccountsOf?.(Number(req.params.chatId)) ?? [])
       .map((a) => ({ ...a, scan: store.dialogScanSummary(a.name) }));
     res.json({ ...details, tgAccounts });
   });

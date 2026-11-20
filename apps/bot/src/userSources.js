@@ -256,7 +256,8 @@ export function createSourceIntake({ api, store, log = console.log, now = Date.n
   // Yopiq guruh (2026-11-13): faqat foydalanuvchi ulagan (ishlab turgan) Telegram akkaunti a'zo bo'lsa. Xabar havolasidagi
   // id — akkauntlarning guruhlar ro'yxatidan (store tg_dialogs) darhol; taklif havolasi — collector aniqlaydi (invite_checks),
   // javobni finishInvite yozadi
-  const ownAccounts = (chatId) => (store.listTgAccounts?.() ?? []).filter((a) => a.addedBy === Number(chatId) && a.status === "ok").map((a) => a.name);
+  const ownAccounts = (chatId) =>
+    (store.tgAccountsOf?.(chatId) ?? (store.listTgAccounts?.() ?? []).filter((a) => a.addedBy === Number(chatId))).filter((a) => a.status === "ok").map((a) => a.name);
   async function submitPrivate(chatId, { peerId, invite }) {
     const accounts = ownAccounts(chatId);
     if (!accounts.length) return INTAKE.private;
