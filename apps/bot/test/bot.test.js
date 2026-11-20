@@ -2006,3 +2006,19 @@ test("band holati (2026-11-19): rejim oynasi va «➕ Guruh qo'shish» ochiq tur
   await message(PRIVATE, "@Yangi_guruh");
   assert.equal(isBusy(42), false, "havola yuborildi");
 });
+
+test("yopiq guruh ovozli yuki (2026-11-20): collector botga ko'rsatgan yozuvchiga «💬 Lichkasi» tugmasi; forward qilingan ovozga bot jim", async () => {
+  const { store, calls, deliverRaw, send } = setup({ appUrl: () => MINIAPP });
+  store.saveDriver(42, { role: "haydovchi", plan: "pro", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true });
+  const post = { id: 78, source: "-1001234567890", link: null, media: "voice", text: "Farg'onadan Toshkentga 2 tonna yuk bor", postedAt: Date.now(), senderId: "5551234" };
+  const lastButtons = () => (calls.filter((c) => c.method === "sendMessage").at(-1).payload.reply_markup?.inline_keyboard ?? []).flat().map((b) => b.url);
+  await deliverRaw(42, post, { phones: [] });
+  assert.ok(!lastButtons().includes("tg://user?id=5551234"), "bot ko'rmagan — tugma yo'q (Telegram rad etardi)");
+  store.markSenderReachable("5551234");
+  await deliverRaw(42, { ...post, id: 79 }, { phones: [] });
+  assert.ok(lastButtons().includes("tg://user?id=5551234"));
+  assert.match(calls.filter((c) => c.method === "sendMessage").at(-1).payload.text, /«💬 Lichkasi» tugmasi orqali yozing/);
+  const before = calls.length;
+  await send({ message: { message_id: 900, date: 1_700_000_000, chat: PRIVATE, from: USER, voice: { file_id: "v", file_unique_id: "v", duration: 5 }, forward_origin: { type: "user", date: 1, sender_user: { id: 5551234, is_bot: false, first_name: "A" } } } });
+  assert.equal(calls.slice(before).filter((c) => c.method === "sendMessage").length, 0, "forward qilingan ovozga javob yo'q");
+});

@@ -12,7 +12,7 @@
 // Tezlik: navbat xabar kelishi bilan ishlaydi (so'rab olish halqasini kutmaydi), bir vaqtda `concurrency` tagacha.
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { transcribePauseMs, transcribeWithGemini } from "@yuk/parser";
+import { fastLook, transcribePauseMs, transcribeWithGemini } from "@yuk/parser";
 
 export const MEDIA_LIMITS = {
   maxDurationSec: 180, // undan uzuni — e'lon emas (qo'shiq, suhbat), o'girilmaydi
@@ -21,6 +21,7 @@ export const MEDIA_LIMITS = {
   concurrency: 3,
   geminiTries: 3,
   geminiTimeoutMs: 15_000, // bitta urinish shundan uzoq cho'zilsa — keyingi model (odatda 2–5 s; avval 30 s kutilardi)
+  showTimeoutMs: 8_000, // botga forward + o'chirish
   seenMax: 5_000,
 };
 
@@ -167,6 +168,7 @@ export function createMediaQueue({
     const ms = now() - started;
     stats.totalMs += ms;
     text = normalizeSpokenPhones(text);
+    await showSender(job, text);
     // Shu odamning shu guruhdagi oldingi ovozli xabari yaqinda bo'lsa — o'sha e'lonning davomi
     const who = job.message.senderId ? `${job.label}:${job.message.senderId}` : null;
     const prev = who ? lastBySender.get(who) : null;
@@ -195,6 +197,31 @@ export function createMediaQueue({
     }
     if (result?.status === "new") {
       log(`${job.label}: ${MEDIA_ICON[kind]} ${kind === "voice" ? "ovozli xabar" : "dumaloq video"} matnga o'girildi (${how}, ${(ms / 1000).toFixed(1)} s) → navbatda`);
+    }
+  }
+
+  // Yopiq guruhdagi username'siz odamning ovozli YUK e'loni (2026-11-20, Azimjon: «Audioda yuk tasdiqlansa jo'natgan odamni
+  // lichkasi yoki id si orqali uni chatiga link yasagin. Odatda yopiq guruhlarda … Pro foydalanuvchilarimiz yuk borligini
+  // bilsada bog'lana olmasligi mumkin»). Yopiq guruhda «📄 Asl e'lon» havolasi yo'q, bot esa tg://user?id= tugmasini faqat
+  // o'zi ko'rgan odamga beradi. O'qiyotgan akkaunt xabarni botga forward qiladi va darhol o'chiradi → bot uni ko'rgan bo'ladi
+  // → store.markSenderReachable → bot «💬 Lichkasi» tugmasini beradi. 4 kunlik o'lchov: yopiq guruh ovozli yuklarining 62% i
+  // shunday (faqat ID). E'lon emaslari forward qilinmaydi (fastLook — bot ham shu bilan hal qiladi). Botga yetmasa — jim
+  async function showSender(job, text) {
+    const id = job.message.senderId;
+    if (!/^-\d+$/.test(job.label) || job.message.sender || !id || !reader.showToBot || store.senderReachable?.(id)) return;
+    const bot = store.getSetting?.("bot_username");
+    if (!bot) return;
+    try {
+      if (fastLook(text, { voice: true }).chatter) return;
+      const shown = await Promise.race([
+        reader.showToBot(job.source, job.message.id, bot),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("javob kelmadi")), limits.showTimeoutMs)),
+      ]);
+      if (shown) store.markSenderReachable(id);
+      stats.shown = (stats.shown ?? 0) + (shown ? 1 : 0);
+      log(`${job.label}: ${shown ? "💬 yozgan odam botga ko'rsatildi — haydovchilarga «Lichkasi» tugmasi chiqadi" : "yozgan odam forward'da yashirin — «Lichkasi» bo'lmaydi"}`);
+    } catch (error) {
+      log(`${job.label}: yozgan odamni botga ko'rsatib bo'lmadi — ${String(error?.errorMessage ?? error?.message ?? error).slice(0, 160)}`);
     }
   }
 

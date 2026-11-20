@@ -182,3 +182,28 @@ test("hamma Gemini modeli dam olayotganda fayl yuklanmaydi — to'g'ri Telegram'
   await settle();
   assert.deepEqual([calls.gemini.length, calls.download, calls.telegram], [1, 1, 2]);
 });
+
+test("yopiq guruhda username'siz odamning ovozli YUK e'loni — botga ko'rsatiladi (bir marta); suhbat, ochiq guruh, username bo'lsa — yo'q", async () => {
+  const CLOSED = { kind: "id", value: "-1001234567890" };
+  const CHAT = "Assalomu alaykum, yaxshimisizlar, mashina buzilib qoldi, nima maslahat berasizlar";
+  const texts = { 1: LOAD_TEXT, 2: LOAD_TEXT, 3: CHAT, 4: LOAD_TEXT, 5: LOAD_TEXT };
+  const { store, reader, logs } = setup({ gemini: async () => ({ text: texts[current] }) });
+  store.setSetting("bot_username", "Yuk_Ekspert_agent");
+  const shown = [];
+  reader.showToBot = async (source, id, bot) => (shown.push([source.value, id, bot]), true);
+  let current = 0;
+  const send = async (source, m) => {
+    current = m.id;
+    addMessage(source, m, store, { via: "live", media: reader.media });
+    await settle();
+  };
+  await send(CLOSED, voice(1, { sender: null, senderId: "555" }));
+  assert.deepEqual(shown, [["-1001234567890", 1, "Yuk_Ekspert_agent"]]);
+  assert.equal(store.senderReachable("555"), true);
+  assert.ok(logs.some((l) => l.includes("botga ko'rsatildi")));
+  await send(CLOSED, voice(2, { sender: null, senderId: "555", date: NOW / 1000 + 600 })); // allaqachon ko'rsatilgan
+  await send(CLOSED, voice(3, { sender: null, senderId: "666" })); // suhbat
+  await send(SOURCE, voice(4, { sender: null, senderId: "777" })); // ochiq guruh — «📄 Asl e'lon» bor
+  await send(CLOSED, voice(5, { sender: "ali_yuk", senderId: "888" })); // username bor — havola o'zi chiqadi
+  assert.equal(shown.length, 1);
+});

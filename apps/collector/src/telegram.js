@@ -454,6 +454,15 @@ export function createReader(client) {
     async download(raw) {
       return client.downloadMedia(raw, {});
     },
+    // Xabarni botga forward qilib, darhol o'chiradi (media.js: bot yozuvchini «ko'rsin» — «💬 Lichkasi» tugmasi uchun).
+    // → true — bot yozuvchini ko'rdi (forward'da muallif ochiq), false — muallif yashirin (forward maxfiyligi «Hech kim»)
+    async showToBot(source, messageId, bot) {
+      const [sent] = await client.forwardMessages(bot, { messages: [messageId], fromPeer: await entityOf(source) });
+      if (!sent) return false;
+      const visible = sent.fwdFrom?.fromId?.className === "PeerUser";
+      await client.deleteMessages(bot, [sent.id], { revoke: true }).catch(() => {});
+      return visible;
+    },
 
     // Yopiq guruhning taklif havolasi (t.me/+hash) — qaysi guruh va akkaunt unga a'zomi (messages.checkChatInvite,
     // qo'shilmaydi). → { member: true, peerId, title, chatType, members } | { member: false, title }

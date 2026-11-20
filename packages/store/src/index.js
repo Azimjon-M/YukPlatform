@@ -231,6 +231,11 @@ function migrate(db) {
   if (!columns.includes("media")) db.exec("ALTER TABLE posts ADD COLUMN media TEXT");
   // sender_id (2026-11-16) — yozgan odamning Telegram ID'si: username'i bo'lmasa bot «💬 Lichkasi» ni tg://user?id= bilan beradi
   if (!columns.includes("sender_id")) db.exec("ALTER TABLE posts ADD COLUMN sender_id TEXT");
+  // Bot «taniydigan» yozuvchilar (2026-11-20): bot tg://user?id= tugmasini faqat o'zi ko'rgan odamga beradi
+  // (begonasiga BUTTON_USER_INVALID). Yopiq guruhni o'qiyotgan akkaunt username'siz odamning ovozli yuk e'lonini botga
+  // forward qilib, darhol o'chiradi — shundan keyin bot o'sha odamni ko'rgan bo'ladi (sinovda tasdiqlangan: o'chirilgandan
+  // keyin ham tugma qabul qilinadi). Shu jadval — kimlar shunday «ko'rsatilgan» (collector media.js yozadi, bot o'qiydi)
+  db.exec("CREATE TABLE IF NOT EXISTS reachable_senders (id TEXT PRIMARY KEY, at INTEGER NOT NULL)");
   // Guruh bo'yicha «shu vaqtdan keyin» (trialStats — sinovdagi har guruh, bot har daqiqada va «Manbalar» sahifasi):
   // indekssiz guruhning hamma e'lonlari aylanardi (~700 ms × 12 guruh = 8 s, 2026-11-16) — indeks bilan ~1 ms.
   // Birinchi ishga tushishda ~2 s quriladi
@@ -1052,6 +1057,16 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
     setCursor(source, messageId) {
       q.setCursor.run(source, messageId);
+    },
+
+    // Bot ko'rgan yozuvchi (forward orqali) — unga «💬 Lichkasi» tugmasini berish mumkin. 30 kundan eskisi — qayta ko'rsatiladi
+    markSenderReachable(id) {
+      if (id == null) return;
+      db.prepare("INSERT INTO reachable_senders (id, at) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET at = excluded.at").run(String(id), now());
+    },
+    senderReachable(id, { maxAgeMs = 30 * 24 * 60 * 60 * 1000 } = {}) {
+      if (id == null) return false;
+      return Boolean(db.prepare("SELECT 1 FROM reachable_senders WHERE id = ? AND at > ?").get(String(id), now() - maxAgeMs));
     },
 
     // --- Kichik sozlamalar (kalit → matn): masalan, bot o'z username'ini yozadi, web uni o'qiydi ---

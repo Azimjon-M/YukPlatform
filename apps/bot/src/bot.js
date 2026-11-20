@@ -316,6 +316,14 @@ export function createBot({
   // «Menu» tugmasi (buyruqlar ro'yxati) — faqat rol tanlaganlarda (commands.js). main.js commands.start() ni chaqiradi
   const commands = createCommandSync({ api: bot.api, store, log });
 
+  // Collector botga forward qilgan ovozli xabar / dumaloq video (media.js showSender: yozuvchini botga «ko'rsatish», darhol
+  // o'chiriladi) — javob yozilmaydi, faollik ham sanalmaydi
+  bot.use(async (ctx, next) => {
+    const m = ctx.message;
+    if (ctx.chat?.type === "private" && m?.forward_origin && (m.voice || m.video_note || m.audio)) return;
+    await next();
+  });
+
   // Oxirgi faollik (boshqaruv markazida «🟢 Hozir botda»): shaxsiy chatdagi har xabar yoki tugmadan KEYIN —
   // yangi foydalanuvchining yozuvi handler ichida yaratiladi, /ochirish dan keyin esa yozadigan joy qolmaydi
   // Hisobini o'chirgan odam yana yozsa yoki tugma bossa — qaytdi (store.comeBack: «o'chirilgan» belgisi olinadi, qaytgan
@@ -1887,7 +1895,9 @@ export function createBot({
   // keladi, qolgan payt — botning har javobida (/start, menyu tugmalari). 2026-11-07 dan 11-09 gacha har yuk menyu bilan borardi.
   // → { ok: true } yoki { ok: false, error } — pipeline buni deliveries ga yozadi (boshqaruv markazi «Olgan yuklari»)
   // Yozgan odam bot foydalanuvchisimi (unga «💬 Lichkasi» ID bo'yicha ishlaydi)
-  const withSender = (post) => (post?.senderId && !post.sender ? { ...post, senderKnown: Boolean(store.getDriver(Number(post.senderId))) } : post);
+  // Bot taniydi: botga yozgan (drivers) yoki collector botga forward qilib ko'rsatgan (store.senderReachable, 2026-11-20)
+  const knows = (id) => Boolean(store.getDriver(Number(id))) || Boolean(store.senderReachable?.(id));
+  const withSender = (post) => (post?.senderId && !post.sender ? { ...post, senderKnown: knows(post.senderId) } : post);
 
   async function deliver(chatId, load, rawPost, kind = "yuk", loadId = null) {
     const post = withSender(rawPost);
