@@ -855,6 +855,9 @@ export async function runLive({
       if (signal?.aborted) break;
       await scanNext();
       if (signal?.aborted) break;
+      // Guruhga qo'shilish ham — kuzatiladigan guruh bo'lmasa ham (yangi o'quvchi akkaunt hali hech narsa o'qimaydi)
+      if (readerJoins && now() >= nextReaderJoinAt) await readerJoinNext();
+      if (signal?.aborted) break;
       const list = current();
       active = new Set(list.map(sourceLabel));
       if (!list.length) {
@@ -886,7 +889,6 @@ export async function runLive({
         }
       }
       if (joins && reader.join && store.setJoinState && !joinsStopped && now() >= nextJoinAt && !signal?.aborted) await joinNext(list);
-      if (readerJoins && now() >= nextReaderJoinAt && !signal?.aborted) await readerJoinNext();
       report(list);
       if (signal?.aborted) break;
 
