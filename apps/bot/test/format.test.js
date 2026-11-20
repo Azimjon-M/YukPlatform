@@ -50,7 +50,7 @@ test("to'liq xabar: yo'nalish, mashina, telefon va asl e'lon vaqti (guruh nomisi
   assert.match(text, /mebel · 6 t/);
   assert.match(text, /Isuzu · tent · ustidan/);
   assert.match(text, /\+998901234567/);
-  assert.match(text, /\n🕒 Asl e'lon: 05\.11 14:30$/, "Toshkent vaqti (UTC+5), oxirgi qator");
+  assert.match(text, /\n📢 E'lon qilingan 🕒 05\.11\.2026 14:30$/, "Toshkent vaqti (UTC+5), oxirgi qator");
   assert.ok(!text.includes("@yuk_markazi_gruupa"), "guruh nomi yozilmaydi (Azimjon, 2026-11-09)");
   assert.ok(!text.includes("href"), "asl e'lon — tugmada, matnda emas");
   assert.equal(url, "https://t.me/yuk_markazi_gruupa/123");
@@ -59,7 +59,7 @@ test("to'liq xabar: yo'nalish, mashina, telefon va asl e'lon vaqti (guruh nomisi
 test("jo'natuvchining lichkasi: telefondan keyin, vaqtdan oldin; username'siz — qator yo'q", () => {
   const postedAt = Date.UTC(2026, 10, 5, 9, 30);
   const { text } = formatLoad(LOAD, { link: "https://t.me/g/1", postedAt, sender: "ish_beruvchi" });
-  assert.match(text, /\+998901234567\n💬 <a href="https:\/\/t\.me\/ish_beruvchi">Lichkasi<\/a>\n🕒 Asl e'lon/);
+  assert.match(text, /\+998901234567\n💬 <a href="https:\/\/t\.me\/ish_beruvchi">Lichkasi<\/a>\n📢 E'lon qilingan 🕒/);
   assert.ok(!formatLoad(LOAD, { postedAt }).text.includes("Lichkasi"));
   assert.ok(!formatLoad(LOAD, { postedAt, sender: '"><b>x' }).text.includes("Lichkasi"), "noto'g'ri username");
   const truck = formatTruck({ fromCity: "Toshkent", phones: [] }, { postedAt, sender: "@haydovchi_1" });

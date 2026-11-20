@@ -20,8 +20,19 @@ export function escapeHtml(text) {
   return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-// E'lon guruhda chiqqan vaqt: «🕒 Asl e'lon: 09.11 12:05». Guruh nomi yozilmaydi (Azimjon, 2026-11-09: «@TutGruz kerak emas»)
-export const postedLine = (postedAt) => `🕒 Asl e'lon: ${escapeHtml(postedText(postedAt))}`;
+// E'lon guruhda chiqqan vaqt (2026-11-20, Azimjon: «(e'lon stikeri) E'lon qilingan (soat stikeri) 20.11.2026 bo'lsin»):
+// «📢 E'lon qilingan 🕒 20.11.2026 12:05» — Toshkent vaqti, yil bilan; soat qoldirildi (kim birinchi qo'ng'iroq qilsa — yuk
+// o'shaniki, haydovchi uchun muhim). Guruh nomi yozilmaydi (2026-11-09: «@TutGruz kerak emas»)
+const DATE_TIME = new Intl.DateTimeFormat("ru-RU", {
+  timeZone: "Asia/Tashkent",
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+export const announcedText = (postedAt) => DATE_TIME.format(new Date(postedAt)).replace(",", "");
+export const postedLine = (postedAt) => `📢 E'lon qilingan 🕒 ${escapeHtml(announcedText(postedAt))}`;
 // Yuk egasining o'zi botga yoki formaga yozgan yuk («📦 Yuk berish», 2026-11-10): guruhdan olinmagan — «asl e'lon» yo'q,
 // vositachisiz ekani haydovchi uchun muhim
 export const ownerLine = (postedAt) => `✅ Yuk egasining o'zi yubordi · ${escapeHtml(postedText(postedAt))}`;
@@ -91,7 +102,9 @@ export function formatRaw(post, { phones = [], label = "⚡ Tezkor" } = {}) {
   const sender = senderLine(post.sender);
   if (sender) lines.push(sender);
   if (mediaLine(post)) lines.push(mediaLine(post));
-  lines.push(`${label}${post.postedAt ? ` · 🕒 ${escapeHtml(postedText(post.postedAt))}` : ""}`);
+  // label (⚡ / 📌 / 📍 — qaysi rejimdan) 2026-11-20 dan yozilmaydi: hammasida bir xil «📢 E'lon qilingan 🕒 …»
+  void label;
+  if (post.postedAt) lines.push(postedLine(post.postedAt));
   return { text: lines.join("\n"), url: post.link ?? null };
 }
 

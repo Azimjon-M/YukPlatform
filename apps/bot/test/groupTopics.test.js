@@ -143,7 +143,7 @@ test("asl matn (AI'siz): bo'lim AI'siz topilgan mashina turidan, matn o'zgarmayd
   assert.equal(sent.options.message_thread_id, poster.stats().topics.isuzu);
   assert.ok(sent.text.startsWith("Toshkentdan Samarqandga 20 tonna un bor, isuzu kerak 90 000 00 01 &lt;b&gt;"));
   assert.match(sent.text, /📞 \+998900000001/);
-  assert.match(sent.text, /⚡ Yangi e'lon/);
+  assert.match(sent.text, /📢 E'lon qilingan/);
   assert.deepEqual(sent.options.reply_markup.inline_keyboard.flat().map((b) => b.url), [
     "https://t.me/yuk_guruh/5",
     "https://t.me/Yuk_Ekspert_agent?start=guruh",

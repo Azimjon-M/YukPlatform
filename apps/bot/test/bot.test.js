@@ -506,7 +506,7 @@ test("📋 Mos yuklar: avval «Qayerdan?», keyin faqat mos keladigani, asl e'lo
   const sent = calls.filter((c) => c.method === "sendMessage");
   assert.equal(sent.length, 2);
   assert.match(sent[0].payload.text, /mos 1 ta yuk/);
-  assert.match(sent[1].payload.text, /Samarqand[\s\S]*\+998900000001[\s\S]*🕒 Asl e'lon: /);
+  assert.match(sent[1].payload.text, /Samarqand[\s\S]*\+998900000001[\s\S]*📢 E'lon qilingan 🕒 /);
   assert.ok(!sent[1].payload.text.includes("href"), "asl e'lon — matnda emas, tugmada");
   // Tunnel (https manzil) yo'q — «📞 Telefon qilish» ham yo'q, faqat asl e'lon
   assert.deepEqual(inlineButtons(sent[1]).map((b) => [b.text, b.url]), [["📄 Asl e'lon", "https://t.me/yuk_guruh/5"]]);
@@ -561,7 +561,7 @@ test("📱 Ilovalar: do'kon havolalari", async () => {
 const rowsOf = (payload) => payload.reply_markup.inline_keyboard.map((row) => row.map((b) => [b.text, b.url ?? `web_app:${b.web_app?.url}`]));
 
 // Azimjon, 2026-11-09: guruh nomi va «📄 Asl e'lon» havolasi matnda kerak emas — xabar ostida 2 ta tugma
-test("yuk xabari: «🕒 Asl e'lon: vaqt», ostida «📄 Asl e'lon» va «📞 Telefon qilish» (raqam havolada yo'q)", async () => {
+test("yuk xabari: «📢 E'lon qilingan 🕒 vaqt», ostida «📄 Asl e'lon» va «📞 Telefon qilish» (raqam havolada yo'q)", async () => {
   const made = [];
   const callLink = (link) => (made.push(link), `L${link.loadId}-${link.phone}-${link.chatId}`);
   const { store, calls, deliver } = setup({ appUrl: () => "https://yukekspert.example.ts.net/", callLink });
@@ -571,7 +571,7 @@ test("yuk xabari: «🕒 Asl e'lon: vaqt», ostida «📄 Asl e'lon» va «📞 
   const sent = () => calls.filter((c) => c.method === "sendMessage").at(-1).payload;
 
   assert.deepEqual(await deliver(42, load, post, "yuk", 7), { ok: true });
-  assert.match(sent().text, /^🚛 <b>Toshkent \(Jomiy\) → Andijon<\/b>\n🚚 plashatka\n💰 narx yozilmagan\n📅 srochno\n📞 \+998509090133\n🕒 Asl e'lon: 09\.11 12:05$/);
+  assert.match(sent().text, /^🚛 <b>Toshkent \(Jomiy\) → Andijon<\/b>\n🚚 plashatka\n💰 narx yozilmagan\n📅 srochno\n📞 \+998509090133\n📢 E'lon qilingan 🕒 09\.11\.2026 12:05$/);
   assert.ok(!sent().text.includes("@TutGruz") && !sent().text.includes("href"));
   assert.deepEqual(rowsOf(sent()), [
     [
@@ -1820,7 +1820,7 @@ test("tezkor xabar (deliverRaw): asl matn, telefonlar, «📄 Asl e'lon» va e'l
   const post = { id: 77, source: "@TutGruz", link: "https://t.me/TutGruz/5", text: "Toshkentdan Samarqandga <20 t> un bor\n90 000 00 01", postedAt: Date.now(), sender: "ali_logist" };
   assert.deepEqual(await deliverRaw(42, post, { phones: ["+998900000001"] }), { ok: true });
   const sent = calls.filter((c) => c.method === "sendMessage").at(-1).payload;
-  assert.match(sent.text, /^Toshkentdan Samarqandga &lt;20 t&gt; un bor\n90 000 00 01\n\n📞 \+998900000001\n💬 <a href="https:\/\/t\.me\/ali_logist">Lichkasi<\/a>\n⚡ Yangi e'lon · 🕒 /);
+  assert.match(sent.text, /^Toshkentdan Samarqandga &lt;20 t&gt; un bor\n90 000 00 01\n\n📞 \+998900000001\n💬 <a href="https:\/\/t\.me\/ali_logist">Lichkasi<\/a>\n📢 E'lon qilingan 🕒 /);
   assert.doesNotMatch(sent.text, /@TutGruz/, "guruh nomi matnda yo'q");
   const kb = sent.reply_markup.inline_keyboard.flat();
   assert.equal(kb[0].url, "https://t.me/TutGruz/5");
