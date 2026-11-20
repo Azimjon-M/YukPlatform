@@ -308,6 +308,24 @@ async function runCommand(client, name, command, rest) {
     const text = JSON.stringify(result, (k, v) => (typeof v === "bigint" ? String(v) : k === "originalArgs" || k === "fileReference" || k === "bytes" ? undefined : v));
     out.push(text.length > 3500 ? `${text.slice(0, 3500)}… (${text.length} belgi)` : text);
     await audit(`[${name}] api ${method} ${json.slice(0, 200).replace(/\s+/g, " ")}`);
+  } else if (command === "search") {
+    // search <so'z> [n] — ochiq guruh/kanallarni nomi bo'yicha qidirish (contacts.Search; 2026-11-20, Azimjon: «o'zimizdagi bor
+    // public guruhlardan tashqari guruh/kanallarni top va qo'sh»). Har qator — JSON: username, title, a'zolar, turi
+    const [n, ...words] = /^\d+$/.test(rest.at(-1) ?? "") ? [Number(rest.at(-1)), ...rest.slice(0, -1)] : [30, ...rest];
+    const q = words.join(" ").trim();
+    if (!q) throw new Error("search <so'z> [n]");
+    const result = await client.invoke(new Api.contacts.Search({ q, limit: Math.min(n, 100) }));
+    for (const c of result.chats ?? []) {
+      if (!c.username) continue;
+      out.push(JSON.stringify({ username: c.username, title: c.title, members: c.participantsCount ?? null, type: c.broadcast ? "kanal" : "guruh" }));
+    }
+    await audit(`[${name}] search «${q}» → ${out.length}`);
+  } else if (command === "probe") {
+    // probe <@guruh> [n] — oxirgi n xabar JSON qatorlarda {d: unix vaqt, t: matn} (yuk guruhimi — Claude o'z modelida tekshiradi)
+    const [to, n = "50"] = rest;
+    const messages = await client.getMessages(await peerOf(client, to), { limit: Math.min(Number(n) || 50, 100) });
+    for (const m of messages) if (m.message) out.push(JSON.stringify({ d: m.date, t: m.message.slice(0, 800) }));
+    if (!out.length) out.push(JSON.stringify({ d: null, t: null }));
   } else if (command === "download") {
     // download <kimdan> <xabar id> — ovozli xabar / dumaloq video / fayl ops/<nom>.media/ ga yoziladi (2026-11-20: Azimjon
     // @YukExperti'ga yuborgan ovozli e'lonlarni Claude bot yo'lidan o'tkazib sinashi uchun). Faqat shu papkaga — boshqa joyga
