@@ -10,7 +10,7 @@ export function throughput(lastHour = {}, queue = {}) {
   const inPerMin = incoming / 60;
   const outPerMin = processed / 60;
   const growthPerHour = incoming - processed;
-  const rates = `Daqiqasiga ${formatNumber(inPerMin, 1)} ta e'lon kelyapti, ${formatNumber(outPerMin, 1)} tasi tahlil qilinyapti.`;
+  const rates = `Daqiqasiga ${formatNumber(inPerMin, 1)} ta e'lon kelyapti, ${formatNumber(outPerMin, 1)} tasi ko'rib chiqilyapti.`;
 
   // Yuk chiqyapti-yu, tahlil soni 0 — demak done_at yozilmayapti (bot eski kod bilan ishlayapti), tezlikni o'lchab bo'lmaydi
   if (processed === 0 && (lastHour.loads ?? 0) > 0) {
@@ -32,7 +32,7 @@ export function throughput(lastHour = {}, queue = {}) {
   }
   // 5% gacha farq — me'yorda (soat chegarasidagi tasodif)
   if (processed >= incoming * 0.95) {
-    return { inPerMin, outPerMin, behind: false, growthPerHour, tone: "good", title: "Tahlil oqimga yetib boryapti", text: rates };
+    return { inPerMin, outPerMin, behind: false, growthPerHour, tone: "good", title: "E'lonlar kelishi bilan ko'rib chiqilyapti", text: rates };
   }
   const ratio = processed > 0 ? incoming / processed : null;
   return {

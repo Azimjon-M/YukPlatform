@@ -152,7 +152,7 @@ export function OverviewPage() {
                 <p className="muted small">
                   🧠 Oxirgi {metrics.hours} soatda {formatNumber(metrics.parsedBy.rules + (metrics.parsedBy.fast ?? 0))} ta e'lon o'zimizning algoritm bilan
                   ajratildi (AI'siz): {formatNumber(metrics.parsedBy.rules)} tasi to'liq tushunildi (yo'nalish, mashina — sayt va «Yuklar» uchun)
-                  {metrics.parsedBy.ai > 0 && <>; AI'da {formatNumber(metrics.parsedBy.ai)} ta (yuk beruvchilar)</>}
+                  {metrics.parsedBy.ai > 0 && <>; AI'da {formatNumber(metrics.parsedBy.ai)} ta (guruh e'lonlari 20.11 10:39 gacha AI'da edi, endi AI faqat yuk beruvchilar uchun)</>}
                 </p>
               )}
               {(metrics.media?.voice > 0 || metrics.media?.round > 0) && (
