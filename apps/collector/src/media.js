@@ -10,9 +10,10 @@
 // Matn posts jadvaliga media = "voice" | "round" bilan yoziladi: keyin hammasi matnli e'londek — tezkor yo'l (asl matn),
 // qoidaviy parser, AI. Ya'ni «e'lonmi yoki yo'q» ni matnli e'lon bilan bir xil qoidalar hal qiladi.
 // Tezlik: navbat xabar kelishi bilan ishlaydi (so'rab olish halqasini kutmaydi), bir vaqtda `concurrency` tagacha.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { extractPhones, fastLook, transcribePauseMs, transcribeWithGemini } from "@yuk/parser";
+import { mediaFileName } from "@yuk/store";
 
 export const MEDIA_LIMITS = {
   maxDurationSec: 180, // undan uzuni — e'lon emas (qo'shiq, suhbat), o'girilmaydi
@@ -77,7 +78,8 @@ export function createMediaQueue({
   limits = MEDIA_LIMITS,
   transcribe = transcribeWithGemini,
   models = [], // faqat o'girish uchun Gemini modellari (accounts.js: .env MEDIA_MODELS yoki TRANSCRIBE_MODELS)
-  saveDir = null, // .env MEDIA_SAVE_DIR=papka — yuklab olingan fayllar shu yerga ham yoziladi (sifatni oflayn sinash uchun; odatda o'chiq)
+  mediaDir = null, // asl fayl shu papkaga (@yuk/store MEDIA_DIR; accounts.js beradi) — bot haydovchiga uni matni bilan yuboradi
+  mediaKeepMs = 24 * 60 * 60_000, // shundan eski fayllar o'chiriladi
   compare = false, // .env MEDIA_COMPARE=1 — Telegram o'girgan xabarni Gemini ham o'giradi, ikkalasi logga (sifatni solishtirish)
 }) {
   const queue = [];
@@ -104,22 +106,32 @@ export function createMediaQueue({
     }
   }
 
-  // Sinov uchun namuna: <papka>/<guruh>_<xabar id>.<ogg|mp4> (ichida odamlarning ovozi — gitga tushmaydigan joyga)
-  async function saveSample(job, data) {
-    await mkdir(saveDir, { recursive: true });
-    const ext = job.message.media.kind === "round" ? "mp4" : "ogg";
-    await writeFile(path.join(saveDir, `${String(job.label).replace(/[^\w-]/g, "")}_${job.message.id}.${ext}`), data);
+  // Asl fayl → mediaDir/<manba>_<xabar id>.<ogg|mp4> (@yuk/store mediaFileName — bot ham shu nom bilan topadi).
+  // Har 10 daqiqada bir marta mediaKeepMs dan eski fayllar o'chiriladi
+  let cleanedAt = 0;
+  async function saveMedia(job, data) {
+    await mkdir(mediaDir, { recursive: true });
+    await writeFile(path.join(mediaDir, mediaFileName(job.label, job.message.id, job.message.media.kind)), data);
+    if (now() - cleanedAt < 10 * 60_000) return;
+    cleanedAt = now();
+    for (const name of await readdir(mediaDir).catch(() => [])) {
+      const full = path.join(mediaDir, name);
+      const info = await stat(full).catch(() => null);
+      if (info && now() - info.mtimeMs > mediaKeepMs) await unlink(full).catch(() => {});
+    }
   }
 
   // → { text, model } | null (sinaydigan model yo'q). Hammasi xato bersa — oxirgi xato tashlanadi
+  // Fayl bir marta yuklanadi (Gemini ham, haydovchiga yuboriladigan asl fayl ham shu)
+  const fileOf = (job) => (job.data ??= reader.download(job.message.raw));
+
   async function viaGemini(job) {
     if (!job.message.raw || !reader.download) return null;
     const list = geminiCandidates(connections(), models, now())
       .filter((c) => !((resting.get(c.key) ?? 0) > now()))
       .slice(0, limits.geminiTries);
-    if (!list.length) return null; // hammasi dam olyapti — fayl ham yuklanmaydi, to'g'ri Telegram'ga
-    const data = await reader.download(job.message.raw);
-    if (saveDir) saveSample(job, data).catch((error) => log(`${job.label}: namuna saqlanmadi — ${error?.message ?? error}`));
+    if (!list.length) return null; // hammasi dam olyapti — to'g'ri Telegram'ga
+    const data = await fileOf(job);
     let last = null;
     for (const c of list) {
       try {
@@ -174,6 +186,14 @@ export function createMediaQueue({
     const ms = now() - started;
     stats.totalMs += ms;
     text = normalizeSpokenPhones(text);
+    // Asl fayl diskka — navbatga yozishdan OLDIN (bot e'lonni ko'rganda fayl tayyor bo'lsin)
+    if (mediaDir && job.message.raw && reader.download) {
+      try {
+        await saveMedia(job, await fileOf(job));
+      } catch (error) {
+        log(`${job.label}: asl fayl saqlanmadi — ${error?.message ?? error} (haydovchiga faqat matn boradi)`);
+      }
+    }
     await showSender(job, text);
     // Shu odamning shu guruhdagi oldingi ovozli xabari yaqinda bo'lsa — o'sha e'lonning davomi
     const who = job.message.senderId ? `${job.label}:${job.message.senderId}` : null;

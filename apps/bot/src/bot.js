@@ -50,7 +50,8 @@ import {
 import { createCommandSync } from "./commands.js";
 import { profileFromText } from "./driverText.js";
 import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, REGION_CALLBACK, TRUCK_CALLBACK, feedSavedText, groupStep, modeStep, regionStep, toggleSource, truckStep } from "./feed.js";
-import { SENDER_TEXT, escapeHtml, formatLoad, formatRaw, formatTruck } from "./format.js";
+import { SENDER_TEXT, escapeHtml, formatLoad, formatRaw, formatRawCaption, formatTruck } from "./format.js";
+import { mediaFileOf } from "@yuk/store";
 import { IDLE_BUTTONS } from "./idle.js";
 import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
 import { MENU, OLD_MENU, PHONE, mainMenu, matchesLabel, miniAppUrl, phoneKeyboard, settingsLabel } from "./menu.js";
@@ -309,8 +310,10 @@ export function createBot({
   postCallLink = () => null,
   parseLoad = async () => null,
   onLoadQueued = () => {},
+  mediaDir, // ovozli xabar / dumaloq videoning asl fayllari (collector yozadi); berilmasa — @yuk/store MEDIA_DIR
 }) {
   const bot = new Bot(token, botInfo ? { botInfo } : undefined);
+  const mediaDirFile = (post) => mediaFileOf(post, ...(mediaDir ? [mediaDir] : []));
   // Telegram "juda tez" (429) desa, aytilgan vaqtcha kutib qayta yuboradi
   bot.api.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 60 }));
   // «Menu» tugmasi (buyruqlar ro'yxati) — faqat rol tanlaganlarda (commands.js). main.js commands.start() ni chaqiradi
@@ -1937,16 +1940,46 @@ export function createBot({
   async function deliverRawNow(chatId, rawPost, { phones = [] } = {}) {
     const post = withSender(rawPost);
     const mode = FEED_MODES[feedMode(store.getDriver(chatId)?.profile)];
-    const { text } = formatRaw(post, { phones, label: mode.groups ? "📌 Guruhingizdan" : mode.regions ? "📍 Hududingizdan" : "⚡ Yangi e'lon" });
+    const options = { phones, label: mode.groups ? "📌 Guruhingizdan" : mode.regions ? "📍 Hududingizdan" : "⚡ Yangi e'lon" };
     const url = rawCallUrl(chatId, post.id);
-    return sendDirect(chatId, text, loadButtons({ phones }, post, url), () => loadButtons({ phones }, post, url, { lichka: false }));
+    const buttons = loadButtons({ phones }, post, url);
+    const fallback = () => loadButtons({ phones }, post, url, { lichka: false });
+    // Ovozli xabar / dumaloq video: asl fayl + ostida matn, bitta xabarda (2026-11-20, Azimjon: matnga o'girish xato bo'lishi
+    // mumkin — haydovchi asl ovozni ham eshitsin). Fayl yo'q (24 soatdan eski, saqlanmagan) yoki Telegram qabul qilmasa — matn
+    const file = mediaFile(post);
+    if (file && existsSync(file)) {
+      const outcome = await sendDirect(chatId, formatRawCaption(post, options), buttons, fallback, { file, kind: post.media });
+      if (outcome.ok || !/Bad Request|wrong|file|caption/i.test(outcome.error ?? "")) return outcome;
+      log(`#${post.id}: asl fayl yuborilmadi (${outcome.error}) — faqat matn`);
+    }
+    const { text } = formatRaw(post, options);
+    return sendDirect(chatId, text, buttons, fallback);
+  }
+
+  // Asl faylning Telegram'dagi nusxasi: birinchi haydovchiga yuklanadi, keyingilariga file_id bilan (qayta yuklanmaydi)
+  const mediaFile = (post) => (post?.source && /^(@|-)/.test(post.source) ? mediaDirFile(post) : null);
+  const fileIds = new Map(); // fayl yo'li → file_id
+  async function sendMedia(chatId, media, caption, markup) {
+    const options = { caption, parse_mode: "HTML", ...markup };
+    const input = fileIds.get(media.file) ?? new InputFile(media.file);
+    // Dumaloq videoga izoh qo'shib bo'lmaydi (sendVideoNote'da caption yo'q) — oddiy video bo'lib, izohi bilan boradi
+    const message = media.kind === "round" ? await bot.api.sendVideo(chatId, input, { ...options, supports_streaming: true }) : await bot.api.sendVoice(chatId, input, options);
+    const id = (message?.voice ?? message?.video ?? message?.document)?.file_id;
+    if (id) {
+      fileIds.set(media.file, id);
+      if (fileIds.size > 1000) fileIds.delete(fileIds.keys().next().value);
+    }
+    return message;
   }
 
   // Shaxsiy xabar (yuk yoki tezkor e'lon) — tugmalar bilan, ular yo'q bo'lsa pastki menyu bilan
   // fallback() — Telegram tugmalarni rad etsa sinab ko'riladigan ikkinchi to'plam («💬 Lichkasi» siz); faqat kerak bo'lganda quriladi
-  async function sendDirect(chatId, text, buttons, fallback = null) {
+  // media — { file, kind } bo'lsa xabar o'rniga asl fayl yuboriladi, text esa uning izohi (caption)
+  async function sendDirect(chatId, text, buttons, fallback = null, media = null) {
     const driver = store.getDriver(chatId);
-    const send = (markup) => bot.api.sendMessage(chatId, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup });
+    const send = media
+      ? (markup) => sendMedia(chatId, media, text, markup)
+      : (markup) => bot.api.sendMessage(chatId, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup });
     try {
       try {
         await send(buttons ? { reply_markup: buttons } : driver ? menu(driver) : {});

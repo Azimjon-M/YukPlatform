@@ -95,6 +95,19 @@ export function formatRaw(post, { phones = [], label = "⚡ Tezkor" } = {}) {
   return { text: lines.join("\n"), url: post.link ?? null };
 }
 
+// Ovozli xabar / video ostidagi matn (caption) — Telegram chegarasi 1024 belgi: sig'masa e'lon matni qisqartiriladi
+export const CAPTION_MAX = 1024;
+export function formatRawCaption(post, options) {
+  let { text } = formatRaw(post, options);
+  for (let i = 0; i < 3 && text.length > CAPTION_MAX; i++) {
+    const body = String(post.text ?? "");
+    const keep = Math.max(40, body.length - (text.length - CAPTION_MAX) - 10);
+    post = { ...post, text: `${body.slice(0, keep).trimEnd()}…` };
+    ({ text } = formatRaw(post, options));
+  }
+  return text;
+}
+
 // Bo'sh mashina (yuk beruvchiga). Matnlar @yuk/shared loadText.js da — web ham xuddi shunday yozadi.
 // → { text, url }
 export function formatTruck(truck, post = {}) {

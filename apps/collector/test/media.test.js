@@ -15,7 +15,7 @@ const voice = (id, extra = {}) => {
 };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
-function setup({ premium = true, telegram = async () => LOAD_TEXT, gemini = async () => ({ text: LOAD_TEXT }), connections = [{ provider: "gemini", apiKey: "k", model: "m" }], models, clock } = {}) {
+function setup({ premium = true, telegram = async () => LOAD_TEXT, gemini = async () => ({ text: LOAD_TEXT }), connections = [{ provider: "gemini", apiKey: "k", model: "m" }], models, clock, mediaDir } = {}) {
   const store = openStore({ file: ":memory:", now: () => NOW });
   const calls = { telegram: 0, download: 0, gemini: [] };
   const reader = {
@@ -31,6 +31,7 @@ function setup({ premium = true, telegram = async () => LOAD_TEXT, gemini = asyn
     log: (m) => logs.push(m),
     now: clock ?? (() => NOW),
     ...(models ? { models } : {}),
+    ...(mediaDir ? { mediaDir } : {}),
     transcribe: async (args) => (calls.gemini.push(args.model), gemini(args)),
   });
   return { store, reader, calls, logs };
@@ -235,4 +236,20 @@ test("yopiq guruh matnli e'loni: faqat ID — avval botga ko'rsatiladi, keyin na
   addMessage(SOURCE, msg(3, { phone: "+998901112233", text: "Namangandan Qarshiga 5 tonna yuk bor" }), store, { media: reader.media });
   assert.equal(store.takeNewPosts(5).find((p) => p.messageId === 3).senderPhone, null);
   assert.deepEqual(order, ["show:1"]);
+});
+
+test("asl fayl mediaDir'ga navbatga yozishdan oldin saqlanadi (bot shu nom bilan topadi); bitta yuklab olish", async () => {
+  const { mkdtempSync, existsSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { mediaFileOf } = await import("@yuk/store");
+  const dir = mkdtempSync(join(tmpdir(), "yuk-media-"));
+  const { store, reader, calls } = setup({ mediaDir: dir });
+  addMessage(SOURCE, voice(7), store, { via: "live", media: reader.media });
+  await settle();
+  const [post] = store.takeNewPosts(5);
+  const file = mediaFileOf(post, dir);
+  assert.ok(existsSync(file));
+  assert.equal(readFileSync(file, "utf8"), "ogg");
+  assert.equal(calls.download, 1, "Gemini uchun ham, saqlash uchun ham — bitta yuklab olish");
 });

@@ -16,7 +16,7 @@ const CHANNEL = { id: -1009876543210, type: "channel", title: "Yuk Ekspert", use
 
 // fail(method, payload) → true (403 «bloklagan») yoki Telegram javobi obyekti (masalan 400) — shu so'rov xato bilan qaytadi
 // answer(method, payload) → Telegram javobidagi result (masalan getChatMember uchun { status }) yoki undefined — standart
-function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued } = {}) {
+function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued, mediaDir } = {}) {
   const store = openStore({ file: ":memory:" });
   const config = { channel: "@Yuk_Ekspert", channelId: CHANNEL.id, admins: [], miniappUrl: null, ...extra };
   const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources, holdReminder } = createBot({
@@ -32,6 +32,7 @@ function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUr
     postCallLink,
     parseLoad,
     onLoadQueued,
+    mediaDir,
   });
   const calls = [];
   let messageId = 100;
@@ -2021,4 +2022,41 @@ test("yopiq guruh ovozli yuki (2026-11-20): collector botga ko'rsatgan yozuvchig
   const before = calls.length;
   await send({ message: { message_id: 900, date: 1_700_000_000, chat: PRIVATE, from: USER, voice: { file_id: "v", file_unique_id: "v", duration: 5 }, forward_origin: { type: "user", date: 1, sender_user: { id: 5551234, is_bot: false, first_name: "A" } } } });
   assert.equal(calls.slice(before).filter((c) => c.method === "sendMessage").length, 0, "forward qilingan ovozga javob yo'q");
+});
+
+test("ovozli xabar / dumaloq video (2026-11-20): asl fayl + ostida matn bitta xabarda; ikkinchisiga file_id; fayl yo'q — matn", async () => {
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { mediaFileName } = await import("@yuk/store");
+  const dir = mkdtempSync(join(tmpdir(), "yuk-media-"));
+  writeFileSync(join(dir, mediaFileName("@yuk_guruh", 5, "voice")), "OGG");
+  writeFileSync(join(dir, mediaFileName("-1001234567890", 6, "round")), "MP4");
+  const { store, calls, deliverRaw } = setup({
+    mediaDir: dir,
+    answer: (method) =>
+      method === "sendVoice" ? { message_id: 1, date: 0, chat: { id: 1 }, voice: { file_id: "VOICE_ID" } } : method === "sendVideo" ? { message_id: 2, date: 0, chat: { id: 1 }, video: { file_id: "VIDEO_ID" } } : undefined,
+  });
+  for (const id of [42, 43]) store.saveDriver(id, { role: "haydovchi", plan: "pro", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true });
+  const voice = { id: 90, source: "@yuk_guruh", messageId: 5, link: "https://t.me/yuk_guruh/5", media: "voice", text: "Farg'onadan Toshkentga 2 tonna yuk bor +998900000001", postedAt: Date.now(), sender: "ali_yuk" };
+  assert.deepEqual(await deliverRaw(42, voice, { phones: ["+998900000001"] }), { ok: true });
+  const first = calls.filter((c) => c.method === "sendVoice").at(-1).payload;
+  assert.ok(first.caption.startsWith("Farg'onadan Toshkentga 2 tonna yuk bor"));
+  assert.match(first.caption, /🎤 Ovozli xabardan/);
+  assert.equal(first.parse_mode, "HTML");
+  assert.ok(first.reply_markup.inline_keyboard.flat().some((b) => b.text === "🎤 Tinglash"));
+  assert.equal(typeof first.voice, "object", "birinchisi — fayl yuklanadi");
+  await deliverRaw(43, voice, { phones: ["+998900000001"] });
+  assert.equal(calls.filter((c) => c.method === "sendVoice").at(-1).payload.voice, "VOICE_ID", "ikkinchisi — Telegram'dagi nusxa");
+  assert.equal(calls.filter((c) => c.method === "sendMessage").length, 0, "alohida matn xabari yo'q");
+  // Dumaloq video — oddiy video, izohi bilan
+  await deliverRaw(42, { ...voice, id: 91, source: "-1001234567890", messageId: 6, media: "round", link: null }, { phones: ["+998900000001"] });
+  assert.match(calls.filter((c) => c.method === "sendVideo").at(-1).payload.caption, /📹/);
+  // Fayl yo'q — avvalgidek matn
+  await deliverRaw(42, { ...voice, id: 92, messageId: 7 }, { phones: ["+998900000001"] });
+  assert.match(calls.filter((c) => c.method === "sendMessage").at(-1).payload.text, /^Farg'onadan/);
+  // Juda uzun matn — izoh 1024 belgidan oshmaydi
+  writeFileSync(join(dir, mediaFileName("@yuk_guruh", 8, "voice")), "OGG");
+  await deliverRaw(42, { ...voice, id: 93, messageId: 8, text: "Farg'onadan Toshkentga yuk bor ".repeat(80) }, { phones: [] });
+  assert.ok(calls.filter((c) => c.method === "sendVoice").at(-1).payload.caption.length <= 1024);
 });

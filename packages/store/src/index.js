@@ -26,6 +26,12 @@ export const DEFAULT_DB_FILE = path.resolve(ROOT, process.env.YUK_DB || path.joi
 // Profil va guruh rasmlari (boshqaruv markazidagi ro'yxatlar uchun, 2026-11-16): users/<chat id>.jpg, sources/<nom>.jpg.
 // API (apps/api avatars.js) bot orqali oladi, yopiq guruhnikini collector (avatars.js) o'qiydigan akkaunt bilan yuklaydi
 export const AVATAR_DIR = path.join(path.dirname(DEFAULT_DB_FILE), "avatars");
+// Ovozli xabar / dumaloq videoning asl fayli (2026-11-20, Azimjon: «audio va dumaloq video bar xato bo'lishi mumkin ekan, demak
+// biz uni asl audio va dumaloq videosini ham qo'shib yo'naltiramiz»): collector media.js yozadi (24 soat turadi), bot
+// haydovchiga shu faylni matni bilan bitta xabarda yuboradi. Ichida odamlarning ovozi — data/ gitignored
+export const MEDIA_DIR = path.join(path.dirname(DEFAULT_DB_FILE), "media");
+export const mediaFileName = (source, messageId, kind) => `${String(source ?? "").replace(/[^\w-]/g, "")}_${Number(messageId)}.${kind === "round" ? "mp4" : "ogg"}`;
+export const mediaFileOf = (post, dir = MEDIA_DIR) => (post?.media && post.source && post.messageId ? path.join(dir, mediaFileName(post.source, post.messageId, post.media)) : null);
 // Fayl nomi: "@TutGruz" → "@tutgruz", "-1001234" → "-1001234" (boshqa belgilar — tashlanadi)
 export const avatarFileName = (key) => `${String(key).toLowerCase().replace(/[^a-z0-9@_-]/g, "")}.jpg`;
 
