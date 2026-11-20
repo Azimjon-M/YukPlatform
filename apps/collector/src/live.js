@@ -14,6 +14,7 @@
 //   Bir xabar bir necha yo'ldan kelsa ham bazaga bir marta yoziladi (posts: UNIQUE source + message_id).
 // Kim a'zo — har membershipMs (10 daq) da bitta so'rov bilan tekshiriladi.
 import { setTimeout as wait } from "node:timers/promises";
+import { extractPhones } from "@yuk/parser";
 import { DEFAULT_DEDUPE_WINDOW_MS, telegramUsername } from "@yuk/shared";
 import { MAIN_TG_ACCOUNT } from "@yuk/store";
 import { CLOSED_PROBE, MISSING_ERROR, PROBE, judgeClosed, judgeProbe } from "./probe.js";
@@ -72,10 +73,17 @@ export function addMessage(source, message, store, { minLength = 20, dedupeWindo
     return "short";
   }
   const sender = telegramUsername(message.sender);
-  return store.addPost(
-    { source: sourceLabel(source), messageId: message.id, link, text, postedAt: message.date * 1000, via, sender, senderId: message.senderId ?? null },
-    { dedupeWindowMs },
-  );
+  // Yopiq guruh (2026-11-20, Azimjon: bog'lanish yo'li — raqam, username, Telegram ID, forward; bo'lmasa haydovchiga
+  // yuborilmaydi): profil raqami faqat yopiq guruh e'loniga yoziladi. Raqami ham, username'i ham yo'q, faqat ID — avval
+  // media.js navbati botga «ko'rsatadi» (forward, darhol o'chiriladi), keyin navbatga yozadi: bot e'lonni ko'rganda
+  // yozuvchini allaqachon taniydi va «💬 Lichkasi» tugmasini bera oladi
+  const closed = source.kind === "id";
+  const senderPhone = closed ? (message.senderPhone ?? null) : null;
+  const fields = { source: sourceLabel(source), messageId: message.id, link, text, postedAt: message.date * 1000, via, sender, senderId: message.senderId ?? null, senderPhone };
+  if (closed && media?.pushContact && !sender && message.senderId && !senderPhone && !extractPhones(text).length) {
+    return media.pushContact({ source, label: fields.source, message, via, dedupeWindowMs, fields }) ? "media" : null;
+  }
+  return store.addPost(fields, { dedupeWindowMs });
 }
 
 // GramJS xabarining jo'natuvchisi (message.sender) → username yoki null.

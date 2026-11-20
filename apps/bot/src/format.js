@@ -37,6 +37,9 @@ export const VOICE_NO_PHONE_ID = "📞 raqam aytilmagan — «💬 Lichkasi» tu
 // Username'siz, lekin ID bor (bot.js loadButtons «💬 Lichkasi» tugmasi) — lichka orqali; bo'lmasa — guruhdagi xabar
 const voiceNoPhone = (post) => (!post.sender && post.senderId && post.senderKnown ? VOICE_NO_PHONE_ID : post.link ? VOICE_NO_PHONE : null);
 
+// Yopiq guruhda yozgan odamning profil raqami (2026-11-20): matnda raqam yo'q, lekin Telegram'da hamma ko'radigan qilib qo'ygan
+const profilePhoneLine = (post) => `📞 ${phoneText(post.senderPhone)} (yozgan odamning Telegram raqami)`;
+
 // E'lonni guruhga yozgan odamning shaxsiy chati: «💬 Lichkasi» (havola). Username'i yo'q bo'lsa — qator yo'q.
 // t.me havolasi Telegram ichida «Havolani ochish» so'ramasdan darhol o'sha odam bilan chatni ochadi
 export const SENDER_TEXT = "Lichkasi";
@@ -59,7 +62,9 @@ export function formatLoad(load, post = {}) {
   if (load.when) lines.push(`📅 ${escapeHtml(load.when)}`);
   if (load.note) lines.push(`📝 ${escapeHtml(load.note)}`);
   if (load.phones?.length) lines.push(`📞 ${load.phones.map(phoneText).join(", ")}`);
+  else if (post.senderPhone) lines.push(profilePhoneLine(post));
   else if (post.media && voiceNoPhone(post)) lines.push(voiceNoPhone(post));
+  else if (!post.link && !post.sender && post.senderKnown) lines.push(VOICE_NO_PHONE_ID.replace("raqam aytilmagan", "telefon yozilmagan"));
   else lines.push("📞 telefon yozilmagan — asl e'lonni oching");
   const sender = senderLine(post.sender);
   if (sender) lines.push(sender);
@@ -80,7 +85,9 @@ export function formatRaw(post, { phones = [], label = "⚡ Tezkor" } = {}) {
   const text = body.length > RAW_TEXT_MAX ? `${body.slice(0, RAW_TEXT_MAX).trimEnd()}…` : body;
   const lines = [escapeHtml(text), ""];
   if (phones.length) lines.push(`📞 ${phones.map(phoneText).join(", ")}`);
+  else if (post.senderPhone) lines.push(profilePhoneLine(post));
   else if (post.media && !post.sender && voiceNoPhone(post)) lines.push(voiceNoPhone(post));
+  else if (!post.link && !post.sender && post.senderKnown) lines.push(VOICE_NO_PHONE_ID.replace("raqam aytilmagan", "telefon yozilmagan"));
   const sender = senderLine(post.sender);
   if (sender) lines.push(sender);
   if (mediaLine(post)) lines.push(mediaLine(post));

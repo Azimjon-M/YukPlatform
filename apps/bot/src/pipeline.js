@@ -54,7 +54,16 @@ export const NO_CONTACT = "Aloqasiz: telefon raqami ham, lichkasi ham yo'q";
 // berilmasa u yuk e'loni emas degani emas! … lichkasi yoki id sidan foydalanib uni chatiga link qo'yish kerak»)
 // ID faqat bot taniydigan odam uchun ishlaydi (botga yozgan — drivers jadvalida): begonasini Telegram tugmada
 // BUTTON_USER_INVALID bilan rad etadi (2026-11-16 jonli loglarida 89 marta). known(id) — store.getDriver bo'yicha
-export const knownUser = (store) => (id) => Boolean(store?.getDriver?.(Number(id)));
+export const knownUser = (store) => (id) => Boolean(store?.getDriver?.(Number(id))) || Boolean(store?.senderReachable?.(id));
+
+// Yopiq guruh e'loni (2026-11-20, Azimjon: «Yopiq guruhda yuk e'lonini bergan shaxs accountiga raqami, username, telegramID,
+// va forvard qilib bog'lanish yo'lini qilamiz. agar shu bog'lanish yo'li yo'q bo'lsa e'lonni haydovchilarga jo'natish shart
+// emas»): matndagi raqam, profil raqami (post.senderPhone), username yoki bot taniydigan ID (botga yozgan yoki collector
+// forward qilib ko'rsatgan — knownUser). Bittasi ham yo'q — hech kimga yuborilmaydi, saralash o'chiq bo'lsa ham
+export const closedContact = (post, known = () => false) =>
+  extractPhones(post?.text ?? "").length > 0 || Boolean(post?.senderPhone) || Boolean(post?.sender) || Boolean(post?.senderId && known(post.senderId));
+export const closedNoContact = (post, known) => post?.shipper == null && isClosedSource(post?.source) && !closedContact(post, known);
+export const CLOSED_NO_CONTACT = "Aloqasiz (yopiq guruh): raqam, username va bot taniydigan ID yo'q — haydovchilarga yuborilmadi";
 export const linkContact = (post, known = () => false) => Boolean(post?.media && (post?.link || (post?.senderId && known(post.senderId))));
 const NO_CONTACT_SKIPPED = `${NO_CONTACT} — AI'ga yuborilmadi`;
 
@@ -91,7 +100,12 @@ export async function handleParsed(post, result, deps) {
 
   // Telefon ham, lichka ham yo'q — bog'lanib bo'lmaydi: yuk saqlanmaydi va hech kimga yuborilmaydi.
   // Odatda bunday e'lon AI'gacha yopiladi (createWorker), bu — oxirgi to'siq (masalan, processPost yo'li)
-  if (deps.requireContact && post.shipper == null && !post.sender && !linkContact(post, knownUser(store)) && result.loads.every((load) => !load.phones?.length)) {
+  if (closedNoContact(post, knownUser(store))) {
+    store.finishPost(post.id, "done", CLOSED_NO_CONTACT, by);
+    return { status: "skipped", reason: "contact", kind };
+  }
+  const closedOk = isClosedSource(post.source) && closedContact(post, knownUser(store));
+  if (deps.requireContact && post.shipper == null && !post.sender && !closedOk && !linkContact(post, knownUser(store)) && result.loads.every((load) => !load.phones?.length)) {
     store.finishPost(post.id, "done", NO_CONTACT, by);
     return { status: "skipped", reason: "contact", kind };
   }
@@ -235,7 +249,8 @@ export function createWorker(
   { idleMs = 5000, fastMs = 1000, rawMaxAgeMs = 30 * 60_000, batch, fillWaitMs, liveWaitMs, log = console.log, now = Date.now, maxParallel, maxAgeMs = 0 } = {},
 ) {
   const { store } = deps;
-  const contactOf = (post) => hasContact(post) || linkContact(post, knownUser(store));
+  const known = knownUser(store);
+  const contactOf = (post) => hasContact(post) || linkContact(post, known) || (isClosedSource(post.source) && closedContact(post, known));
   const pool = deps.pool ?? poolFromParser(deps.parser);
   const size = batch ?? pool.batchSize ?? 10;
   const fillWait = fillWaitMs ?? pool.batchWaitMs ?? 90_000;
@@ -282,6 +297,12 @@ export function createWorker(
   // Aloqasiz e'lon — darhol yopiladi (AI so'rovi ham, qoidaviy parser ham kerak emas). true — yopildi
   let noContactCount = 0;
   function contactless(post) {
+    // Yopiq guruh — REQUIRE_CONTACT'dan qat'i nazar (uning qoidasi)
+    if (closedNoContact(post, known)) {
+      store.finishPost(post.id, "done", CLOSED_NO_CONTACT);
+      noContactCount++;
+      return true;
+    }
     if (!deps.requireContact || contactOf(post)) return false;
     store.finishPost(post.id, "done", NO_CONTACT_SKIPPED);
     noContactCount++;
@@ -314,6 +335,7 @@ export function createWorker(
   // Bitta e'lon: kimga kerak (rejim + guruh) → yuk e'lonimi (AI'siz) → tezkor rejimda chet el emasmi → yuborish navbatiga
   function fast(post, users, getLook = () => lookOf(post.text, { voice: Boolean(post.media) })) {
     if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || (!fastAll && !contactOf(post))) return;
+    if (closedNoContact(post, known)) return; // yopiq guruh, bog'lanish yo'li yo'q — saralash o'chiq bo'lsa ham hech kimga
     // Filtr (2026-11-19, Azimjon): «quruq gap» — hech kimga (shart); «🚚 Transport» va «📍 Qayerdan» — haydovchi tanlagan
     // bo'lsa. Bitta qoidaviy tahlil (~3 ms, AI'siz); e'londa transport yoki joy topilmasa — o'sha filtrdan o'tadi
     const look = getLook();

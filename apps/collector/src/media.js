@@ -12,7 +12,7 @@
 // Tezlik: navbat xabar kelishi bilan ishlaydi (so'rab olish halqasini kutmaydi), bir vaqtda `concurrency` tagacha.
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fastLook, transcribePauseMs, transcribeWithGemini } from "@yuk/parser";
+import { extractPhones, fastLook, transcribePauseMs, transcribeWithGemini } from "@yuk/parser";
 
 export const MEDIA_LIMITS = {
   maxDurationSec: 180, // undan uzuni — e'lon emas (qo'shiq, suhbat), o'girilmaydi
@@ -133,6 +133,12 @@ export function createMediaQueue({
     throw last;
   }
 
+  // Yopiq guruhning matnli e'loni, faqat ID bilan (live.js addMessage → pushContact): botga ko'rsatib, keyin navbatga
+  async function workContact(job) {
+    await showSender(job, job.fields.text, { voice: false });
+    store.addPost(job.fields, { dedupeWindowMs: job.dedupeWindowMs });
+  }
+
   async function work(job) {
     const started = now();
     let text = null;
@@ -182,6 +188,7 @@ export function createMediaQueue({
       via: job.via,
       sender: job.message.sender ?? null,
       senderId: job.message.senderId ?? null,
+      senderPhone: /^-\d+$/.test(job.label) ? (job.message.senderPhone ?? null) : null, // yopiq guruhda — profil raqami
       media: kind,
     };
     const merged = prev && at - prev.at <= MERGE_WINDOW_MS && at >= prev.at ? store.mergePost?.(prev.postId, fields) : null;
@@ -206,13 +213,15 @@ export function createMediaQueue({
   // o'zi ko'rgan odamga beradi. O'qiyotgan akkaunt xabarni botga forward qiladi va darhol o'chiradi → bot uni ko'rgan bo'ladi
   // → store.markSenderReachable → bot «💬 Lichkasi» tugmasini beradi. 4 kunlik o'lchov: yopiq guruh ovozli yuklarining 62% i
   // shunday (faqat ID). E'lon emaslari forward qilinmaydi (fastLook — bot ham shu bilan hal qiladi). Botga yetmasa — jim
-  async function showSender(job, text) {
+  // Matnli e'lon ham (2026-11-20): raqami (matnda yoki profilda) va username'i yo'q bo'lsa — xuddi shunday
+  async function showSender(job, text, { voice = true } = {}) {
     const id = job.message.senderId;
-    if (!/^-\d+$/.test(job.label) || job.message.sender || !id || !reader.showToBot || store.senderReachable?.(id)) return;
+    if (!/^-\d+$/.test(job.label) || job.message.sender || job.message.senderPhone || !id || !reader.showToBot || store.senderReachable?.(id)) return;
+    if (extractPhones(text).length) return; // raqam aytilgan — bog'lanish bor
     const bot = store.getSetting?.("bot_username");
     if (!bot) return;
     try {
-      if (fastLook(text, { voice: true }).chatter) return;
+      if (fastLook(text, { voice }).chatter) return;
       const shown = await Promise.race([
         reader.showToBot(job.source, job.message.id, bot),
         new Promise((_, reject) => setTimeout(() => reject(new Error("javob kelmadi")), limits.showTimeoutMs)),
@@ -236,10 +245,10 @@ export function createMediaQueue({
       const who = whoOf(job);
       if (who) busy.add(who);
       running++;
-      work(job)
+      (job.contact ? workContact : work)(job)
         .catch((error) => {
           stats.failed++;
-          log(`${job.label}: ${MEDIA_ICON[job.message.media.kind]} matnga o'girib bo'lmadi — ${error?.message ?? error}`);
+          log(`${job.label}: ${job.contact ? "yopiq guruh e'loni navbatga yozilmadi" : `${MEDIA_ICON[job.message.media?.kind] ?? ""} matnga o'girib bo'lmadi`} — ${error?.message ?? error}`);
         })
         .finally(() => {
           running--;
@@ -262,6 +271,17 @@ export function createMediaQueue({
         return false;
       }
       queue.push({ source, label, link, message, via, dedupeWindowMs });
+      pump();
+      return true;
+    },
+    // Yopiq guruhning matnli e'loni, faqat ID bilan (live.js addMessage): botga ko'rsatiladi, keyin navbatga yoziladi.
+    // → true (olindi) | false (allaqachon ko'rilgan)
+    pushContact({ source, label, message, via = null, dedupeWindowMs, fields }) {
+      const key = `${label}:${message.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      if (seen.size > limits.seenMax) seen.delete(seen.values().next().value);
+      queue.push({ source, label, message, via, dedupeWindowMs, fields, contact: true });
       pump();
       return true;
     },

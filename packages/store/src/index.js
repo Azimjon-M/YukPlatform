@@ -236,6 +236,9 @@ function migrate(db) {
   // forward qilib, darhol o'chiradi — shundan keyin bot o'sha odamni ko'rgan bo'ladi (sinovda tasdiqlangan: o'chirilgandan
   // keyin ham tugma qabul qilinadi). Shu jadval — kimlar shunday «ko'rsatilgan» (collector media.js yozadi, bot o'qiydi)
   db.exec("CREATE TABLE IF NOT EXISTS reachable_senders (id TEXT PRIMARY KEY, at INTEGER NOT NULL)");
+  // sender_phone (2026-11-20) — yopiq guruhda e'lon bergan odamning PROFIL raqami (Telegram'da hamma ko'radigan qilib
+  // qo'ygan bo'lsa; matnda raqam bo'lmasa haydovchiga shu ko'rsatiladi). Faqat yopiq guruhlar uchun yoziladi (collector live.js)
+  if (!columns.includes("sender_phone")) db.exec("ALTER TABLE posts ADD COLUMN sender_phone TEXT");
   // Guruh bo'yicha «shu vaqtdan keyin» (trialStats — sinovdagi har guruh, bot har daqiqada va «Manbalar» sahifasi):
   // indekssiz guruhning hamma e'lonlari aylanardi (~700 ms × 12 guruh = 8 s, 2026-11-16) — indeks bilan ~1 ms.
   // Birinchi ishga tushishda ~2 s quriladi
@@ -476,6 +479,7 @@ function queuedPost(row) {
     sender: row.sender ?? null, // e'lonni yozgan odamning username'i («💬 Lichkasi»)
     media: row.media ?? null, // voice | round — matn ovozdan o'girilgan (🎤 / 📹)
     senderId: row.sender_id ?? null, // yozgan odamning Telegram ID'si (username'siz «💬 Lichkasi» uchun)
+    senderPhone: row.sender_phone ?? null, // yopiq guruhda: yozgan odamning profil raqami (ko'rinadigan bo'lsa)
     // Yuk beruvchining o'z yuki: kim yubordi va tayyor yuklar (AI'ga bormaydi, bot darhol yuboradi). Oddiy e'londa — null
     shipper: row.shipper ?? null,
     fromShipper: row.shipper != null,
@@ -497,8 +501,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
   const q = {
     insertPost: db.prepare(
-      `INSERT OR IGNORE INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via, sender, media, sender_id, text_fold)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO posts (source, message_id, link, text, text_key, posted_at, status, created_at, via, sender, media, sender_id, text_fold, sender_phone)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     recentSameText: db.prepare("SELECT id FROM posts WHERE text_key = ? AND posted_at > ? LIMIT 1"),
     newPosts: db.prepare("SELECT * FROM posts WHERE status = 'new' ORDER BY id LIMIT ?"),
@@ -562,11 +566,11 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.
     // → { id, status } yoki null (bu xabar allaqachon bor). via — live | poll (collector), qolganlari null.
     // sender — e'lonni yozgan odamning username'i, @ siz (@yuk/shared telegramUsername tekshirgan; bo'lmasa null)
-    addPost({ source, messageId, link = null, text, postedAt = now(), via = null, sender = null, media = null, senderId = null }, { dedupeWindowMs } = {}) {
+    addPost({ source, messageId, link = null, text, postedAt = now(), via = null, sender = null, media = null, senderId = null, senderPhone = null }, { dedupeWindowMs } = {}) {
       const key = textKey(text);
       const same = dedupeWindowMs ? q.recentSameText.get(key, postedAt - dedupeWindowMs) : null;
       const status = same ? "duplicate" : "new";
-      const result = q.insertPost.run(source, messageId, link, text, key, postedAt, status, now(), via, sender, media, senderId == null ? null : String(senderId), foldText(text));
+      const result = q.insertPost.run(source, messageId, link, text, key, postedAt, status, now(), via, sender, media, senderId == null ? null : String(senderId), foldText(text), senderPhone);
       if (result.changes === 0) return null;
       return { id: Number(result.lastInsertRowid), status };
     },

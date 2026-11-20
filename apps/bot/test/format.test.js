@@ -87,3 +87,10 @@ test("raqamsiz ovozli e'lon — «xabarni guruhda tinglang»", async () => {
   assert.ok(formatLoad(load, { media: "voice", link: "https://t.me/g/1" }).text.includes(VOICE_NO_PHONE));
   assert.ok(!formatLoad(load, { link: "https://t.me/g/1" }).text.includes(VOICE_NO_PHONE));
 });
+
+test("yopiq guruh: matnda raqam yo'q — yozgan odamning profil raqami ko'rsatiladi", async () => {
+  const { formatRaw, formatLoad } = await import("../src/format.js");
+  const post = { text: "Toshkentdan Samarqandga 20 tonna un bor", senderPhone: "+998901112233", postedAt: Date.now() };
+  assert.match(formatRaw(post, { phones: [] }).text, /📞 \+998901112233 \(yozgan odamning Telegram raqami\)/);
+  assert.match(formatLoad({ fromCity: "Toshkent", toCity: "Samarqand", phones: [] }, post).text, /yozgan odamning Telegram raqami/);
+});

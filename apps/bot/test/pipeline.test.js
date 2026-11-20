@@ -874,7 +874,7 @@ test("yopiq guruh: yuk faqat Pro va guruhni qo'shgan haydovchiga; kanal va guruh
   store.saveDriver(4, { profile: FURA, active: true, plan: "pro" });
   store.saveDriver(5, { profile: FURA, active: true });
   store.addUserSource({ name: CLOSED, chatId: 5, account: "dost" });
-  store.addPost({ source: CLOSED, messageId: 1, text: `yopiq ${"x".repeat(20)}`, postedAt: Date.now() - 2000 });
+  store.addPost({ source: CLOSED, messageId: 1, text: `yopiq ${"x".repeat(20)}`, postedAt: Date.now() - 2000, sender: "ali_yuk" });
   await processPost(store.takeNewPosts()[0], deps);
   assert.deepEqual(delivered.sort(), [4, 5], "1 (bepul) olmaydi; 4 — Pro, 5 — guruhni o'zi qo'shgan");
   assert.equal(published.length, 0, "ochiq kanal / guruh bo'limlariga yo'q");
@@ -1061,4 +1061,22 @@ test("guruh bo'limlariga asl matn (AI'siz): ochiq guruh e'loni — ha; yopiq gur
   post("@g", 5, LOAD_TEXT.replace("0001", "0005"), Date.now() - 40 * 60_000);
   await worker.runOnce();
   assert.deepEqual(group, [[2, ["+998900000002"]]]);
+});
+
+test("yopiq guruh: bog'lanish yo'li yo'q e'lon hech kimga ketmaydi (saralash o'chiq bo'lsa ham); profil raqami, username yoki bot taniydigan ID — ketadi", async () => {
+  const { store, deps, raw, post } = rawSetup();
+  deps.pool = noAi;
+  deps.sortingOff = true;
+  store.saveDriver(7, { role: "haydovchi", plan: "pro", profile: TEZKOR, active: true });
+  const text = (n) => `Toshkentdan Samarqandga ${n} tonna un bor, tent fura kerak`;
+  const add = (id, extra) => store.addPost({ source: "-1001234567890", messageId: id, text: text(10 + id), postedAt: Date.now() - 1000, ...extra });
+  add(1, { senderId: "555" }); // faqat ID, bot tanimaydi
+  add(2, { senderId: "556", senderPhone: "+998901112233" });
+  add(3, { sender: "ali_yuk" });
+  store.markSenderReachable("557");
+  add(4, { senderId: "557" });
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual([...new Set(raw.filter(([c]) => c === 7).map(([, id]) => id))].sort(), [2, 3, 4]);
+  const closedPost = store.listPosts().items.find((p) => p.messageId === 1);
+  assert.match(closedPost.error ?? "", /Aloqasiz \(yopiq guruh\)/);
 });

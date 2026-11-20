@@ -64,7 +64,7 @@ export function createFeedQueries(db, now) {
 
     // Bitta e'lon id bo'yicha (tezkor xabardagi «📞 Telefon qilish» raqamni shu matndan oladi) → { id, source, link, text, postedAt, sender } | null
     getPost(id) {
-      const row = db.prepare("SELECT id, source, link, text, posted_at, sender, shipper, media, sender_id FROM posts WHERE id = ?").get(id);
+      const row = db.prepare("SELECT id, source, link, text, posted_at, sender, shipper, media, sender_id, sender_phone FROM posts WHERE id = ?").get(id);
       if (!row) return null;
       return {
         id: row.id,
@@ -76,6 +76,7 @@ export function createFeedQueries(db, now) {
         fromShipper: row.shipper != null,
         media: row.media ?? null,
         senderId: row.sender_id ?? null,
+        senderPhone: row.sender_phone ?? null,
       };
     },
 

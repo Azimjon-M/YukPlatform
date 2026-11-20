@@ -186,7 +186,8 @@ test("hamma Gemini modeli dam olayotganda fayl yuklanmaydi — to'g'ri Telegram'
 test("yopiq guruhda username'siz odamning ovozli YUK e'loni — botga ko'rsatiladi (bir marta); suhbat, ochiq guruh, username bo'lsa — yo'q", async () => {
   const CLOSED = { kind: "id", value: "-1001234567890" };
   const CHAT = "Assalomu alaykum, yaxshimisizlar, mashina buzilib qoldi, nima maslahat berasizlar";
-  const texts = { 1: LOAD_TEXT, 2: LOAD_TEXT, 3: CHAT, 4: LOAD_TEXT, 5: LOAD_TEXT };
+  const NOPHONE = "Toshkentdan Samarqandga 20 tonna un bor, fura kerak";
+  const texts = { 1: NOPHONE, 2: NOPHONE, 3: CHAT, 4: NOPHONE, 5: NOPHONE, 6: LOAD_TEXT };
   const { store, reader, logs } = setup({ gemini: async () => ({ text: texts[current] }) });
   store.setSetting("bot_username", "Yuk_Ekspert_agent");
   const shown = [];
@@ -205,5 +206,33 @@ test("yopiq guruhda username'siz odamning ovozli YUK e'loni — botga ko'rsatila
   await send(CLOSED, voice(3, { sender: null, senderId: "666" })); // suhbat
   await send(SOURCE, voice(4, { sender: null, senderId: "777" })); // ochiq guruh — «📄 Asl e'lon» bor
   await send(CLOSED, voice(5, { sender: "ali_yuk", senderId: "888" })); // username bor — havola o'zi chiqadi
+  await send(CLOSED, voice(6, { sender: null, senderId: "999" })); // raqam aytilgan — bog'lanish bor
   assert.equal(shown.length, 1);
+});
+
+test("yopiq guruh matnli e'loni: faqat ID — avval botga ko'rsatiladi, keyin navbatga; raqam yoki username bo'lsa — darhol; profil raqami faqat yopiqda", async () => {
+  const CLOSED = { kind: "id", value: "-1001234567890" };
+  const { store, reader } = setup();
+  store.setSetting("bot_username", "Yuk_Ekspert_agent");
+  const order = [];
+  reader.showToBot = async (source, id) => (order.push(`show:${id}`), true);
+  const msg = (id, extra = {}) => {
+    const m = { id, text: "Toshkentdan Samarqandga 20 tonna un bor, fura kerak", date: NOW / 1000 - 5, sender: null, senderId: "555", ...extra };
+    if (extra.phone) Object.defineProperty(m, "senderPhone", { value: extra.phone, enumerable: false });
+    return m;
+  };
+  assert.equal(addMessage(CLOSED, msg(1), store, { via: "live", media: reader.media }), "media", "navbatga — botga ko'rsatish uchun");
+  await settle();
+  assert.deepEqual(order, ["show:1"]);
+  assert.equal(store.senderReachable("555"), true);
+  const [first] = store.takeNewPosts(5);
+  assert.equal(first.messageId, 1);
+  // Profil raqami bor — darhol, forward'siz; raqam postga yoziladi
+  const r2 = addMessage(CLOSED, msg(2, { senderId: "556", phone: "+998901112233", text: "Andijondan Buxoroga 10 tonna yuk bor" }), store, { media: reader.media });
+  assert.equal(r2.status, "new");
+  assert.equal(store.takeNewPosts(5).find((p) => p.messageId === 2).senderPhone, "+998901112233");
+  // Ochiq guruhda profil raqami yozilmaydi
+  addMessage(SOURCE, msg(3, { phone: "+998901112233", text: "Namangandan Qarshiga 5 tonna yuk bor" }), store, { media: reader.media });
+  assert.equal(store.takeNewPosts(5).find((p) => p.messageId === 3).senderPhone, null);
+  assert.deepEqual(order, ["show:1"]);
 });

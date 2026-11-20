@@ -361,6 +361,10 @@ function plainMessage(m) {
   // Yozgan odamning Telegram ID'si (faqat oddiy odam: kanal nomidan, bot, o'chirilgan akkaunt — yo'q). Username'i bo'lmasa,
   // bot «💬 Lichkasi» tugmasini tg://user?id= bilan beradi; bir odamning ketma-ket ovozli xabarlari ham shu bilan birlashadi
   out.senderId = senderIdOf(m);
+  // Profil raqami (2026-11-20): Telegram uni faqat egasi «hamma ko'rsin» qilgan bo'lsa yoki o'quvchi akkaunt kontaktida
+  // bo'lsa beradi. Ko'rinmas (enumerable emas) — live.js uni faqat yopiq guruh e'loniga yozadi
+  const phone = String(m.sender?.phone ?? "").replace(/\D/g, "");
+  if (out.senderId && phone.length >= 9) Object.defineProperty(out, "senderPhone", { value: `+${phone}`, enumerable: false });
   if (media) {
     out.media = media;
     Object.defineProperty(out, "raw", { value: m, enumerable: false });
