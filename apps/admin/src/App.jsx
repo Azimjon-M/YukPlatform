@@ -105,7 +105,7 @@ function Sidebar({ current, overview }) {
             <Icon name={route.id} />
             <span>{route.title}</span>
             {route.id === "queue" && waiting != null && (
-              <span className={`nav-count ${failed ? "has-failed" : ""}`} title={failed ? `${failed} ta xato` : undefined}>
+              <span className={`nav-count ${failed ? "has-failed" : ""}`} title={failed ? `${formatNumber(waiting)} ta navbatda · ${failed} ta xato` : `${formatNumber(waiting)} ta e'lon navbatda`}>
                 {formatNumber(waiting)}
               </span>
             )}

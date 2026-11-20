@@ -1,4 +1,5 @@
-// Navbat: GET /api/posts — collector yozgan e'lonlar va ularning holati.
+// E'lonlar (2026-11-20 gacha «Navbat»): GET /api/posts — collector guruhlardan yozgan e'lonlar va ularning holati.
+// Guruh e'lonlari endi AI'siz: asl matni darhol haydovchilarga, o'zimizning algoritm «e'lon / e'lon emas» deb yopadi.
 // Xatolar: «🗑 Barcha xatolarni o'chirish» (DELETE /api/posts/failed). Qayta navbatga qo'yish 2026-11-18 da olib tashlandi —
 // vaqti o'tgan e'lonni qayta tahlil qilish kerak emas.
 import { useState } from "react";
@@ -13,12 +14,17 @@ const LIMIT = 50;
 
 const EMPTY_TEXT = {
   "": "Collector hali birorta e'lon yozmagan. Jarayonlar sahifasida collector ishlayotganini tekshiring.",
-  new: "Navbat bo'sh — hamma e'lonlar tahlil qilingan.",
-  done: "Hali tahlil qilingan e'lon yo'q.",
+  new: "Navbat bo'sh — hamma e'lonlar ko'rib chiqilgan.",
+  done: "Hali ko'rib chiqilgan e'lon yo'q.",
   failed: "Xato bilan tugagan e'lon yo'q.",
   skipped: "O'tkazib yuborilgan e'lon yo'q.",
   duplicate: "Takror e'lon yo'q.",
 };
+
+// Bot «e'lon emas» deb yopganlar: postType (boshqa, mashina_bor) error ustunida. Aloqasiz/eskirgan — noma'lum, belgi yo'q
+const isChatter = (item) => item.error === "boshqa" || item.error === "mashina_bor";
+// Yuk e'loni: xatosiz tugagan yoki «Boshqa yo'nalish» (yuk, faqat chet el yo'nalishi)
+const isLoad = (item) => !item.error || item.error.startsWith("Boshqa yo");
 
 const TAG_TONE = { good: "is-good", critical: "is-critical", serious: "is-critical", info: "is-info" };
 
@@ -60,9 +66,25 @@ function PostRow({ item, now }) {
             {item.media === "voice" ? "Ovozli xabar" : "Dumaloq video"}
           </Badge>
         )}
+        {/* Kim ajratdi (bot pipeline.js): rules — to'liq tushunildi (yo'nalish, mashina), fast — algoritm hukmi (e'lon / e'lon emas), ai — AI */}
         {item.parsedBy === "rules" && (
-          <Badge tone="info" icon="⚡">
-            AI'siz
+          <Badge tone="info" icon="⚡" title="Qoidaviy parser to'liq tushundi — yo'nalish va mashina «Yuklar» va saytda">
+            To'liq tushunildi
+          </Badge>
+        )}
+        {item.parsedBy === "fast" && (
+          <Badge tone="neutral" icon="🧠" title="O'zimizning algoritm (AI'siz) e'lon yoki e'lon emasligini aniqladi">
+            Algoritm
+          </Badge>
+        )}
+        {item.parsedBy === "ai" && (
+          <Badge tone="neutral" icon="🤖">
+            AI
+          </Badge>
+        )}
+        {item.status === "done" && (isChatter(item) || isLoad(item)) && (
+          <Badge tone={isChatter(item) ? "neutral" : "good"} icon={isChatter(item) ? "💬" : "📦"}>
+            {isChatter(item) ? "E'lon emas" : "Yuk e'loni"}
           </Badge>
         )}
         {/* Telefon ham, lichka ham yo'q — bot yopdi, hech kimga yubormadi (apps/bot pipeline.js NO_CONTACT) */}
@@ -79,7 +101,7 @@ function PostRow({ item, now }) {
         <span className="muted small">{source}</span>
         {item.doneAt && (
           <span className="muted small">
-            Tahlil: <TimeAgo ts={item.doneAt} now={now} />
+            Ko'rib chiqildi: <TimeAgo ts={item.doneAt} now={now} />
           </span>
         )}
       </div>
@@ -88,7 +110,7 @@ function PostRow({ item, now }) {
 }
 
 export function QueuePage() {
-  useTitle("Navbat");
+  useTitle("E'lonlar");
   const now = useNow(30_000);
   const overview = useOverview();
   const [status, setStatus] = useState("");
@@ -132,8 +154,8 @@ export function QueuePage() {
   return (
     <>
       <PageHeader
-        title="Navbat"
-        subtitle="Collector guruhlardan yozgan e'lonlar va ularning tahlil holati"
+        title="E'lonlar"
+        subtitle="Guruh va kanallardan kelgan e'lonlar: asl matni haydovchilarga ketadi, algoritm e'lon yoki e'lon emasligini belgilaydi"
         actions={
           <Button onClick={refresh} busy={state.loading && state.data != null}>
             Yangilash

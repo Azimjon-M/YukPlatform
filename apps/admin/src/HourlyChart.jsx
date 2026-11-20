@@ -1,5 +1,5 @@
-// Oxirgi 24 soat, soatma-soat: kelgan e'lonlar, tahlil qilinganlar, yangi yuklar.
-// "Kelgan" chizig'i "tahlil" chizig'idan doim yuqori bo'lsa — navbat o'syapti (tahlil oqimga yetmayapti).
+// Oxirgi 24 soat, soatma-soat: kelgan e'lonlar va ulardan haydovchilarga yetganlari (2026-11-20: guruh e'lonlari AI'siz,
+// asl matn bilan ketadi — «tahlil» va «yangi yuklar» chiziqlari o'rniga). Farq — e'lon emas, takror yoki filtrga tushmagan.
 // Oddiy SVG: bitta Y o'qi, ingichka chiziqlar, sichqoncha/klaviatura bilan har bir soat qiymati, jadval ko'rinishi.
 import { useLayoutEffect, useRef, useState } from "react";
 import { bucketRanges, labelEvery, labelsCollide, linePath, nearestIndex, yTicks } from "./chart.js";
@@ -7,8 +7,7 @@ import { formatNumber, formatTime } from "./format.js";
 
 const SERIES = [
   { key: "posts", label: "Kelgan e'lonlar", color: "var(--series-1)" },
-  { key: "processed", label: "Tahlil qilingan", color: "var(--series-2)" },
-  { key: "loads", label: "Yangi yuklar", color: "var(--series-3)" },
+  { key: "sent", label: "Haydovchiga yetgan", color: "var(--series-2)" },
 ];
 
 const HEIGHT = 240;
@@ -81,7 +80,7 @@ export function HourlyChart({ hourly, now }) {
           viewBox={`0 0 ${width} ${HEIGHT}`}
           tabIndex={0}
           role="img"
-          aria-label={`Oxirgi ${n} soat: kelgan e'lonlar ${sum(values.posts)}, tahlil qilingan ${sum(values.processed)}, yangi yuklar ${sum(values.loads)}. Chap va o'ng strelka bilan soatlarni ko'ring.`}
+          aria-label={`Oxirgi ${n} soat: kelgan e'lonlar ${sum(values.posts)}, haydovchiga yetgan ${sum(values.sent)}. Chap va o'ng strelka bilan soatlarni ko'ring.`}
           onPointerMove={onPointer}
           onPointerDown={onPointer}
           onPointerLeave={() => setActive(null)}

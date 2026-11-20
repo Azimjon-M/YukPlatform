@@ -8,7 +8,7 @@ import { ACTION_LABELS, processActions, processStatus } from "./status.js";
 import { Badge, Button, useToast } from "./ui.jsx";
 
 const DESCRIPTIONS = {
-  bot: "Navbatdagi e'lonlarni AI bilan tahlil qiladi, kanalga va haydovchilarga yuboradi",
+  bot: "E'lonlarning asl matnini darhol mos haydovchilarga yuboradi (AI'siz); yuk beruvchilar yozganini tushunadi",
   collector: "Manba guruhlardan yangi e'lonlarni o'qib, navbatga yozadi",
   nginx: "Kompyuterning «old eshigi»: haydovchilar ilovasini beradi va /pub so'rovlarini serverga uzatadi (http://localhost)",
   tunnel: "Haydovchilar ilovasini internetga chiqaradi (Cloudflare, tekin). Manzil har yoqilganda yangi — bot o'zi oladi",

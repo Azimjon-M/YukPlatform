@@ -30,7 +30,8 @@ test("router: /admin ostidagi sahifalar", () => {
   assert.equal(pathInApp("/admin/yuklar/"), "/yuklar");
   assert.equal(pathInApp("/administrator"), null);
   assert.equal(pathInApp("/%E0%A4%A"), null);
-  assert.equal(routeFor("/admin/navbat").id, "queue");
+  assert.equal(routeFor("/admin/navbat").id, "queue", "eski manzil");
+  assert.equal(routeFor("/admin/elonlar").id, "queue");
   assert.equal(routeFor("/admin/").id, "overview");
   assert.equal(routeFor("/admin/yoq"), null);
   assert.equal(hrefFor("/"), "/admin/");

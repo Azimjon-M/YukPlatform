@@ -524,6 +524,38 @@ export function createAdminQueries(db, now) {
         .get(since, kind);
     const loads = loadStats("yuk");
     const trucks = loadStats("mashina");
+
+    // Haydovchilarga asl matn bilan yuborish (2026-11-20: saralash o'chiq, guruh e'lonlari AI'siz — asosiy ko'rsatkich shu).
+    // post_deliveries: har (e'lon, haydovchi) — bitta qator; ok=0 — Telegram rad etdi (bloklagan, 429 …)
+    const feed = db
+      .prepare(
+        `SELECT SUM(ok) AS sent, COUNT(DISTINCT CASE WHEN ok = 1 THEN post_id END) AS posts, COUNT(DISTINCT CASE WHEN ok = 1 THEN chat_id END) AS drivers,
+                SUM(ok = 0) AS failed, SUM(called_at IS NOT NULL) AS calls
+           FROM post_deliveries WHERE sent_at > ?`,
+      )
+      .get(since);
+    // Har e'lon birinchi haydovchiga qachon yetdi — soatma-soat chiziq va tezlik (guruhda chiqqanidan, oxirgi soat)
+    const firstSent = db
+      .prepare(
+        `SELECT MIN(d.sent_at) AS t, MIN(d.sent_at) - p.posted_at AS ms FROM post_deliveries d JOIN posts p ON p.id = d.post_id
+          WHERE d.sent_at > ? AND d.ok = 1 GROUP BY d.post_id`,
+      )
+      .all(since);
+    hourly.sent = bucket(firstSent.map((r) => ({ t: r.t, n: 1 })));
+    const feedDelays = firstSent.filter((r) => r.t > time - HOUR && r.ms >= 0).map((r) => r.ms);
+    // E'lon yoki e'lon emas (oxirgi hours soatda yopilganlar): bot pipeline.js — fast/rules/ai hukmi; postType (boshqa,
+    // mashina_bor) error ustunida; «Boshqa yo'nalish» — yuk, faqat chet el yo'nalishi
+    const verdict = db
+      .prepare(
+        `SELECT SUM(status = 'done' AND (error IS NULL OR error LIKE 'Boshqa yo%')) AS loads,
+                SUM(status = 'done' AND error IN ('boshqa', 'mashina_bor')) AS chatter,
+                SUM(error LIKE 'Aloqasiz%') AS no_contact, SUM(error LIKE 'Eskirgan%') AS stale
+           FROM posts WHERE done_at > ?`,
+      )
+      .get(since);
+    const media = Object.fromEntries(
+      db.prepare("SELECT media, COUNT(*) AS n FROM posts INDEXED BY posts_created WHERE created_at > ? AND media IS NOT NULL GROUP BY media").all(since).map((r) => [r.media, r.n]),
+    );
     return {
       now: time,
       hours,
@@ -541,7 +573,13 @@ export function createAdminQueries(db, now) {
         processed: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ?", time - HOUR),
         loads: delays.length,
         medianDelayMin: delays.length ? Math.round((median(delays) / 60000) * 10) / 10 : null,
+        // Haydovchiga yetgan e'lonlar va guruhda chiqqanidan birinchi haydovchiga yetguncha (median, soniya)
+        feedPosts: feedDelays.length,
+        feedDelaySec: feedDelays.length ? Math.round(median(feedDelays) / 1000) : null,
       },
+      feed: { sent: feed.sent ?? 0, posts: feed.posts ?? 0, drivers: feed.drivers ?? 0, failed: feed.failed ?? 0, calls: feed.calls ?? 0 },
+      verdict: { loads: verdict.loads ?? 0, chatter: verdict.chatter ?? 0, noContact: verdict.no_contact ?? 0, stale: verdict.stale ?? 0 },
+      media: { voice: media.voice ?? 0, round: media.round ?? 0 },
       // Kim tushundi (oxirgi hours soatda tugagan e'lonlar): AI'siz qoidaviy parser yoki AI;
       // noContact — telefon ham, lichka ham yo'q, shuning uchun hech kim tahlil qilmay yopilganlar (apps/bot pipeline.js NO_CONTACT)
       parsedBy: {

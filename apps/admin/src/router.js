@@ -5,7 +5,7 @@ export const BASE = "/admin";
 export const ROUTES = [
   { path: "/", id: "overview", title: "Bosh sahifa" },
   { path: "/yuklar", id: "loads", title: "Yuklar" },
-  { path: "/navbat", id: "queue", title: "Navbat" },
+  { path: "/elonlar", id: "queue", title: "E'lonlar" }, // 2026-11-20 gacha «Navbat» (/navbat)
   { path: "/haydovchilar", id: "drivers", title: "Haydovchilar" },
   { path: "/manbalar", id: "sources", title: "Manbalar" },
   { path: "/jarayonlar", id: "processes", title: "Jarayonlar" },
@@ -27,10 +27,14 @@ export function pathInApp(pathname, base = BASE) {
   return rest || "/";
 }
 
+// Eski manzillar (saqlab qo'yilgan havolalar ishlayversin)
+const ALIASES = { "/navbat": "/elonlar" };
+
 // Manzil → sahifa (topilmasa null)
 export function routeFor(pathname, base = BASE) {
   const path = pathInApp(pathname, base);
-  return ROUTES.find((r) => r.path === path) ?? null;
+  const real = ALIASES[path] ?? path;
+  return ROUTES.find((r) => r.path === real) ?? null;
 }
 
 // "/yuklar" → "/admin/yuklar", "/" → "/admin/"

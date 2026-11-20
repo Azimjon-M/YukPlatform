@@ -1,6 +1,7 @@
-// Yuklar: GET /api/loads — filtrlar (qayerdan, qayerga, mashina, kuzov, qidiruv, oxirgi N soat), 50 tadan sahifalab.
+// Yuklar: GET /api/loads — filtrlar (qayerdan, qayerga, mashina, qidiruv, oxirgi N soat), 50 tadan sahifalab.
+// Kuzov 2026-11-20 da olib tashlandi (Azimjon): haydovchi filtrlarida ham faqat mashina turi qoldi
 import { useState } from "react";
-import { BODY_TYPES, REGIONS, TRUCK_CLASSES } from "@yuk/shared";
+import { REGIONS, TRUCK_CLASSES } from "@yuk/shared";
 import { get } from "../api.js";
 import { formatNumber, loadView } from "../format.js";
 import { useApi, useDebounced, useNow } from "../hooks.js";
@@ -14,7 +15,7 @@ const HOURS = [
   { value: "168", label: "Oxirgi 7 kun" },
   { value: "", label: "Hammasi" },
 ];
-const EMPTY_FILTERS = { from: "", to: "", truckClass: "", bodyType: "", hours: "" };
+const EMPTY_FILTERS = { from: "", to: "", truckClass: "", hours: "" };
 
 function Select({ label, value, onChange, options, placeholder }) {
   return (
@@ -33,11 +34,10 @@ function Select({ label, value, onChange, options, placeholder }) {
 
 const regionOptions = REGIONS.map((r) => ({ value: r.id, label: r.name }));
 const truckOptions = TRUCK_CLASSES.map((t) => ({ value: t.id, label: t.name }));
-const bodyOptions = BODY_TYPES.map((b) => ({ value: b.id, label: b.name }));
 
 // Yopiq: yo'nalish, mashina va yuk, o'ngda — qachon va nechta haydovchiga ketgani. Ochiq: hamma ma'lumot
 function LoadRow({ item, now }) {
-  const v = loadView(item.load ?? {});
+  const v = loadView({ ...item.load, bodyType: null }); // kuzov ko'rsatilmaydi
   const source = item.post?.source;
   const sent = item.sentTo > 0;
   return (
@@ -188,7 +188,6 @@ export function LoadsPage() {
           <Select label="Qayerdan" value={filters.from} onChange={set("from")} options={regionOptions} placeholder="Hamma joy" />
           <Select label="Qayerga" value={filters.to} onChange={set("to")} options={regionOptions} placeholder="Hamma joy" />
           <Select label="Mashina turi" value={filters.truckClass} onChange={set("truckClass")} options={truckOptions} placeholder="Hammasi" />
-          <Select label="Kuzov" value={filters.bodyType} onChange={set("bodyType")} options={bodyOptions} placeholder="Hammasi" />
           <Select label="Vaqt" value={filters.hours} onChange={set("hours")} options={HOURS} />
         </div>
         {dirty && (

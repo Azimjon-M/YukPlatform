@@ -645,7 +645,7 @@ export function AiPage() {
                     </li>
                     <li>
                       Model <strong>xato qaytarsa</strong>, unga berilgan e'lonlar darhol navbatga qaytadi va ishlayotgan boshqa model ularni oladi. Bitta e'lon
-                      3 ta ulanishda xato bersa, «xato» deb yopiladi (Navbat sahifasidan qayta yuborish mumkin).
+                      3 ta ulanishda xato bersa, «xato» deb yopiladi («E'lonlar» sahifasida ko'rinadi).
                     </li>
                     <li>
                       Tez-tez xato beradigan model (24 soatda 4 ta yoki oxirgi 10 so'rovdan 3 tasi) avtomatik <strong>📌 Muammoli</strong> deb belgilanadi:
