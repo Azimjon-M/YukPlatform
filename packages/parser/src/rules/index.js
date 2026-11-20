@@ -839,11 +839,19 @@ function chatterByRules({ place, phone, weight, sure, free, junk, signal, truck,
   return place ? !phone && !signal : !(sure || truck || weight) || (!phone && !signal);
 }
 
-export function fastLook(text) {
+// voice — matn ovozli xabar / dumaloq videodan o'girilgan (bot pipeline post.media bo'yicha beradi; 2026-11-20).
+// Model yozma e'lonlarda o'rgatilgan: ovozdagi uzun salom-alik va telefon aytilmasligi tufayli aniq yuk e'loni ham past ball
+// oladi («Assalomu alaykum shofyor akalar… Angrendan Qo'qonga 9 tonna yuklari bor ekan» — 0,10). Shuning uchun ovozli matnda
+// joy nomi + aniq yuk belgisi (LOAD_SURE: «yuk bor», «isuzu kerak») bo'lsa va bo'sh mashina / taksi / sotuv andozasi
+// bo'lmasa — yuk e'loni. 868 ta ovozli matnda: 6 tasini qaytardi (5 tasi haqiqiy yuk). Sinab rad etilganlar: modelni ovozli
+// matnlar bilan qayta o'rgatish (belgilarning «ovozli nusxasi» bilan ham), salom-alikni olib tashlash, kengroq qoida
+// (joy + og'irlik yoki mashina: 20 tadan 9 tasi suhbat edi) — ovozli misollar hali kam va AI yorliqlari ovozda shovqinli.
+export function fastLook(text, { voice = false } = {}) {
   const { origins, originUnknown, trucks, flags, masked } = fastFacts(text);
   if (flags.service) return { chatter: true, origins, originUnknown, trucks };
   // O'rgatilgan model (loadlike.js): yuk e'loni ehtimoli. Model bo'lmasa — qoidalar
   const score = loadScore(masked, flags);
-  const chatter = score == null ? chatterByRules(flags) : score < LOAD_THRESHOLD;
+  let chatter = score == null ? chatterByRules(flags) : score < LOAD_THRESHOLD;
+  if (chatter && voice && flags.place && flags.sure && !flags.free && !flags.junk) chatter = false;
   return { chatter, origins, originUnknown, trucks, score };
 }

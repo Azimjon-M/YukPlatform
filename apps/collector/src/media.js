@@ -10,7 +10,9 @@
 // Matn posts jadvaliga media = "voice" | "round" bilan yoziladi: keyin hammasi matnli e'londek — tezkor yo'l (asl matn),
 // qoidaviy parser, AI. Ya'ni «e'lonmi yoki yo'q» ni matnli e'lon bilan bir xil qoidalar hal qiladi.
 // Tezlik: navbat xabar kelishi bilan ishlaydi (so'rab olish halqasini kutmaydi), bir vaqtda `concurrency` tagacha.
-import { transcribeWithGemini } from "@yuk/parser";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { transcribePauseMs, transcribeWithGemini } from "@yuk/parser";
 
 export const MEDIA_LIMITS = {
   maxDurationSec: 180, // undan uzuni — e'lon emas (qo'shiq, suhbat), o'girilmaydi
@@ -18,6 +20,7 @@ export const MEDIA_LIMITS = {
   minTextLength: 10, // o'girilgan matn shundan qisqa bo'lsa («Alo», «Ha») — e'lon emas
   concurrency: 3,
   geminiTries: 3,
+  geminiTimeoutMs: 15_000, // bitta urinish shundan uzoq cho'zilsa — keyingi model (odatda 2–5 s; avval 30 s kutilardi)
   seenMax: 5_000,
 };
 
@@ -44,6 +47,24 @@ function geminiOrder(connections, now) {
   return connections.filter((c) => c.provider === "gemini").sort((a, b) => rank(a) - rank(b));
 }
 
+// Sinash tartibi: avval faqat o'girish uchun modellar (models — @yuk/parser TRANSCRIBE_MODELS, limiti matn tahlilidan
+// alohida), keyin tahlil bilan umumiy ulanishlar. Kalit — boshqaruv markazidagi Gemini kalit(lar)i.
+// 2026-11-20 gacha faqat umumiy ulanishlar edi: tahlil kunlik limitni tushgacha yeb qo'yardi va ovozli xabarlarning ~30% i
+// Telegram'ning sifatsiz o'girishiga tushardi (4 kunda 685 ta 429).
+function geminiCandidates(connections, models, now) {
+  const pool = geminiOrder(connections, now);
+  const list = [];
+  const seen = new Set();
+  const add = (c) => {
+    const key = `${c.apiKey}|${c.model}`;
+    if (!seen.has(key)) list.push({ ...c, key });
+    seen.add(key);
+  };
+  for (const apiKey of new Set(pool.map((c) => c.apiKey))) for (const model of models) add({ apiKey, model });
+  pool.forEach(add);
+  return list;
+}
+
 // reader — telegram.js createReader (isPremium, transcribe, download); connections() — store.aiConnections(access)
 // transcribe — testda soxtasi (berilmasa @yuk/parser transcribeWithGemini)
 export function createMediaQueue({
@@ -54,6 +75,8 @@ export function createMediaQueue({
   now = Date.now,
   limits = MEDIA_LIMITS,
   transcribe = transcribeWithGemini,
+  models = [], // faqat o'girish uchun Gemini modellari (accounts.js: .env MEDIA_MODELS yoki TRANSCRIBE_MODELS)
+  saveDir = null, // .env MEDIA_SAVE_DIR=papka — yuklab olingan fayllar shu yerga ham yoziladi (sifatni oflayn sinash uchun; odatda o'chiq)
   compare = false, // .env MEDIA_COMPARE=1 — Telegram o'girgan xabarni Gemini ham o'giradi, ikkalasi logga (sifatni solishtirish)
 }) {
   const queue = [];
@@ -63,6 +86,7 @@ export function createMediaQueue({
   let premium = null; // null — hali so'ralmagan
   let telegramBroken = false; // Telegram o'girishi ishlamadi (masalan, Premium tugagan) — keyin to'g'ri Gemini'ga
   const stats = { telegram: 0, gemini: 0, empty: 0, skipped: 0, failed: 0, totalMs: 0 };
+  const resting = new Map(); // "kalit|model" → qachongacha sinalmaydi (limit tugagan, band — transcribePauseMs)
 
   async function viaTelegram(job) {
     if (telegramBroken || !reader.transcribe) return null;
@@ -79,31 +103,48 @@ export function createMediaQueue({
     }
   }
 
+  // Sinov uchun namuna: <papka>/<guruh>_<xabar id>.<ogg|mp4> (ichida odamlarning ovozi — gitga tushmaydigan joyga)
+  async function saveSample(job, data) {
+    await mkdir(saveDir, { recursive: true });
+    const ext = job.message.media.kind === "round" ? "mp4" : "ogg";
+    await writeFile(path.join(saveDir, `${String(job.label).replace(/[^\w-]/g, "")}_${job.message.id}.${ext}`), data);
+  }
+
+  // → { text, model } | null (sinaydigan model yo'q). Hammasi xato bersa — oxirgi xato tashlanadi
   async function viaGemini(job) {
-    const list = geminiOrder(connections(), now()).slice(0, limits.geminiTries);
-    if (!list.length || !job.message.raw || !reader.download) return null;
+    if (!job.message.raw || !reader.download) return null;
+    const list = geminiCandidates(connections(), models, now())
+      .filter((c) => !((resting.get(c.key) ?? 0) > now()))
+      .slice(0, limits.geminiTries);
+    if (!list.length) return null; // hammasi dam olyapti — fayl ham yuklanmaydi, to'g'ri Telegram'ga
     const data = await reader.download(job.message.raw);
+    if (saveDir) saveSample(job, data).catch((error) => log(`${job.label}: namuna saqlanmadi — ${error?.message ?? error}`));
     let last = null;
     for (const c of list) {
       try {
-        const { text } = await transcribe({ apiKey: c.apiKey, model: c.model, data, mime: job.message.media.mime });
-        return text;
+        const { text } = await transcribe({ apiKey: c.apiKey, model: c.model, data, mime: job.message.media.mime, timeoutMs: limits.geminiTimeoutMs });
+        return { text, model: c.model };
       } catch (error) {
         last = error;
+        resting.set(c.key, now() + transcribePauseMs(error));
       }
     }
-    throw last ?? new Error("Gemini ulanishi yo'q");
+    throw last;
   }
 
   async function work(job) {
     const started = now();
     let text = null;
     let by = null;
+    let model = null;
     try {
-      text = await viaGemini(job);
+      const result = await viaGemini(job);
+      text = result?.text ?? null;
+      model = result?.model ?? null;
       by = text ? "gemini" : null;
     } catch (error) {
-      log(`${job.label}: Gemini matnga o'gira olmadi (${error?.message ?? error}) — Telegram'ga`);
+      // Google xatosi — uzun JSON: logga boshi yetadi («code 429 … PerDay» ko'rinadi)
+      log(`${job.label}: Gemini matnga o'gira olmadi (${String(error?.message ?? error).slice(0, 220)}) — Telegram'ga`);
     }
     if (!text) {
       text = await viaTelegram(job);
@@ -122,6 +163,7 @@ export function createMediaQueue({
       return;
     }
     stats[by]++;
+    const how = model ? `${by} · ${model.replace(/^gemini-/, "")}` : by; // logda: «gemini · 3.5-transcribe»
     const ms = now() - started;
     stats.totalMs += ms;
     text = normalizeSpokenPhones(text);
@@ -143,7 +185,7 @@ export function createMediaQueue({
     const merged = prev && at - prev.at <= MERGE_WINDOW_MS && at >= prev.at ? store.mergePost?.(prev.postId, fields) : null;
     if (merged) {
       lastBySender.set(who, { postId: merged.id, at });
-      log(`${job.label}: ${MEDIA_ICON[kind]} davomi oldingi ovozli xabar bilan birlashtirildi (#${prev.postId} → #${merged.id}, ${by}, ${(ms / 1000).toFixed(1)} s) → navbatda`);
+      log(`${job.label}: ${MEDIA_ICON[kind]} davomi oldingi ovozli xabar bilan birlashtirildi (#${prev.postId} → #${merged.id}, ${how}, ${(ms / 1000).toFixed(1)} s) → navbatda`);
       return;
     }
     const result = store.addPost(fields, { dedupeWindowMs: job.dedupeWindowMs });
@@ -152,7 +194,7 @@ export function createMediaQueue({
       if (lastBySender.size > limits.seenMax) lastBySender.delete(lastBySender.keys().next().value);
     }
     if (result?.status === "new") {
-      log(`${job.label}: ${MEDIA_ICON[kind]} ${kind === "voice" ? "ovozli xabar" : "dumaloq video"} matnga o'girildi (${by}, ${(ms / 1000).toFixed(1)} s) → navbatda`);
+      log(`${job.label}: ${MEDIA_ICON[kind]} ${kind === "voice" ? "ovozli xabar" : "dumaloq video"} matnga o'girildi (${how}, ${(ms / 1000).toFixed(1)} s) → navbatda`);
     }
   }
 

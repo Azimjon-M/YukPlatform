@@ -9,6 +9,7 @@
 // loginWorker.js, sessiya sessions/<nom>.session ga yoziladi — shu supervisor 30 s ichida ko'radi) yoki terminalda:
 // npm run tg:login -- --account <nom>. Asosiy akkaunt — faqat terminalda.
 import { setTimeout as wait } from "node:timers/promises";
+import { TRANSCRIBE_MODELS } from "@yuk/parser";
 import { MAIN_TG_ACCOUNT } from "@yuk/store";
 import { durationText, runLive, withTimeout } from "./live.js";
 import { createAvatarRefresher } from "./avatars.js";
@@ -75,7 +76,9 @@ export async function runAccount({ name, client, telegram, store, me = null, sou
   // Yopiq guruh rasmlari (boshqaruv markazidagi ro'yxat uchun) — sekin, bittadan
   const avatarTick = createAvatarRefresher({ reader, sources: readSources, log, now });
   // Ovozli xabar / dumaloq video → matn (Premium bo'lsa Telegram, bo'lmasa Gemini) → odatdagi navbat
-  if (connections) reader.media = createMediaQueue({ reader, store, connections, log, now, compare: process.env.MEDIA_COMPARE === "1" });
+  // MEDIA_MODELS — faqat o'girish uchun Gemini modellari (vergul bilan; bo'sh qoldirilsa @yuk/parser TRANSCRIBE_MODELS)
+  const models = process.env.MEDIA_MODELS?.trim() ? process.env.MEDIA_MODELS.split(/[,\s]+/).filter(Boolean) : TRANSCRIBE_MODELS;
+  if (connections) reader.media = createMediaQueue({ reader, store, connections, log, now, models, compare: process.env.MEDIA_COMPARE === "1", saveDir: process.env.MEDIA_SAVE_DIR?.trim() || null });
   await runLive({
     ...live,
     sources: readSources,

@@ -26,3 +26,25 @@ export async function transcribeWithGemini({ apiKey, model, data, mime, timeoutM
   });
   return { text: String(response.text ?? "").trim(), model: response.modelVersion ?? model };
 }
+
+// Faqat ovoz/video o'girish uchun sinaladigan modellar (2026-11-20 o'lchovi, 8 ta haqiqiy ovozli xabar): matn tahlili
+// ishlatmaydigan modellar — limiti alohida, shuning uchun tahlil kunlik 500 talik limitni yeb qo'yganda ham ishlaydi.
+// gemini-3.5-transcribe ~2 s va eng aniq (daqiqasiga ~5 ta so'rov), 3-flash-preview ~3,5 s, 3.6-flash ~5 s, 3.5-flash 5–10 s
+// (kunlik limiti kichik). Sinab rad etilgan: Groq Whisper large-v3 / turbo — 0,5 s, lekin o'zbekchani turkcha-ozarbayjoncha
+// qilib buzadi (til = uz va maslahat matni bilan ham); 3.7/3.8-flash — 15–28 s; omni/gemma — ovozni olmaydi yoki limit yo'q.
+export const TRANSCRIBE_MODELS = ["gemini-3.5-transcribe", "gemini-3-flash-preview", "gemini-3.6-flash", "gemini-3.5-flash"];
+
+// Xatodan keyin shu modelni necha ms sinamaslik kerak (collector media.js): limit tugagan modelga har xabarda qayta
+// urilmaymiz — vaqt ketadi. Kunlik limit — 30 daqiqada bir tekshiriladi (ba'zan muddatidan oldin ochiladi, rad javobi ~0,3 s),
+// daqiqalik — Google aytgan vaqt, band / javob kelmadi — 1 daqiqa, model yo'q / kalit xato / ovozni olmaydi — 6 soat.
+export function transcribePauseMs(error) {
+  const text = String(error?.message ?? error ?? "");
+  const code = Number(error?.status ?? text.match(/"code":\s*(\d+)/)?.[1] ?? text.match(/\b(4\d\d|5\d\d)\b/)?.[1] ?? 0);
+  if (code === 429) {
+    if (/PerDay/i.test(text)) return 30 * 60_000;
+    const sec = Number(text.match(/retryDelay"?:\s*"?([\d.]+)s/)?.[1] ?? text.match(/retry in ([\d.]+)s/i)?.[1] ?? 30);
+    return Math.min(Math.max(Math.ceil(sec) + 1, 3), 120) * 1000;
+  }
+  if ([400, 401, 403, 404].includes(code)) return 6 * 60 * 60_000;
+  return 60_000;
+}

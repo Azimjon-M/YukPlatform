@@ -7,4 +7,4 @@ export { POST_SCHEMA, BATCH_SCHEMA, conformLoad, conformPost } from "./schema.js
 export { SYSTEM_PROMPT, BATCH_SYSTEM_PROMPT } from "./prompt.js";
 export { createParserPool, poolFromParser, pauseFor, nextPacificMidnight, pacificDay, PAUSES } from "./pool.js";
 export { fastLook, looksLikeLoad, parseByRules, quickLook } from "./rules/index.js";
-export { MAX_INLINE_BYTES, TRANSCRIBE_PROMPT, transcribeWithGemini } from "./transcribe.js";
+export { MAX_INLINE_BYTES, TRANSCRIBE_MODELS, TRANSCRIBE_PROMPT, transcribePauseMs, transcribeWithGemini } from "./transcribe.js";

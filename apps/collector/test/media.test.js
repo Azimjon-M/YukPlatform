@@ -15,7 +15,7 @@ const voice = (id, extra = {}) => {
 };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
-function setup({ premium = true, telegram = async () => LOAD_TEXT, gemini = async () => ({ text: LOAD_TEXT }), connections = [{ provider: "gemini", apiKey: "k", model: "m" }] } = {}) {
+function setup({ premium = true, telegram = async () => LOAD_TEXT, gemini = async () => ({ text: LOAD_TEXT }), connections = [{ provider: "gemini", apiKey: "k", model: "m" }], models, clock } = {}) {
   const store = openStore({ file: ":memory:", now: () => NOW });
   const calls = { telegram: 0, download: 0, gemini: [] };
   const reader = {
@@ -29,7 +29,8 @@ function setup({ premium = true, telegram = async () => LOAD_TEXT, gemini = asyn
     store,
     connections: () => connections,
     log: (m) => logs.push(m),
-    now: () => NOW,
+    now: clock ?? (() => NOW),
+    ...(models ? { models } : {}),
     transcribe: async (args) => (calls.gemini.push(args.model), gemini(args)),
   });
   return { store, reader, calls, logs };
@@ -147,4 +148,37 @@ test("kirillcha raqam: «93 лик 123 45 67» → +998 93 123 45 67; «20 ли�
   assert.equal(normalizeSpokenPhones("90 лиги 111 22 33"), "+998 90 111 22 33");
   assert.equal(normalizeSpokenPhones("5 тонна 20 лик фура"), "5 тонна 20 лик фура");
   assert.equal(normalizeSpokenPhones("Кияли 93 ликоп"), "Кияли 93 ликоп");
+});
+
+test("avval faqat o'girish uchun modellar; limiti tugagani dam oladi va keyingi xabarda sinalmaydi", async () => {
+  let time = NOW;
+  const daily = new Error('{"error":{"code":429,"message":"quota","details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}');
+  const { store, reader, calls, logs } = setup({
+    models: ["ovoz-1", "ovoz-2"],
+    clock: () => time,
+    gemini: async ({ model }) => {
+      if (model === "ovoz-1") throw daily;
+      return { text: LOAD_TEXT };
+    },
+  });
+  addMessage(SOURCE, voice(1), store, { via: "live", media: reader.media });
+  await settle();
+  assert.deepEqual(calls.gemini, ["ovoz-1", "ovoz-2"]); // umumiy «m» gacha bormadi
+  assert.ok(logs.some((l) => l.includes("(gemini · ovoz-2")));
+  addMessage(SOURCE, voice(2, { sender: "vali" }), store, { via: "live", media: reader.media });
+  await settle();
+  assert.deepEqual(calls.gemini.slice(2), ["ovoz-2"]); // ovoz-1 dam olyapti
+  time += 31 * 60_000; // kunlik limit 30 daqiqada bir qayta tekshiriladi
+  addMessage(SOURCE, voice(3, { sender: "soli" }), store, { via: "live", media: reader.media });
+  await settle();
+  assert.deepEqual(calls.gemini.slice(3), ["ovoz-1", "ovoz-2"]);
+});
+
+test("hamma Gemini modeli dam olayotganda fayl yuklanmaydi — to'g'ri Telegram'ga", async () => {
+  const { store, reader, calls } = setup({ gemini: async () => { throw new Error("503 band"); } });
+  addMessage(SOURCE, voice(1), store, { via: "live", media: reader.media });
+  await settle();
+  addMessage(SOURCE, voice(2, { sender: "vali" }), store, { via: "live", media: reader.media });
+  await settle();
+  assert.deepEqual([calls.gemini.length, calls.download, calls.telegram], [1, 1, 2]);
 });

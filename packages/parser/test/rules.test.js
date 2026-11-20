@@ -327,3 +327,11 @@ test("fastLook: tanish joy oldidagi xato yozilgan joy nomi ham «qayerdan» («N
   // oddiy so'z joyga aylanmaydi
   assert.deepEqual(fastLook("Qoplik sement Samarqandga 5 tonna yuk bor 90 000 00 02").origins, []);
 });
+
+test("fastLook: ovozli xabarda joy + «yuk bor» — salom-alik bilan ham yuk e'loni; bo'sh mashina — yo'q", () => {
+  const load = "Assalomu alaykum, shofyor akalar, yaxshimisizlar? Hozir bitta nomer tashlab qo'yaman, ana shu Angrendan Qo'qonga 9 tonna yuklari bor ekan. Kelishib olib ketarsizlar.";
+  assert.equal(fastLook(load, { voice: true }).chatter, false);
+  const truck = "Assalomu alaykum akalar, Qo'qonda bo'shadik. Toshkentga yuk bo'lsa beraverasizlar. Oldindan rahmat.";
+  assert.equal(fastLook(truck, { voice: true }).chatter, true);
+  assert.equal(fastLook("Assalomu alaykum, shofyor akalar, yaxshimisizlar?", { voice: true }).chatter, true);
+});

@@ -26,9 +26,10 @@ import {
 } from "@yuk/shared";
 
 // Tezkor yo'l filtri (@yuk/parser fastLook): «quruq gap»mi, «qayerdan» viloyatlari, transport turlari. Xato — filtrsiz o'tadi
-export function lookOf(text) {
+// voice — ovozli xabar / dumaloq videodan o'girilgan matn (post.media): model ovoz uchun o'z vaznlarini ishlatadi
+export function lookOf(text, { voice = false } = {}) {
   try {
-    return fastLook(text);
+    return fastLook(text, { voice });
   } catch {
     return { chatter: false, origins: [], originUnknown: false, trucks: [] };
   }
@@ -315,7 +316,7 @@ export function createWorker(
     if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || (!fastAll && !contactOf(post))) return;
     // Filtr (2026-11-19, Azimjon): «quruq gap» — hech kimga (shart); «🚚 Transport» va «📍 Qayerdan» — haydovchi tanlagan
     // bo'lsa. Bitta qoidaviy tahlil (~3 ms, AI'siz); e'londa transport yoki joy topilmasa — o'sha filtrdan o'tadi
-    const look = lookOf(post.text);
+    const look = lookOf(post.text, { voice: Boolean(post.media) });
     if (look.chatter) return;
     const wanted = users.filter((u) => wantedFn(u.profile, post.source) && filtersWanted(u.profile, look));
     if (!wanted.length) return;
