@@ -18,8 +18,8 @@ import {
   useLocalErrors,
 } from "../errors.js";
 import { formatDateTime, formatNumber } from "../format.js";
-import { useApi, useNow } from "../hooks.js";
-import { Badge, Button, Empty, ErrorBox, Field, Loading, PageHeader, Tabs, TimeAgo, useTitle, useToast } from "../ui.jsx";
+import { useApi, useNow, usePaged } from "../hooks.js";
+import { Badge, Button, Empty, ErrorBox, Field, Loading, PageHeader, PagedPager, Tabs, TimeAgo, useTitle, useToast } from "../ui.jsx";
 
 const REMOVE_HINT = "Faqat shu yozuv o'chadi. Xato yana chiqsa — ro'yxatda qaytadi.";
 const IGNORE_HINT = "Bu xato boshqa ko'rsatilmaydi — yana chiqsa ham. «🙈 E'tiborsiz» bo'limidan qaytarasiz.";
@@ -160,6 +160,7 @@ export function ErrorsPage() {
   const ignoredView = level === "ignored";
   const shown = ignoredView ? [] : all.filter((e) => (level === "all" || e.level === level) && bySource(e));
   const ignoredShown = ignoredAll.filter(bySource);
+  const paged = usePaged(shown, `${level}|${from}`, 50);
   const count = (lvl) => all.filter((e) => e.level === lvl && bySource(e)).length;
   // Eski server (npm start qayta yoqilmagan) /api/errors ni bilmaydi
   const oldServer = server.error?.status === 404;
@@ -301,8 +302,9 @@ export function ErrorsPage() {
           {all.length ? "Boshqa daraja yoki manbani tanlang." : "Hozircha hech qanday xato yozilmagan. Yangisi chiqishi bilan shu yerda ko'rinadi."}
         </Empty>
       ) : (
-        <ul className="error-list">
-          {shown.map((entry) => (
+        <>
+        <ul className="error-list" ref={paged.ref}>
+          {paged.items.map((entry) => (
             <ErrorItem
               key={entry.id}
               entry={entry}
@@ -315,6 +317,8 @@ export function ErrorsPage() {
             />
           ))}
         </ul>
+        <PagedPager paged={paged} />
+        </>
       )}
     </>
   );

@@ -5,8 +5,8 @@ import { useState } from "react";
 import { foldText } from "@yuk/shared";
 import { del, get, patch, post } from "../api.js";
 import { formatDateTime, formatNumber, sourceCheckView } from "../format.js";
-import { useApi, useNow } from "../hooks.js";
-import { Async, Avatar, Badge, Button, Card, Empty, ExpandRow, ExternalLink, Field, PageHeader, TimeAgo, Toggle, avatarUrl, useTitle, useToast } from "../ui.jsx";
+import { useApi, useNow, usePaged } from "../hooks.js";
+import { Async, Avatar, Badge, Button, Card, Empty, ExpandRow, ExternalLink, Field, PageHeader, PagedPager, TimeAgo, Toggle, avatarUrl, useTitle, useToast } from "../ui.jsx";
 import { PrivateGroupPicker, TgAccountsCard, useTgAccounts } from "./TgAccounts.jsx";
 
 const NOTE = "O'zgarish collector'da bir necha soniyada kuchga kiradi.";
@@ -397,6 +397,8 @@ export function SourcesPage() {
   const [query, setQuery] = useState("");
   const counts = Object.fromEntries(SOURCE_FILTERS.map((f) => [f.id, items.filter(f.test).length]));
   const currentFilter = SOURCE_FILTERS.find((f) => f.id === filter) ?? SOURCE_FILTERS[0];
+  const shown = items.filter((source) => currentFilter.test(source) && sourceMatches(source, query));
+  const paged = usePaged(shown, `${filter}|${query}`, 30);
   const byUsers = items.filter((s) => s.addedBy != null);
   const checking = byUsers.filter((s) => ["probe", "trial"].includes(s.checkState)).length;
 
@@ -502,19 +504,21 @@ export function SourcesPage() {
                     ))}
                   </div>
                 </div>
+                <p className="muted small list-count" ref={paged.ref}>
+                  {formatNumber(shown.length)} ta manba
+                </p>
                 <ul className="rows">
-                  {data.items
-                    .filter((source) => currentFilter.test(source) && sourceMatches(source, query))
-                    .map((source) => (
-                      <SourceRow
-                        key={`${source.name}:${source.enabled}`}
-                        source={source}
-                        account={source.account ? (accountsByName.get(source.account) ?? null) : null}
-                        now={now}
-                        onChanged={state.reload}
-                      />
-                    ))}
+                  {paged.items.map((source) => (
+                    <SourceRow
+                      key={`${source.name}:${source.enabled}`}
+                      source={source}
+                      account={source.account ? (accountsByName.get(source.account) ?? null) : null}
+                      now={now}
+                      onChanged={state.reload}
+                    />
+                  ))}
                 </ul>
+                <PagedPager paged={paged} />
               </>
             )
           }

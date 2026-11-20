@@ -104,3 +104,17 @@ export function useNow(intervalMs = 30_000) {
   }, [intervalMs]);
   return now;
 }
+
+// Ro'yxatni brauzerning o'zida sahifalash (2026-11-20, Azimjon: «Pagination qo'shsang, masalan manbalardagi listlarga»):
+// butun ro'yxat bitta so'rovda keladi (Manbalar, Haydovchilar, Xatolar…), ekranga size tadan chiqadi.
+// resetKey (qidiruv, filtr) o'zgarsa — birinchi sahifa; ro'yxat qisqarsa (jonli yangilanish) — oxirgi bor sahifa.
+// → { items, offset, limit, total, setOffset, ref } — ref ro'yxat tepasiga: sahifa almashganda o'sha joyga suriladi
+export function usePaged(all, resetKey = "", size = 30) {
+  const [page, setPage] = useState({ key: resetKey, offset: 0 });
+  const ref = useRef(null);
+  const total = all.length;
+  let offset = page.key === resetKey ? page.offset : 0;
+  if (offset >= total) offset = Math.max(0, Math.floor((total - 1) / size) * size);
+  const setOffset = useCallback((next) => setPage({ key: resetKey, offset: next }), [resetKey]);
+  return { items: all.slice(offset, offset + size), offset, limit: size, total, setOffset, ref };
+}

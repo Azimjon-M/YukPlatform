@@ -206,11 +206,13 @@ export function Async({ state, children, loadingText }) {
   );
 }
 
-export function Pager({ offset, limit, total, onChange: change }) {
+// anchorRef — sahifa almashganda shu elementga suriladi (ro'yxat sahifa o'rtasida bo'lsa); berilmasa — sahifa tepasiga
+export function Pager({ offset, limit, total, onChange: change, anchorRef = null }) {
   const info = pageInfo({ offset, limit, total });
   const onChange = (next) => {
     change(next);
-    window.scrollTo({ top: 0 });
+    if (anchorRef?.current) anchorRef.current.scrollIntoView({ block: "start" });
+    else window.scrollTo({ top: 0 });
   };
   if (total <= limit && offset === 0) return null;
   return (
@@ -227,6 +229,11 @@ export function Pager({ offset, limit, total, onChange: change }) {
     </nav>
   );
 }
+
+// usePaged (hooks.js) natijasi uchun qisqa yo'l: <PagedPager paged={paged} />
+export const PagedPager = ({ paged }) => (
+  <Pager offset={paged.offset} limit={paged.limit} total={paged.total} onChange={paged.setOffset} anchorRef={paged.ref} />
+);
 
 export function Tabs({ tabs, value, onChange, label }) {
   return (

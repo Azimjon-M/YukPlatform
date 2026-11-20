@@ -22,8 +22,8 @@ import {
   initials,
   isProDriver,
 } from "../format.js";
-import { useApi, useNow } from "../hooks.js";
-import { Async, Avatar, Badge, Button, ConfirmDialog, Empty, PageHeader, TimeAgo, Toggle, avatarUrl, useTitle, useToast } from "../ui.jsx";
+import { useApi, useNow, usePaged } from "../hooks.js";
+import { Async, Avatar, Badge, Button, ConfirmDialog, Empty, PageHeader, PagedPager, TimeAgo, Toggle, avatarUrl, useTitle, useToast } from "../ui.jsx";
 import { DriverDetails } from "./DriverDetails.jsx";
 
 
@@ -312,6 +312,7 @@ export function DriversPage() {
   const counts = Object.fromEntries(DRIVER_FILTERS.map((f) => [f.id, items.filter((d) => f.test(d, now)).length]));
   const current = DRIVER_FILTERS.find((f) => f.id === filter) ?? DRIVER_FILTERS[0];
   const shown = items.filter((d) => current.test(d, now) && driverMatches(d, query));
+  const paged = usePaged(shown, `${filter}|${query}`, 30);
 
   return (
     <>
@@ -368,8 +369,12 @@ export function DriversPage() {
               {shown.length === 0 ? (
                 <Empty title="Hech kim topilmadi">Boshqa filtrni tanlang yoki qidiruvni o'zgartiring.</Empty>
               ) : (
+                <>
+                <p className="muted small list-count" ref={paged.ref}>
+                  {formatNumber(shown.length)} ta foydalanuvchi
+                </p>
                 <ul className="people">
-                  {shown.map((d) => (
+                  {paged.items.map((d) => (
                     <DriverRow
                       key={d.chatId}
                       driver={d}
@@ -381,6 +386,8 @@ export function DriversPage() {
                     />
                   ))}
                 </ul>
+                <PagedPager paged={paged} />
+                </>
               )}
             </div>
           )

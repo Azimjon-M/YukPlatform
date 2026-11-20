@@ -5,10 +5,10 @@
 import { useState } from "react";
 import { get, post } from "../api.js";
 import { dialogSource, formatNumber, loginCommand, MAIN_TG_ACCOUNT, MINIAPP_LOGIN, pickableDialogs, scanView, tgAccountView } from "../format.js";
-import { useApi } from "../hooks.js";
-import { Badge, Button, Card, Field, TimeAgo, useToast } from "../ui.jsx";
+import { useApi, usePaged } from "../hooks.js";
+import { Badge, Button, Card, Field, PagedPager, TimeAgo, useToast } from "../ui.jsx";
 
-const SHOW = 30; // ro'yxatda birdaniga ko'rsatiladigan guruhlar (qolgani — qidiruv bilan)
+const SHOW = 30; // bir sahifada ko'rsatiladigan guruhlar (usePaged)
 const accountLabel = (name) => (name === MAIN_TG_ACCOUNT ? "asosiy" : name);
 const who = (a) => [a.firstName, a.username ? `@${a.username}` : null].filter(Boolean).join(" ") || (a.userId ? `id ${a.userId}` : "—");
 
@@ -188,8 +188,9 @@ export function PrivateGroupPicker({ state, onAdded }) {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(null);
   const data = state.data;
+  const list = data ? pickableDialogs(data.dialogs, data.accounts, query) : [];
+  const paged = usePaged(list, query, SHOW); // hook — erta return'dan oldin
   if (!data || data.accounts.length === 0) return null;
-  const list = pickableDialogs(data.dialogs, data.accounts, query);
 
   async function add(dialog) {
     const source = dialogSource(dialog);
@@ -217,8 +218,8 @@ export function PrivateGroupPicker({ state, onAdded }) {
       {list.length === 0 ? (
         <p className="muted small">{query ? "Topilmadi." : "Qo'shiladigan guruh yo'q: akkaunt yangi guruhga qo'shilgan bo'lsa, «Ro'yxatni yangilash» ni bosing."}</p>
       ) : (
-        <ul className="dialog-list">
-          {list.slice(0, SHOW).map((dialog) => (
+        <ul className="dialog-list" ref={paged.ref}>
+          {paged.items.map((dialog) => (
             <li key={dialog.peerId} className="dialog-row">
               <div className="source-main">
                 <div className="source-name">
@@ -237,7 +238,7 @@ export function PrivateGroupPicker({ state, onAdded }) {
           ))}
         </ul>
       )}
-      {list.length > SHOW && <p className="muted small">Yana {formatNumber(list.length - SHOW)} ta — qidiruv bilan toping.</p>}
+      <PagedPager paged={paged} />
     </Card>
   );
 }
