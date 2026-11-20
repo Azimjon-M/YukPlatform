@@ -35,6 +35,9 @@ export const AUTO_PRO_SQL = `(drivers.phone IS NOT NULL AND EXISTS (SELECT 1 FRO
 
 const REFRESH_KEY = "tg_dialogs_request";
 const DAY = 24 * 60 * 60 * 1000;
+// «🔎 Auto scan»: tekshirilgan guruh qachon qayta ko'riladi (dialog_scans holati bo'yicha; yo'q — hech qachon).
+// rejected — yuk guruhi emas edi (keyin e'lon tusha boshlashi mumkin), error — o'qib bo'lmagan edi
+export const SCAN_RECHECK = { rejected: 7 * DAY, error: DAY };
 
 const accountRow = (row) => ({
   name: row.name,
@@ -153,6 +156,8 @@ export function createTgAccountQueries(db, now) {
       if (!row) return null;
       const time = now();
       db.prepare("UPDATE tg_accounts SET scan_requested_at = ?, updated_at = ? WHERE name = ?").run(time, time, name);
+      // Akkaunt yangi guruhlarga qo'shilgan bo'lishi mumkin — collector avval ro'yxatni yangilaydi (live.js scanNext kutadi)
+      db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(REFRESH_KEY, String(time));
       return time;
     },
 
@@ -161,11 +166,16 @@ export function createTgAccountQueries(db, now) {
       db.prepare("UPDATE tg_accounts SET scan_requested_at = NULL, scan_done_at = ?, updated_at = ? WHERE name = ?").run(time, time, name);
     },
 
-    // Tekshirilishi kerak bo'lgan guruhlar: hali manba emas (peer id yoki @username bo'yicha) va since (so'rov vaqti)dan
-    // keyin tekshirilmagan; tekshiruvdan o'tib, sinovda yiqilgan (o'chirilgan) manba — qayta. exclude — ["@kanal", "-100…"]
-    // (o'zimizning kanal/guruhlar — ular «skipped» bo'lib qoladi). since null — so'rov yo'q → bo'sh ro'yxat
+    // Tekshirilishi kerak bo'lgan guruhlar (2026-11-20, Azimjon: «yana scan qilsam yana boshidan scan qilayabdi! … bizda
+    // tasdiqlangan yoki shunchaki bizda bo'lsa keyingisiga o'tsin, yana tekshirib o'tirmasdan»): faqat YANGI guruhlar.
+    // O'tkazib yuboriladi: bizda manba (peer id yoki @username bo'yicha, istalgan holatda — boshqa akkaunt qo'shgan bo'lsa
+    // ham), avval tekshirilgan (dialog_scans — peer id bo'yicha, qaysi akkaunt bilan bo'lsa ham: passed / skipped — doim,
+    // rejected — SCAN_RECHECK.rejected (7 kun) o'tguncha, error — SCAN_RECHECK.error (1 kun) o'tguncha). Auto scan
+    // qo'shib, 24 soatlik sinovdan o'tolmagan manba ham 7 kundan keyingina qayta ko'riladi.
+    // exclude — ["@kanal", "-100…"] (o'zimizning kanal/guruhlar — «skipped»). since null — so'rov yo'q → bo'sh ro'yxat
     dialogsToScan(account, { limit = 1, since = null, exclude = [] } = {}) {
       if (since == null) return [];
+      const time = now();
       const skip = new Set(exclude.map((x) => String(x).toLowerCase()));
       const known = new Map(db.prepare("SELECT name, auto_scan, check_state, check_at FROM sources").all().map((r) => [r.name.toLowerCase(), r]));
       const scans = new Map(db.prepare("SELECT * FROM dialog_scans").all().map((r) => [r.peer_id, r]));
@@ -174,10 +184,13 @@ export function createTgAccountQueries(db, now) {
         const d = dialogRow(row);
         const names = [d.peerId, d.username ? `@${d.username}` : null].filter(Boolean).map((n) => n.toLowerCase());
         if (names.some((n) => skip.has(n))) continue;
-        const scan = scans.get(d.peerId);
-        if (scan?.state === "skipped" || (scan && scan.at >= since)) continue;
         const source = names.map((n) => known.get(n)).find(Boolean);
-        if (source && !(source.auto_scan && source.check_state === "failed")) continue;
+        if (source && !(source.auto_scan && source.check_state === "failed" && time - (source.check_at ?? 0) >= SCAN_RECHECK.rejected)) continue;
+        const scan = scans.get(d.peerId);
+        if (!source && scan) {
+          const wait = SCAN_RECHECK[scan.state];
+          if (wait == null || time - scan.at < wait) continue;
+        }
         out.push(d);
         if (out.length >= limit) break;
       }

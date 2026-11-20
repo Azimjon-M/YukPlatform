@@ -191,12 +191,29 @@ test("Auto scan: bosilmaguncha hech narsa tekshirilmaydi; bosilgach «➕ Guruh 
   assert.ok(logs.some((l) => l.includes("«Yopiq yuklar»: akkaunt guruhi tekshirildi — -1001 darhol qo'shildi (yopiq)")));
   assert.ok(logs.some((l) => l.startsWith("Auto scan tugadi: shu safar 2 ta yuk guruhi topildi; jami 2 ta yuk guruhi kuzatuvda")));
 
-  // Keyin o'z-o'zidan qayta tekshirilmaydi; yana bosilsa — rad etilgani qayta ko'riladi, manbalarga tegilmaydi
+  // Keyin o'z-o'zidan qayta tekshirilmaydi; yana bosilsa ham (2026-11-20) — faqat YANGI guruh tekshiriladi: bizdagi manba
+  // ham, avval rad etilgani ham, boshqa akkaunt orqali tekshirilgani ham o'tkazib yuboriladi
   await run(3);
   assert.equal(reads.length, 3);
+  store.finishDialogScan("-1006", { account: "ufk-2", state: "rejected", note: "boshqa akkaunt bilan tekshirilgan" });
+  store.addSource("@Bizda_Bor"); // bizda allaqachon manba (qo'lda qo'shilgan)
+  store.setTgDialogs("ufk-1", [
+    ...store.tgDialogs({ account: "ufk-1" }).map((d) => ({ id: d.peerId, title: d.title, username: d.username, type: d.type, members: d.members })),
+    { id: "-1005", title: "Yangi yuklar", username: null, type: "guruh", members: 300 },
+    { id: "-1006", title: "Boshqasida tekshirilgan", username: null, type: "guruh", members: 200 },
+    { id: "-1007", title: "Bizda bor", username: "bizda_bor", type: "guruh", members: 100 },
+  ]);
   store.requestAccountScan("ufk-1");
+  assert.equal(store.dialogScanSummary("ufk-1").pending, 1);
   await run(2);
-  assert.deepEqual(reads.slice(3).map((r) => r[1]), ["-1003"]);
+  assert.deepEqual(reads.slice(3).map((r) => r[1]), ["-1005"]);
+  assert.equal(store.dialogScanSummary("ufk-1").running, false);
+
+  // Rad etilgani 7 kundan keyin qayta ko'riladi (keyin e'lon tusha boshlagan bo'lishi mumkin)
+  clock.t += 8 * 24 * 60 * 60 * 1000;
+  store.requestAccountScan("ufk-1");
+  await run(3);
+  assert.deepEqual(reads.slice(4).map((r) => r[1]).sort(), ["-1003", "-1006"]);
 });
 
 test("yopiq guruh («➕ Guruh qo'shish»): foydalanuvchi akkaunti id bo'yicha tekshiradi; taklif havolasini ham shu akkaunt aniqlaydi", async () => {

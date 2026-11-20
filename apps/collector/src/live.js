@@ -207,6 +207,7 @@ export async function runLive({
   // o'tadi; o'tgani — sinovga. scanExclude — o'zimizning kanal/guruhlar (.env CHANNEL_ID, REQUIRED_CHATS)
   scan = null,
   scanGapMs = 30_000,
+  scanWaitMs = 0, // Auto scan oldidan guruhlar ro'yxati yangilanishini shuncha kutadi (accounts.js beradi — u ro'yxatni yangilaydi)
   scanExclude = [],
   // Har aylanish boshida chaqiriladi (accounts.js: guruhlar ro'yxatini vaqti-vaqti bilan yangilash). Xatosi — o'zida
   tick = null,
@@ -507,9 +508,16 @@ export async function runLive({
   let scanBatch = { checked: 0, passed: 0 };
   async function scanNext() {
     if (!scan || !store.dialogsToScan || !reader.since || now() < nextScanAt || now() < pauseUntil) return;
-    const since = store.listTgAccounts().find((a) => a.name === scan)?.scanRequestedAt ?? null;
+    const me = store.listTgAccounts().find((a) => a.name === scan);
+    const since = me?.scanRequestedAt ?? null;
     if (since == null) {
       nextScanAt = now() + 15_000; // so'rov yo'q — bazaga 15 soniyada bir qaraladi
+      return;
+    }
+    // Avval guruhlar ro'yxati yangilansin (requestAccountScan so'radi; accounts.js tick ≤ 1 daqiqada oladi) — akkaunt
+    // yaqinda qo'shilgan guruhlar ham tekshirilsin. Ro'yxat olinmasa ham scanWaitMs (3 daqiqa) dan keyin eskisi bilan
+    if (store.dialogsRefreshRequest && (me.dialogsAt ?? -Infinity) < since && now() - since < scanWaitMs) {
+      nextScanAt = now() + 5_000;
       return;
     }
     const [dialog] = store.dialogsToScan(scan, { limit: 1, since, exclude: scanExclude });

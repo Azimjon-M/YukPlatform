@@ -18,7 +18,7 @@ export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR }
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
 export { createCallLinks, createSessions, LINK_PERIOD_S, SESSION_TTL_S } from "./sessions.js";
 export { TUNNEL_URL_KEY, tunnelUrl } from "./tunnel.js";
-export { hashPhone, MAIN_TG_ACCOUNT, TG_ACCOUNT_NAME } from "./tgAccounts.js";
+export { hashPhone, MAIN_TG_ACCOUNT, SCAN_RECHECK, TG_ACCOUNT_NAME } from "./tgAccounts.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // YUK_DB — boshqa fayl bilan sinash uchun (masalan, YUK_DB=data/sinov.db); yo'l YukPlatform papkasiga nisbatan

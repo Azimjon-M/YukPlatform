@@ -93,6 +93,7 @@ export async function runAccount({ name, client, telegram, store, me = null, sou
     probeAccount: main ? null : name,
     joins: main,
     scan: name, // «🔎 Auto scan» — boshqaruv markazidan so'ralganda (live.js scanNext)
+    scanWaitMs: 3 * MINUTE, // scan oldidan tick ro'yxatni yangilab olsin (yangi qo'shilgan guruhlar)
     ...(main
       ? {}
       : { emptyText: "Bu akkauntga biriktirilgan guruh yo'q: boshqaruv markazi → «Manbalar» → «Yopiq guruh qo'shish» dan tanlang." }),
