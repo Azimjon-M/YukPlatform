@@ -357,6 +357,35 @@ export function createTgAccountQueries(db, now) {
         .map((r) => ({ name: r.name, title: r.title ?? null }));
     },
 
+    // Hech bir o'quvchi akkaunt a'zo bo'lmagan yoqilgan ochiq guruh (2026-11-20, Azimjon: «3 ta meni accountim bor va ularni
+    // qo'shish kerak bo'lgan guruh/kanallarga qo'sh»): shu akkaunt uchun BITTASINI band qiladi (reader_joins 'claimed') —
+    // boshqa akkaunt uni olmaydi (bitta SQL — ikki akkaunt bir vaqtda so'rasa ham). Eng faoli (24 soatdagi e'lonlar) birinchi.
+    // readers — .env TG_READERS. → { name, title } | null
+    claimUncoveredJoin(account, readers) {
+      const marks = readers.map(() => "?").join(", ");
+      const row = db
+        .prepare(
+          `INSERT INTO reader_joins (name, account, state, at)
+           SELECT s.name, ?, 'claimed', ? FROM sources s
+            WHERE s.enabled = 1 AND s.name LIKE '@%'
+              AND NOT EXISTS (SELECT 1 FROM reader_joins j WHERE j.name = s.name AND NOT (j.state = 'claimed' AND j.at < ?))
+              AND NOT EXISTS (SELECT 1 FROM tg_dialogs d WHERE d.account IN (${marks}) AND '@' || lower(d.username) = lower(s.name))
+            ORDER BY (SELECT COUNT(*) FROM posts p WHERE p.source = s.name AND p.created_at > ?) DESC, s.name
+            LIMIT 1
+           ON CONFLICT (name, account) DO UPDATE SET state = 'claimed', error = NULL, at = excluded.at
+           RETURNING name`,
+        )
+        // band qilingan, lekin 1 soatda tugamagan (jarayon to'xtagan) — qayta olinadi
+        .get(account, now(), now() - 60 * 60 * 1000, ...readers, now() - DAY);
+      if (!row) return null;
+      return { name: row.name, title: db.prepare("SELECT title FROM sources WHERE name = ?").get(row.name)?.title ?? null };
+    },
+
+    // Band qilingan, lekin qo'shilmagan (FLOOD_WAIT) — keyin yana olinadi
+    releaseReaderJoin(name, account) {
+      db.prepare("DELETE FROM reader_joins WHERE name = ? AND account = ? AND state = 'claimed'").run(name, account);
+    },
+
     finishReaderJoin(name, account, { state, error = null }) {
       db.prepare(
         `INSERT INTO reader_joins (name, account, state, error, at) VALUES (?, ?, ?, ?, ?)

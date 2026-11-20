@@ -121,6 +121,8 @@ export async function runAccount({ name, client, telegram, store, me = null, sou
     scanWaitMs: 3 * MINUTE, // scan oldidan tick ro'yxatni yangilab olsin (yangi qo'shilgan guruhlar)
     // Tasdiqlangan guruhga qo'shilish (TG_READERS dagi akkauntlar; live.js readerJoinNext)
     readerJoins: readerAccounts().includes(name) ? name : null,
+    coverJoins: name !== MAIN_TG_ACCOUNT && readerAccounts().includes(name),
+    readers: readerAccounts(),
     ...(main
       ? {}
       : { emptyText: "Bu akkauntga biriktirilgan guruh yo'q: boshqaruv markazi → «Manbalar» → «Yopiq guruh qo'shish» dan tanlang." }),

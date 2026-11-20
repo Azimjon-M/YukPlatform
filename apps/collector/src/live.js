@@ -211,6 +211,10 @@ export async function runLive({
   scanExclude = [],
   // Tasdiqlangan guruhga qo'shilish (2026-11-20): shu akkaunt nomi (accounts.js beradi — .env TG_READERS dagilar); null — o'chiq
   readerJoins = null,
+  // Hech bir o'quvchi a'zo bo'lmagan guruhga ham shu akkaunt qo'shiladi (accounts.js: TG_READERS dagi asosiy bo'lmaganlar;
+  // asosiy 500 ta guruh chegarasiga yaqin). readers — TG_READERS ro'yxati
+  coverJoins = false,
+  readers = [],
   // Har aylanish boshida chaqiriladi (accounts.js: guruhlar ro'yxatini vaqti-vaqti bilan yangilash). Xatosi — o'zida
   tick = null,
   emptyText = "Kuzatiladigan guruh yo'q: boshqaruv markazining «Manbalar» bo'limidan qo'shing.",
@@ -451,33 +455,36 @@ export async function runLive({
   async function readerJoinNext() {
     nextReaderJoinAt = now() + joinGapMs;
     if (!store.readerJoinCandidates || !reader.join || joinsStopped || now() < pauseUntil) return;
-    const [row] = store.readerJoinCandidates(readerJoins, { limit: 1 });
-    if (!row) return;
     if (store.readerJoinsSince(readerJoins, now() - DAY) >= joinsPerDay) {
       nextReaderJoinAt = now() + 30 * MINUTE;
       return;
     }
+    // Avval tasdiqlangan yangi guruh (hamma o'quvchi qo'shiladi), keyin — hech kim a'zo bo'lmagan guruh (bittasi qo'shiladi)
+    const [approved] = store.readerJoinCandidates(readerJoins, { limit: 1 });
+    const row = approved ?? (coverJoins && store.claimUncoveredJoin ? store.claimUncoveredJoin(readerJoins, readers) : null);
+    if (!row) return;
     const source = { kind: "username", value: row.name.replace(/^@/, "") };
     await pace();
-    if (signal?.aborted) return;
+    if (signal?.aborted) return store.releaseReaderJoin?.(row.name, readerJoins);
     try {
       const result = await call(reader.join(source));
       ok();
       store.finishReaderJoin(row.name, readerJoins, { state: result === "requested" ? "requested" : "joined" });
       store.requestDialogsRefresh?.(); // a'zolik tg_dialogs ga tushsin — guruh shu akkauntga o'tadi
       const muted = result === "requested" ? false : await mute(source);
-      log(`${row.name}: tasdiqlangan guruh — akkaunt ${result === "requested" ? "a'zolik so'rovini yubordi (admin tasdiqlaydi)" : `qo'shildi${muted ? ", bildirishnomasi o'chirildi" : ""}`}`);
+      log(`${row.name}: ${approved ? "tasdiqlangan guruh" : "hech bir o'quvchi a'zo emas edi"} — akkaunt ${result === "requested" ? "a'zolik so'rovini yubordi (admin tasdiqlaydi)" : `qo'shildi${muted ? ", bildirishnomasi o'chirildi" : ""}`}`);
     } catch (error) {
       const seconds = floodSeconds(error);
       if (seconds != null) {
         nextReaderJoinAt = now() + seconds * 1000 + joinGapMs;
-        log(`Tasdiqlangan guruhga qo'shilish: Telegram vaqtincha chekladi (FLOOD_WAIT ${seconds} s)`);
+        store.releaseReaderJoin?.(row.name, readerJoins);
+        log(`Guruhga qo'shilish: Telegram vaqtincha chekladi (FLOOD_WAIT ${seconds} s)`);
         return;
       }
       const code = errorText(error);
       if (/CHANNELS_TOO_MUCH/.test(code)) joinsStopped = true;
       store.finishReaderJoin(row.name, readerJoins, { state: "error", error: code });
-      log(`${row.name}: tasdiqlangan guruhga qo'shilib bo'lmadi — ${code}`);
+      log(`${row.name}: guruhga qo'shilib bo'lmadi — ${code}`);
     }
   }
 

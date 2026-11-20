@@ -318,3 +318,24 @@ test("tasdiqlangan guruhga qo'shilish navbati: faqat sinovdan o'tgan, yangi tasd
   assert.equal(store.readerJoinsSince("asosiy", 0), 1);
   store.close();
 });
+
+test("hech bir o'quvchi a'zo bo'lmagan guruh: bitta akkaunt band qiladi, ikkinchisi boshqasini oladi; FLOOD'da bo'shatiladi", () => {
+  const clock = { t: 5_000_000 };
+  const store = openStore({ file: ":memory:", now: () => clock.t });
+  for (const name of ["@Azo_bor", "@Birinchi", "@Ikkinchi"]) store.addSource(name);
+  store.setTgDialogs("sarvar", [{ id: "-1001", title: "A", username: "azo_bor", type: "guruh" }]);
+  // Faqat haydovchining akkaunti a'zo — hisobga olinmaydi
+  store.setTgDialogs("boshqa", [{ id: "-1002", title: "B", username: "birinchi", type: "guruh" }]);
+  const readers = ["asosiy", "sarvar", "ummu"];
+  const a = store.claimUncoveredJoin("ummu", readers);
+  const b = store.claimUncoveredJoin("sarvar", readers);
+  assert.deepEqual([a.name, b.name].sort(), ["@Birinchi", "@Ikkinchi"]);
+  assert.equal(store.claimUncoveredJoin("ummu", readers), null, "qolmadi");
+  store.releaseReaderJoin(a.name, "ummu");
+  assert.equal(store.claimUncoveredJoin("ummu", readers).name, a.name, "bo'shatilgani qayta olinadi");
+  store.finishReaderJoin(a.name, "ummu", { state: "joined" });
+  // 1 soatdan ortiq «band» qolgani (jarayon to'xtagan) — boshqa akkaunt oladi
+  clock.t += 2 * 60 * 60 * 1000;
+  assert.equal(store.claimUncoveredJoin("ummu", readers).name, b.name);
+  store.close();
+});
