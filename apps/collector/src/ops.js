@@ -308,6 +308,27 @@ async function runCommand(client, name, command, rest) {
     const text = JSON.stringify(result, (k, v) => (typeof v === "bigint" ? String(v) : k === "originalArgs" || k === "fileReference" || k === "bytes" ? undefined : v));
     out.push(text.length > 3500 ? `${text.slice(0, 3500)}… (${text.length} belgi)` : text);
     await audit(`[${name}] api ${method} ${json.slice(0, 200).replace(/\s+/g, " ")}`);
+  } else if (command === "download") {
+    // download <kimdan> <xabar id> — ovozli xabar / dumaloq video / fayl ops/<nom>.media/ ga yoziladi (2026-11-20: Azimjon
+    // @YukExperti'ga yuborgan ovozli e'lonlarni Claude bot yo'lidan o'tkazib sinashi uchun). Faqat shu papkaga — boshqa joyga
+    // yozilmaydi; papka gitignored (ichida odamlarning ovozi)
+    const [to, id] = rest;
+    if (!Number(id)) throw new Error("download <kimdan> <xabar id>");
+    const peer = await peerOf(client, to);
+    const [message] = await client.getMessages(peer, { ids: [Number(id)] });
+    if (!message?.media) throw new Error(`#${id} xabarda fayl yo'q`);
+    const doc = message.media.document;
+    const mime = doc?.mimeType ?? "application/octet-stream";
+    const round = (doc?.attributes ?? []).some((a) => a.className === "DocumentAttributeVideo" && a.roundMessage);
+    const voice = (doc?.attributes ?? []).some((a) => a.className === "DocumentAttributeAudio" && a.voice);
+    const ext = mime.includes("ogg") ? "ogg" : mime.includes("mp4") ? "mp4" : mime.includes("mpeg") ? "mp3" : "bin";
+    const dir = path.join(OPS_DIR, `${name}.media`);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    const file = path.join(dir, `${String(to).replace(/[^\w-]/g, "")}_${Number(id)}.${ext}`);
+    const data = await client.downloadMedia(message, {});
+    await writeFile(file, data, { mode: 0o600 });
+    out.push(`Yozildi: ${file} · ${voice ? "ovozli" : round ? "dumaloq video" : "fayl"} · ${mime} · ${data.length} bayt`);
+    await audit(`[${name}] download ${to} #${id} (${data.length} bayt)`);
   } else if (command === "logout") {
     await client.invoke(new Api.auth.LogOut());
     await unlink(opsSessionFile(name)).catch(() => {});
