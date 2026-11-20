@@ -430,14 +430,16 @@ export function createReader(client) {
       }
     }
     if (!entities.has(source.value)) {
-      const left = Math.ceil((resolveBlockedUntil - Date.now()) / 1000);
+      // Cheklov faqat @nom so'rashga (resolveUsername). id bo'yicha guruh dialoglar ro'yxatidan olinadi — cheklanmaydi
+      // (2026-11-20: shu tekshiruv id ni ham to'xtatib, asosiy akkauntning «🔎 Auto scan»i 2 soat jim turib qoldi)
+      const left = source.kind === "username" ? Math.ceil((resolveBlockedUntil - Date.now()) / 1000) : 0;
       if (left > 0) throw Object.assign(new Error(`FLOOD_WAIT_${left}`), { errorMessage: `FLOOD_WAIT_${left}`, resolveFlood: true });
       let entity;
       try {
         entity = await resolveEntity(client, source);
       } catch (error) {
         const seconds = floodOf(error);
-        if (Number.isFinite(seconds)) {
+        if (Number.isFinite(seconds) && source.kind === "username") {
           resolveBlockedUntil = Date.now() + seconds * 1000;
           error.resolveFlood = true;
         }
