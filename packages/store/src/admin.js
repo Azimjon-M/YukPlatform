@@ -535,6 +535,8 @@ export function createAdminQueries(db, now) {
       parsedBy: {
         rules: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'rules'", since),
         ai: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'ai'", since),
+        // AI'siz (2026-11-20): qoidalar to'liq tushunmagan, o'zimizning model (fastLook) hukmi bilan yopilgan
+        fast: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND parsed_by = 'fast'", since),
         noContact: count("SELECT COUNT(*) AS n FROM posts WHERE done_at > ? AND error LIKE 'Aloqasiz%'", since),
         // «📦 Yuk berish» — yuk beruvchilarning o'zi yuborgan (botga yozib yoki formadan)
         shipper: count("SELECT COUNT(*) AS n FROM posts WHERE created_at > ? AND shipper IS NOT NULL", since),

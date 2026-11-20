@@ -92,6 +92,14 @@ export function requireContactOn(env = process.env) {
 // Saralash algoritmi (AI / qoidalar → mashina va yo'nalish bo'yicha). Standart — O'CHIQ (Azimjon, 2026-11-19: «ushbu
 // algoritmimizni hozir noaktiv qil. Bizga tezlik kerak sifat emas!»): hamma haydovchiga guruh e'loni asl matn bilan,
 // filtrsiz, darhol (pipeline.js deps.sortingOff). FEED_SORTING=1 (ha / on / true) — avvalgi tartib qaytadi
+// Guruh e'lonlarini AI tahlil qiladimi (2026-11-20, Azimjon: «AI bilan tahrirlamaymiz! O'zimiz yozgan algoritmimiz 96% to'g'ri
+// ishlayotgan edi … AI faqat kerakli joylarimizda masalan Yuk beruvchi rolida yozsa … umumiy e'lonlarni qayta ishlash kerak
+// emas»). Standart — YO'Q: guruh e'loni qoidaviy parser + fastLook bilan yopiladi; AI (Gemini) ovozli xabar va yuk beruvchi
+// uchun bo'sh qoladi. .env GROUP_AI=1 — avvalgidek AI tahlil qiladi
+export function groupAiOn(env = process.env) {
+  return /^(1|ha|yes|true|on)$/i.test(env.GROUP_AI?.trim() ?? "");
+}
+
 export function sortingOffOn(env = process.env) {
   return !/^(1|ha|yes|true|on)$/i.test(env.FEED_SORTING?.trim() ?? "");
 }

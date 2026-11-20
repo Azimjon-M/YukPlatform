@@ -409,6 +409,21 @@ export function createWorker(
   let ruleCursor = 0;
   let ruleCount = 0;
 
+  // Guruh e'lonlari AI'siz (deps.groupAi === false; main.js .env GROUP_AI, standart o'chiq — 2026-11-20, Azimjon: «AI bilan
+  // tahrirlamaymiz … umumiy e'lonlarni qayta ishlash kerak emas»). Qoidaviy parser ishonchli tushungani — avvalgidek
+  // handleParsed (saytdagi yuklar ro'yxati). Tushunmagani AI'ga BORMAYDI, o'zimizning «e'lon / e'lon emas» modeli
+  // (fastLook, sinovda 96,8%) hukmi bilan yopiladi: e'lon — done, izohsiz (foydalanuvchi qo'shgan guruh sinovi uni yuk deb
+  // sanaydi), e'lon emas — done «boshqa»; parsed_by "fast". Nega AI'ga uzatilmaydi (o'sha kungi o'lchov): haydovchilarga
+  // e'lon baribir asl matn bilan, AI'siz boradi (saralash o'chiq); AI natijasi faqat sayt ro'yxati uchun edi, lekin Gemini
+  // limitini ertalabgacha yeb qo'yardi va ovozli xabarlar sifatsiz Telegram o'girishiga tushardi; yuk beruvchilar 0 ta
+  // (bo'sh mashina e'lonini kutadigan odam yo'q)
+  const groupAi = deps.groupAi !== false;
+  let fastCount = 0;
+  function closeWithoutAi(post, look) {
+    store.finishPost(post.id, "done", look.chatter ? "boshqa" : null, "fast");
+    fastCount++;
+  }
+
   // Guruh bo'limlariga asl matn (deps.groupRaw — bot.js groupTopics pushRaw; 2026-11-20, Azimjon: guruhga ham AI'siz).
   // Ochiq guruh e'loni, 30 daqiqadan eski emas, «quruq gap» emas. Yopiq guruh — yo'q (u Pro uchun), yuk beruvchining yuki —
   // handleParsed → publish orqali. Bot ishga tushishidan oldin navbatga tushganlari yuborilmaydi: guruhda «yuborildi»
@@ -454,14 +469,18 @@ export function createWorker(
         if (contactless(post)) continue;
         // Tezkor rejimdagilarga asl matn — AI'ni ham, qoidaviy parserni ham kutmasdan (e'lon o'zi navbatda qoladi)
         if (!fastAll) fast(post, users, getLook);
-        if (!deps.rules) continue; // aloqasi bor — AI kutadi
         let result = null;
-        try {
-          result = deps.rules(post.text);
-        } catch (error) {
-          log(`#${post.id}: qoidaviy parser xatosi — ${error.message} (AI tahlil qiladi)`);
+        if (deps.rules) {
+          try {
+            result = deps.rules(post.text);
+          } catch (error) {
+            log(`#${post.id}: qoidaviy parser xatosi — ${error.message}${groupAi ? " (AI tahlil qiladi)" : ""}`);
+          }
         }
-        if (!result) continue;
+        if (!result) {
+          if (!groupAi) closeWithoutAi(post, getLook()); // AI'siz — model hukmi bilan yopiladi
+          continue; // aks holda AI kutadi
+        }
         claimed.add(post.id);
         ready.push(post);
         results.push({ ...result, by: "rules" });
@@ -477,6 +496,7 @@ export function createWorker(
   // Navbatdan bir guruh (eng yangilari, boshqa AI olganlaridan tashqari). Guruh to'lmagan va yangi bo'lsa — [] (kutamiz)
   // lease.batchSize — ulanishning o'z chegarasi (1pro: 6 ta), umumiy o'lchamdan katta bo'lmaydi
   function take(fill, lease, live = Math.min(liveWait, fill)) {
+    if (!groupAi) return []; // guruh e'lonlari AI'ga bermaydi (quick() o'zi yopadi); yuk beruvchining yuki — quick() da
     const n = Math.min(size, lease?.batchSize || size);
     // quick() aloqasizlarni odatda oldinroq yopadi; bu — o'rtada kelib qolgani uchun (collector boshqa jarayon)
     // Yuk beruvchining yuki (direct) — AI'ga emas, quick() ga (u keyingi aylanishda oladi)
@@ -661,12 +681,15 @@ export function createWorker(
       let reported = 0;
       let reportedNoContact = 0;
       let reportedRaw = 0;
+      let reportedFast = 0;
       while (!controller.signal.aborted) {
         // Hamma AI dam olayotgan bo'lsa ham: kechasi to'plangan e'lonlar navbatda "kutib" turmasin
         expire();
         quick();
         if ((deps.rules || deps.requireContact || deps.deliverRaw) && now() - reportedAt >= 10 * 60_000) {
           if (ruleCount > reported) log(`Qoidaviy parser: oxirgi 10 daqiqada ${ruleCount - reported} ta e'lon AI'siz tushunildi`);
+          if (fastCount > reportedFast) log(`AI'siz: oxirgi 10 daqiqada ${fastCount - reportedFast} ta e'lonni qoidalar to'liq tushunmadi — model hukmi bilan yopildi (AI'ga yuborilmadi)`);
+          reportedFast = fastCount;
           if (rawCount > reportedRaw) log(`Tezkor: oxirgi 10 daqiqada ${rawCount - reportedRaw} ta asl matnli xabar yuborildi`);
           reportedRaw = rawCount;
           if (noContactCount > reportedNoContact) {

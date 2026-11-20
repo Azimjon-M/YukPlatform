@@ -1080,3 +1080,24 @@ test("yopiq guruh: bog'lanish yo'li yo'q e'lon hech kimga ketmaydi (saralash o'c
   const closedPost = store.listPosts().items.find((p) => p.messageId === 1);
   assert.match(closedPost.error ?? "", /Aloqasiz \(yopiq guruh\)/);
 });
+
+test("guruh e'lonlari AI'siz (groupAi: false): qoidalar tushunsa — yuk saqlanadi; tushunmasa — model hukmi bilan yopiladi; AI chaqirilmaydi", async () => {
+  const { store, deps, post } = rawSetup();
+  let aiCalls = 0;
+  deps.parser.parse = async () => (aiCalls++, { ok: true, postType: "boshqa", loads: [] });
+  deps.parser.parseBatch = async (texts) => (aiCalls++, texts.map(() => ({ ok: true, postType: "boshqa", loads: [] })));
+  deps.groupAi = false;
+  deps.rules = (text) => (text === LOAD_TEXT ? { ok: true, postType: "yuk_bor", loads: [LOAD] } : null);
+  post("@g", 1, LOAD_TEXT); // qoidalar tushunadi
+  post("@g", 2, "Andijondan Buxoroga yuk bor kimda isuzu bor aloqaga chiqing +998900000009"); // tushunmaydi, lekin e'lon
+  post("@g", 3, CHAT_TEXT); // suhbat
+  const worker = createWorker(deps, { log: () => {}, fillWaitMs: 0, liveWaitMs: 0 });
+  await worker.runOnce();
+  const byId = Object.fromEntries(store.listPosts().items.map((p) => [p.messageId, p]));
+  assert.equal(byId[1].parsedBy, "rules");
+  assert.equal(store.recentLoads().length, 1, "qoidalar tushungani saytga yuk bo'ldi");
+  assert.deepEqual([byId[2].status, byId[2].error, byId[2].parsedBy], ["done", null, "fast"]);
+  assert.deepEqual([byId[3].status, byId[3].error, byId[3].parsedBy], ["done", "boshqa", "fast"]);
+  assert.equal(store.takeNewPosts().length, 0, "navbatda hech narsa qolmadi");
+  assert.equal(aiCalls, 0, "AI chaqirilmadi");
+});

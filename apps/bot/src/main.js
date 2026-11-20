@@ -11,7 +11,7 @@ import { EXIT_CONFIG, ROUTE_SCOPES, SHIPPER_LOAD_LIMIT, devBotProblem, isDevMode
 import { DEFAULT_DB_FILE, acquireRunLock, createCallLinks, createSessions, loadSecret, openStore, tunnelUrl } from "@yuk/store";
 import { createBot } from "./bot.js";
 import { createIdleWatcher } from "./idle.js";
-import { readConfig, requireContactOn, ruleParserOn, sortingOffOn } from "./config.js";
+import { readConfig, requireContactOn, ruleParserOn, groupAiOn, sortingOffOn } from "./config.js";
 import { formatLoad } from "./format.js";
 import { createWorker, ruleParse } from "./pipeline.js";
 
@@ -236,9 +236,10 @@ async function main() {
   // onDirect — yuk beruvchining yuki yuborildi: natijani unga yozadi.
   // deliverRaw — «⚡ Tezkor» / «📌 Mening guruhlarim» rejimidagilarga asl matn, AI'siz (pipeline.js tezkor yo'l)
   worker = createWorker(
-    { pool, store, publish, deliver, deliverRaw, groupRaw, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone, sortingOff: sortingOffOn(), held: isBusy },
+    { pool, store, publish, deliver, deliverRaw, groupRaw, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone, sortingOff: sortingOffOn(), held: isBusy, groupAi: groupAiOn() },
     { log, maxAgeMs: maxPostAgeMs },
   );
+  if (!groupAiOn()) log("🧠 Guruh e'lonlari AI'siz: qoidaviy parser tushunsa — saytga yuk, tushunmasa — o'zimizning model hukmi bilan yopiladi; AI faqat ovozli xabar va yuk beruvchi uchun (GROUP_AI=1 — AI qaytadi)");
   if (sortingOffOn()) log("⚡ Saralash o'chiq: hamma haydovchiga guruh e'lonlari asl matn bilan, filtrsiz, darhol (FEED_SORTING=1 — saralash qaytadi)");
   // Guruh bo'limlari: yo'q bo'limlarni ochadi va navbatni yuborishni boshlaydi (GROUP_LOADS bo'lsa)
   await group?.start();
