@@ -19,6 +19,7 @@
 // (~1 100/soat) dan ikki barobar ko'p. Uning tanlovi: 1 xabar = 1 e'lon; navbatdan har safar ENG YANGISI olinadi, 10 daqiqadan
 // eskirgani tashlanadi (yuk tez olinadi — eskisini kech yuborishdan foyda yo'q).
 import { InlineKeyboard } from "grammy";
+import { isClosedSource } from "@yuk/shared";
 import { formatLoad, formatRaw } from "./format.js";
 
 // classes — @yuk/shared vehicles.js TRUCK_CLASSES id'lari. Mashina turi yozilmagan yuk «Boshqa yuklar» ga boradi.
@@ -139,7 +140,18 @@ export function createGroupPoster({
     }
   }
 
+  // Ikkinchi qatlam (2026-11-20, Azimjon: «Private guruhlardagi e'lonlarimiz ochiq guruhimizga jo'natilmasligiga ishonch hosil
+  // qil»): chaqiruvchi (pipeline toGroup, bot.js publish) tekshirgan bo'lsa ham, shu yerda yana — yopiq guruh e'loni
+  // (Pro uchun, posts.source "-100…") va o'z guruhimizning xabari (qayta o'ziga joylanmasin) navbatga hech qachon tushmaydi
+  const own = String(chat).toLowerCase();
+  let refused = 0;
   function enqueue(item) {
+    const source = item.post?.source;
+    if (isClosedSource(source) || String(source ?? "").toLowerCase() === own) {
+      refused++;
+      if (refused === 1 || refused % 100 === 0) log(`Guruhga yuborilmadi: ${isClosedSource(source) ? "yopiq guruh e'loni" : "o'z guruhimiz xabari"} (${source}) — jami ${refused} ta`);
+      return;
+    }
     queue.push({ ...item, at: now() });
     if (queue.length > maxQueue) {
       queue.shift();
@@ -166,6 +178,6 @@ export function createGroupPoster({
       timer = null;
     },
     tick,
-    stats: () => ({ queued: queue.length, sent, dropped, topics: { ...topics } }),
+    stats: () => ({ queued: queue.length, sent, dropped, refused, topics: { ...topics } }),
   };
 }

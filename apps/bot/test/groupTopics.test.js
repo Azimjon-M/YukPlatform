@@ -149,3 +149,22 @@ test("asl matn (AI'siz): bo'lim AI'siz topilgan mashina turidan, matn o'zgarmayd
     "https://t.me/Yuk_Ekspert_agent?start=guruh",
   ]);
 });
+
+test("yopiq guruh e'loni va o'z guruhimiz xabari guruhga hech qaysi yo'l bilan tushmaydi", async () => {
+  const store = openStore({ file: ":memory:" });
+  const api = fakeApi();
+  const logs = [];
+  const poster = createGroupPoster({ api, store, chat: "@Yuk_Ekspert_chat", log: (m) => logs.push(m) });
+  const closed = { source: "-1001234567890", link: null, postedAt: Date.now(), text: "Toshkentdan Samarqandga 20 tonna un bor +998900000001" };
+  poster.pushRaw(closed, { trucks: ["fura"] });
+  poster.push({ ...LOAD, truckClass: "fura" }, closed);
+  poster.pushRaw({ ...closed, source: "-123456" }, {}); // oddiy (super emas) yopiq guruh
+  poster.pushRaw({ ...closed, source: "@yuk_ekspert_chat", link: "https://t.me/Yuk_Ekspert_chat/9" }, {});
+  assert.equal(poster.stats().queued, 0);
+  assert.equal(poster.stats().refused, 4);
+  await poster.tick();
+  assert.equal(api.calls.filter((c) => c.method === "sendMessage").length, 0);
+  assert.ok(logs.some((l) => l.includes("yopiq guruh e'loni (-1001234567890)")));
+  poster.pushRaw({ ...closed, source: "@yuk_guruh", link: "https://t.me/yuk_guruh/1" }, {});
+  assert.equal(poster.stats().queued, 1, "ochiq guruh e'loni o'tadi");
+});
