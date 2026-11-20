@@ -625,6 +625,18 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       return q.newPostsAfter.all(afterId, limit).map(queuedPost);
     },
 
+    // Shu vaqtdan keyin JOYLANGAN guruh e'lonlari, holati qanday bo'lsa ham (takrorlar va yuk beruvchining yuki tashqari),
+    // eng yangisi birinchi — bot pipeline catchUp (haydovchi e'lon olishni endi boshladi: oxirgi daqiqalardagilari ham)
+    recentPostsSince(postedSince, limit = 300) {
+      return db
+        .prepare(
+          `SELECT * FROM posts INDEXED BY posts_created WHERE created_at > ? AND posted_at >= ? AND status != 'duplicate' AND direct IS NULL AND shipper IS NULL
+           ORDER BY posted_at DESC, id DESC LIMIT ?`,
+        )
+        .all(postedSince - 5 * 60_000, postedSince, limit)
+        .map(queuedPost);
+    },
+
     // --- Yuk beruvchining o'z yuki («📦 Yuk berish»: web forma yoki botga yozilgan matn) ---
     // Navbatga tushadi (bot pipeline.js uni AI'siz, darhol mos haydovchilarga yuboradi va natijani yuk beruvchiga yozadi).
     // loads — tayyor yuklar (@yuk/shared sanitizeShipperLoad yoki bot tushungani, telefonlari bilan); text — botga yozgani

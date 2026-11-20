@@ -355,9 +355,11 @@ export function createWorker(
     // «⚡ Tezkor» (hamma guruh) — chet el (Rossiya, Yevropa…) yo'nalishi tashlanadi; o'zi tanlagan guruhdan esa hammasi.
     // Bot qayta yoqilgan bo'lsa — bazada «yuborilgan» deb turganlarga ikkinchi marta emas
     const already = new Set(store.postDeliveredTo?.(post.id) ?? []);
-    const targets = wanted.filter((u) => !already.has(u.chatId) && !(quick.outOfScope && feedMode(u.profile) === "tezkor"));
-    if (!targets.length) return;
-    rawPending.set(post.id, new Set(targets.map((u) => u.chatId)));
+    const targets = wanted.filter((u) => !already.has(u.chatId) && !rawPending.get(post.id)?.has(u.chatId) && !(quick.outOfScope && feedMode(u.profile) === "tezkor"));
+    if (!targets.length) return 0;
+    const pending = rawPending.get(post.id) ?? new Set();
+    for (const u of targets) pending.add(u.chatId);
+    rawPending.set(post.id, pending);
     const phones = extractPhones(post.text);
     const closed = isClosedSource(post.source);
     const plan = { kind: "yuk", source: closed ? post.source : null, owner: closed ? (store.sourceOwner?.(post.source) ?? null) : null };
@@ -385,8 +387,8 @@ export function createWorker(
         log(`#${post.id}: tezkor xabar yuborilmadi (${user.chatId}) — ${error.description ?? error.message}`);
       } finally {
         rawPending.get(post.id)?.delete(user.chatId);
+        if (rawPending.get(post.id)?.size === 0) rawPending.delete(post.id);
         if (--left === 0) {
-          rawPending.delete(post.id);
           rawCount += count;
           if (count) log(`#${post.id} ${post.source}: ⚡ ${count} ta haydovchiga asl matn bilan (AI'siz, ${Math.round((now() - (post.queuedAt ?? post.postedAt)) / 1000)} s)`);
         }
@@ -401,6 +403,7 @@ export function createWorker(
         if (rawQueues.get(user.chatId) === job) rawQueues.delete(user.chatId);
       });
     }
+    return targets.length;
   }
 
   // Tez yo'l: navbatga yangi tushgan e'lonlar qoidaviy parserdan o'tadi (~2 ms). Ishonchlisi — darhol yuborishga,
@@ -648,8 +651,30 @@ export function createWorker(
     }
   }
 
+  // Haydovchi e'lon olishni endi boshladi (2026-11-20, Azimjon: «men yuk olishni boshladim (masalan filterdan Qarshini
+  // tanladim) anashu vaqtda yoki undan so'ng keladigan yuklar menga jo'natilmoqda. Bizga anashu vaqtda chiqgan va 1 daqiqa
+  // oldin chiqgan e'lonlarni ham haydovchiga jo'natishimiz kerak (balki ulgurar)»): bot filtr saqlanganda / ▶️ / ro'yxatdan
+  // o'tganda (bot.js release) chaqiradi. Filtr oynasi ochiq paytda e'lonlar unga tashlanardi (navbatga qo'yilmasdi) — shu
+  // ham qoplanadi. Har e'lon odatdagi tezkor yo'ldan o'tadi (fast: quruq gap, filtr, yopiq guruh/aloqa, allaqachon olgani);
+  // eng yangisidan, ko'pi bilan limit ta — filtrsiz haydovchida 2 daqiqada ~80 ta bo'ladi va ular yangi e'lonlarni
+  // daqiqalab ushlab qolardi (bir chatga ~3 s da bitta). → nechta navbatga qo'yildi
+  function catchUp(chatId, since, { limit = 8 } = {}) {
+    if (!deps.deliverRaw) return 0;
+    const user = store.getDriver?.(chatId);
+    if (!user || user.active === false || user.deletedAt != null || user.role !== "haydovchi") return 0;
+    if (!fastAll && !usesRawFeed(user.profile)) return 0;
+    let queued = 0;
+    for (const post of store.recentPostsSince?.(since) ?? []) {
+      if (queued >= limit) break;
+      queued += fast(post, [user]) || 0;
+    }
+    if (queued) log(`${chatId}: ⏪ e'lon olishni boshladi — oxirgi ${Math.round((now() - since) / 60_000)} daqiqadagi ${queued} ta mos e'lon ham yuborilyapti`);
+    return queued;
+  }
+
   return {
     runOnce,
+    catchUp,
     // Yuk beruvchi yuk yubordi — ishchi uyqudan darhol uyg'onadi (aks holda 5 s gacha kutardi)
     poke() {
       wake();

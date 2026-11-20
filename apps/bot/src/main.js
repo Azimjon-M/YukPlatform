@@ -218,7 +218,7 @@ async function main() {
   };
   // Ishchi pastda yaratiladi, bot esa undan oldin: «navbatga tushdi — darhol ko'r» keyin ulanadi
   let worker = null;
-  const { bot, init, publish, deliver, deliverRaw, groupRaw, isBusy, canReceive, directDone, commands, notices, sources, group, holdReminder } = createBot({
+  const { bot, init, publish, deliver, deliverRaw, groupRaw, setCatchUp, isBusy, canReceive, directDone, commands, notices, sources, group, holdReminder } = createBot({
     token: config.token,
     store,
     config,
@@ -239,6 +239,8 @@ async function main() {
     { pool, store, publish, deliver, deliverRaw, groupRaw, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone, sortingOff: sortingOffOn(), held: isBusy, groupAi: groupAiOn() },
     { log, maxAgeMs: maxPostAgeMs },
   );
+  // Haydovchi e'lon olishni boshlaganda (filtr saqlandi, ▶️, ro'yxatdan o'tdi) — oxirgi 2 daqiqadagi mos e'lonlar ham
+  setCatchUp((chatId, since) => worker.catchUp(chatId, since));
   if (!groupAiOn()) log("🧠 Guruh e'lonlari AI'siz: qoidaviy parser tushunsa — saytga yuk, tushunmasa — o'zimizning model hukmi bilan yopiladi; AI faqat ovozli xabar va yuk beruvchi uchun (GROUP_AI=1 — AI qaytadi)");
   if (sortingOffOn()) log("⚡ Saralash o'chiq: hamma haydovchiga guruh e'lonlari asl matn bilan, filtrsiz, darhol (FEED_SORTING=1 — saralash qaytadi)");
   // Guruh bo'limlari: yo'q bo'limlarni ochadi va navbatni yuborishni boshlaydi (GROUP_LOADS bo'lsa)

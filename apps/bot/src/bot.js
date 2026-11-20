@@ -311,6 +311,8 @@ export function createBot({
   parseLoad = async () => null,
   onLoadQueued = () => {},
   mediaDir, // ovozli xabar / dumaloq videoning asl fayllari (collector yozadi); berilmasa — @yuk/store MEDIA_DIR
+  catchUpMs = 2 * 60_000, // e'lon olish boshlanganda shuncha oldingi e'lonlar ham (pipeline catchUp)
+  catchUpDelayMs = 1500, // javob xabari («✅ Tayyor!») oldin borsin
 }) {
   const bot = new Bot(token, botInfo ? { botInfo } : undefined);
   const mediaDirFile = (post) => mediaFileOf(post, ...(mediaDir ? [mediaDir] : []));
@@ -614,9 +616,22 @@ export function createBot({
   // ms — qancha vaqt uzilib turadi (oldingi uzunroq muddat qisqartirilmaydi)
   const hold = (chatId, ms) => (busy.set(chatId, Math.max(busy.get(chatId) ?? 0, Date.now() + ms)), drain(chatId));
   const holdWindow = (chatId, kind) => (store.setHold?.(chatId, kind), drain(chatId));
+  // release — haydovchi e'lon olishni (qayta) boshlaydi: oxirgi catchUpMs dagi mos e'lonlar ham yuboriladi (main.js
+  // setCatchUp → pipeline catchUp). Biroz keyin — saqlash va javob xabari tugasin; pauza bosilgan bo'lsa catchUp o'zi qaytadi
+  let catchUpFn = null;
   const release = (chatId) => {
     busy.delete(chatId);
     store.clearHold?.(chatId);
+    if (!catchUpFn) return;
+    const since = Date.now() - catchUpMs;
+    const timer = setTimeout(() => {
+      try {
+        catchUpFn(chatId, since);
+      } catch (error) {
+        log(`${chatId}: oxirgi e'lonlar yuborilmadi — ${error.message}`);
+      }
+    }, catchUpDelayMs);
+    timer.unref?.();
   };
   function isBusy(chatId) {
     if (store.getDriver(chatId)?.hold) return true;
@@ -2045,5 +2060,6 @@ export function createBot({
   // directDone — yuk beruvchiga natija (main.js worker deps.onDirect)
   // Guruh bo'limlariga asl matn (pipeline.js quick chaqiradi; GROUP_LOADS bo'lmasa — null)
   const groupRaw = group ? (post, look) => group.pushRaw(post, look) : null;
-  return { bot, init, publish, deliver, deliverRaw, groupRaw, isBusy, canReceive, directDone, members, commands, notices, sources, group, holdReminder };
+  const setCatchUp = (fn) => (catchUpFn = fn);
+  return { bot, init, publish, deliver, deliverRaw, groupRaw, setCatchUp, isBusy, canReceive, directDone, members, commands, notices, sources, group, holdReminder };
 }

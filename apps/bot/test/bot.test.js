@@ -16,10 +16,10 @@ const CHANNEL = { id: -1009876543210, type: "channel", title: "Yuk Ekspert", use
 
 // fail(method, payload) → true (403 «bloklagan») yoki Telegram javobi obyekti (masalan 400) — shu so'rov xato bilan qaytadi
 // answer(method, payload) → Telegram javobidagi result (masalan getChatMember uchun { status }) yoki undefined — standart
-function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued, mediaDir } = {}) {
+function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued, mediaDir, catchUpDelayMs } = {}) {
   const store = openStore({ file: ":memory:" });
   const config = { channel: "@Yuk_Ekspert", channelId: CHANNEL.id, admins: [], miniappUrl: null, ...extra };
-  const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources, holdReminder } = createBot({
+  const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources, holdReminder, setCatchUp } = createBot({
     actionHoldMs,
     token: `123456:${"x".repeat(35)}`,
     store,
@@ -33,6 +33,7 @@ function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUr
     parseLoad,
     onLoadQueued,
     mediaDir,
+    catchUpDelayMs,
   });
   const calls = [];
   let messageId = 100;
@@ -55,7 +56,7 @@ function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUr
   const press = (data) =>
     send({ callback_query: { id: String(++updateId), from: USER, chat_instance: "x", data, message: { message_id: 101, date: 0, chat: PRIVATE, text: "..." } } });
   const webAppData = (data) => message(PRIVATE, undefined, { web_app_data: { data, button_text: MENU.settings } });
-  return { store, calls, send, message, command, press, webAppData, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources, holdReminder };
+  return { store, calls, send, message, command, press, webAppData, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources, holdReminder, setCatchUp };
 }
 
 const ROLE_QUESTION = /^Iltimos, tanlang/;
@@ -2059,4 +2060,19 @@ test("ovozli xabar / dumaloq video (2026-11-20): asl fayl + ostida matn bitta xa
   writeFileSync(join(dir, mediaFileName("@yuk_guruh", 8, "voice")), "OGG");
   await deliverRaw(42, { ...voice, id: 93, messageId: 8, text: "Farg'onadan Toshkentga yuk bor ".repeat(80) }, { phones: [] });
   assert.ok(calls.filter((c) => c.method === "sendVoice").at(-1).payload.caption.length <= 1024);
+});
+
+test("e'lon olish boshlanganda (✅ Tayyor / ▶️) — oxirgi 2 daqiqa uchun catchUp chaqiriladi", async () => {
+  const { store, press, message, setCatchUp } = setup({ catchUpDelayMs: 0 });
+  const calls = [];
+  setCatchUp((chatId, since) => calls.push([chatId, Math.round((Date.now() - since) / 1000)]));
+  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
+  await message(PRIVATE, MENU.feed);
+  await press("fm:done");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(calls.at(-1), [42, 120]);
+  await message(PRIVATE, MENU.pause);
+  await message(PRIVATE, MENU.resume);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(calls.length >= 2, "▶️ dan keyin ham");
 });

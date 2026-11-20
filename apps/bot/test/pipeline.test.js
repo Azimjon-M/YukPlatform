@@ -1101,3 +1101,30 @@ test("guruh e'lonlari AI'siz (groupAi: false): qoidalar tushunsa — yuk saqlana
   assert.equal(store.takeNewPosts().length, 0, "navbatda hech narsa qolmadi");
   assert.equal(aiCalls, 0, "AI chaqirilmadi");
 });
+
+test("catchUp (2026-11-20): e'lon olishni boshlagan haydovchiga oxirgi daqiqalardagi mos e'lonlar — eng yangisidan, limit bilan; olganini takrorlamaydi; pauzada — yo'q", async () => {
+  const { store, deps, raw, post } = rawSetup();
+  deps.pool = noAi;
+  deps.sortingOff = true;
+  const now = Date.now();
+  store.saveDriver(7, { role: "haydovchi", profile: TEZKOR, active: true });
+  post("@g", 1, LOAD_TEXT, now - 30_000);
+  post("@g", 2, LOAD_TEXT.replace("0001", "0002"), now - 60_000);
+  post("@g", 3, LOAD_TEXT.replace("0001", "0003"), now - 10 * 60_000); // oynadan tashqari
+  post("@g", 4, CHAT_TEXT, now - 20_000); // quruq gap
+  const closeAll = () => store.listPosts().items.forEach((p) => p.status === "new" && store.finishPost(p.id, "done", null, "fast")); // allaqachon yopilgan (oddiy yo'l o'tib bo'lgan)
+  closeAll();
+  const worker = createWorker(deps, { log: () => {} });
+  store.addPostDelivery({ postId: store.listPosts().items.find((p) => p.messageId === 2).id, chatId: 7, ok: true }); // allaqachon olgan
+  assert.equal(worker.catchUp(7, now - 2 * 60_000), 1);
+  await worker.runOnce();
+  assert.deepEqual(raw.filter(([c]) => c === 7).map(([, id]) => id), [1]);
+  // Limit va tartib: eng yangisi birinchi
+  for (let i = 0; i < 12; i++) post("@g", 100 + i, LOAD_TEXT.replace("0001", String(1000 + i).padStart(4, "0")), now - 50_000 + i * 1000);
+  closeAll();
+  assert.equal(worker.catchUp(7, now - 2 * 60_000, { limit: 3 }), 3);
+  await worker.runOnce();
+  assert.deepEqual(raw.filter(([c]) => c === 7).map(([, id]) => id).slice(1), [111, 110, 109]);
+  store.saveDriver(7, { active: false });
+  assert.equal(worker.catchUp(7, now - 2 * 60_000), 0, "pauzada — hech narsa");
+});
