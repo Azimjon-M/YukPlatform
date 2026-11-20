@@ -78,6 +78,9 @@ export function createMediaQueue({
   limits = MEDIA_LIMITS,
   transcribe = transcribeWithGemini,
   models = [], // faqat o'girish uchun Gemini modellari (accounts.js: .env MEDIA_MODELS yoki TRANSCRIBE_MODELS)
+  // Ochiq guruh ovozli xabari faqat shu ro'yxatdagilardan (store.voiceSourceNames — boshqaruv markazida yoqilgan);
+  // yopiq guruh ("-100…") — doim. Berilmasa (testlar, eski chaqiruv) — hammasi
+  voiceSources = null,
   mediaDir = null, // asl fayl shu papkaga (@yuk/store MEDIA_DIR; accounts.js beradi) — bot haydovchiga uni matni bilan yuboradi
   mediaKeepMs = 24 * 60 * 60_000, // shundan eski fayllar o'chiriladi
   compare = false, // .env MEDIA_COMPARE=1 — Telegram o'girgan xabarni Gemini ham o'giradi, ikkalasi logga (sifatni solishtirish)
@@ -104,6 +107,22 @@ export function createMediaQueue({
       log(`${job.label}: Telegram ham matnga o'gira olmadi (${text})`);
       return null;
     }
+  }
+
+  // Ochiq guruh — boshqaruv markazida «🎤 Ovozli xabarlar» yoqilgan bo'lsagina (ro'yxat 30 s da bir qayta o'qiladi)
+  let voiceSet = null;
+  let voiceAt = -Infinity;
+  function voiceAllowed(label) {
+    if (!voiceSources || /^-\d+$/.test(label)) return true;
+    if (now() - voiceAt > 30_000) {
+      try {
+        voiceSet = voiceSources();
+      } catch {
+        voiceSet ??= new Set();
+      }
+      voiceAt = now();
+    }
+    return voiceSet.has(String(label).toLowerCase());
   }
 
   // Asl fayl → mediaDir/<manba>_<xabar id>.<ogg|mp4> (@yuk/store mediaFileName — bot ham shu nom bilan topadi).
@@ -283,6 +302,10 @@ export function createMediaQueue({
     push({ source, label, link = null, message, via = null, dedupeWindowMs }) {
       const key = `${label}:${message.id}`;
       if (seen.has(key)) return false;
+      if (!voiceAllowed(label)) {
+        stats.notAllowed = (stats.notAllowed ?? 0) + 1;
+        return false;
+      }
       seen.add(key);
       if (seen.size > limits.seenMax) seen.delete(seen.values().next().value);
       const { duration = 0, size = 0 } = message.media;

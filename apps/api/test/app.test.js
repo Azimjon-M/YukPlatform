@@ -108,6 +108,12 @@ test("manbalar: qo'shish, takror, o'chirib-yoqish, o'chirish", async () => {
   assert.equal((await send("PATCH", `/api/sources/${name}`, { enabled: false })).status, 200);
   const items = (await get("/api/sources")).body.items;
   assert.deepEqual(items.map((s) => [s.name, s.enabled, s.stats.posts]), [["@yangi_guruh", false, 0]]);
+  // Ovozli xabarlar (2026-11-20): ochiq guruhda standart o'chiq, admin yoqadi; yopiq guruhga — 409
+  assert.equal(items[0].voice, false);
+  assert.equal((await send("PATCH", `/api/sources/${name}`, { voice: true })).status, 200);
+  assert.equal((await get("/api/sources")).body.items[0].voice, true);
+  assert.equal((await send("PATCH", `/api/sources/${name}`, {})).status, 400);
+  assert.equal((await send("PATCH", `/api/sources/${encodeURIComponent("-1001234")}`, { voice: true })).status, 409);
   assert.equal((await send("DELETE", `/api/sources/${name}`)).status, 200);
   assert.equal((await send("DELETE", `/api/sources/${name}`)).status, 404);
 });

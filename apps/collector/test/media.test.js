@@ -15,7 +15,7 @@ const voice = (id, extra = {}) => {
 };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
-function setup({ premium = true, telegram = async () => LOAD_TEXT, gemini = async () => ({ text: LOAD_TEXT }), connections = [{ provider: "gemini", apiKey: "k", model: "m" }], models, clock, mediaDir } = {}) {
+function setup({ premium = true, telegram = async () => LOAD_TEXT, gemini = async () => ({ text: LOAD_TEXT }), connections = [{ provider: "gemini", apiKey: "k", model: "m" }], models, clock, mediaDir, voiceSources } = {}) {
   const store = openStore({ file: ":memory:", now: () => NOW });
   const calls = { telegram: 0, download: 0, gemini: [] };
   const reader = {
@@ -32,6 +32,7 @@ function setup({ premium = true, telegram = async () => LOAD_TEXT, gemini = asyn
     now: clock ?? (() => NOW),
     ...(models ? { models } : {}),
     ...(mediaDir ? { mediaDir } : {}),
+    ...(voiceSources ? { voiceSources } : {}),
     transcribe: async (args) => (calls.gemini.push(args.model), gemini(args)),
   });
   return { store, reader, calls, logs };
@@ -252,4 +253,16 @@ test("asl fayl mediaDir'ga navbatga yozishdan oldin saqlanadi (bot shu nom bilan
   assert.ok(existsSync(file));
   assert.equal(readFileSync(file, "utf8"), "ogg");
   assert.equal(calls.download, 1, "Gemini uchun ham, saqlash uchun ham — bitta yuklab olish");
+});
+
+test("ovozli xabar faqat yopiq guruhdan va admin yoqqan ochiq guruhdan tekshiriladi (AI limiti behuda ketmasin)", async () => {
+  const CLOSED = { kind: "id", value: "-1001234567890" };
+  const allowed = new Set(["@yuk_guruh"]);
+  const { store, reader, calls } = setup({ voiceSources: () => allowed });
+  assert.equal(addMessage({ kind: "username", value: "begona" }, voice(1), store, { via: "live", media: reader.media }), "short", "yoqilmagan ochiq guruh — tekshirilmaydi");
+  assert.equal(addMessage(SOURCE, voice(2, { sender: "a" }), store, { via: "live", media: reader.media }), "media", "yoqilgan ochiq guruh");
+  assert.equal(addMessage(CLOSED, voice(3, { sender: "b" }), store, { via: "live", media: reader.media }), "media", "yopiq — doim");
+  await settle();
+  assert.equal(calls.gemini.length, 2);
+  assert.equal(reader.media.stats().notAllowed, 1);
 });

@@ -185,7 +185,9 @@ function SourceRow({ source, account, now, onChanged }) {
   const notify = useToast();
   const [busy, setBusy] = useState(false);
   const [enabled, setEnabled] = useState(source.enabled);
+  const [voice, setVoice] = useState(Boolean(source.voice));
   const [confirming, setConfirming] = useState(false);
+  const open = source.name.startsWith("@");
   const s = source.stats;
 
   async function toggle(value) {
@@ -197,6 +199,22 @@ function SourceRow({ source, account, now, onChanged }) {
       onChanged();
     } catch (e) {
       setEnabled(!value);
+      notify(e.message, "critical");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Ovozli xabarlar (2026-11-20): ochiq guruhda faqat shu yoqilgan bo'lsa matnga o'giriladi — AI limiti behuda ketmasin
+  async function toggleVoice(value) {
+    setBusy(true);
+    setVoice(value);
+    try {
+      await patch(sourcePath(source.name), { voice: value });
+      notify(value ? "🎤 Bu guruhning ovozli xabarlari ham tekshiriladi" : "Bu guruhning ovozli xabarlari endi tekshirilmaydi");
+      onChanged();
+    } catch (e) {
+      setVoice(!value);
       notify(e.message, "critical");
     } finally {
       setBusy(false);
@@ -224,6 +242,7 @@ function SourceRow({ source, account, now, onChanged }) {
   const sub = [
     titled ? source.name : source.title,
     `24 s: ${formatNumber(s.posts)} e'lon · ${formatNumber(s.loads)} yuk`,
+    open && voice ? "🎤" : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -304,6 +323,11 @@ function SourceRow({ source, account, now, onChanged }) {
       </div>
       <div className="source-controls">
         <Toggle checked={enabled} onChange={toggle} busy={busy} label={enabled ? "Kuzatilyapti" : "O'chiq"} />
+        {open ? (
+          <Toggle checked={voice} onChange={toggleVoice} busy={busy} label={voice ? "🎤 Ovozli xabarlar tekshiriladi" : "🎤 Ovozli xabarlar: o'chiq"} />
+        ) : (
+          <span className="muted small">🎤 Yopiq guruh — ovozli xabarlar doim tekshiriladi</span>
+        )}
         {enabled && source.joinState !== undefined && !source.account && <JoinControl source={source} onChanged={onChanged} />}
         {confirming ? (
           <div className="confirm" role="group" aria-label="Olib tashlashni tasdiqlash">
@@ -337,6 +361,7 @@ const SOURCE_FILTERS = [
   { id: "on", label: "Kuzatilyapti", test: (s) => s.enabled },
   { id: "off", label: "O'chiq", test: (s) => !s.enabled },
   { id: "private", label: "Yopiq", test: (s) => !s.name.startsWith("@") },
+  { id: "voice", label: "🎤 Ovoz tekshiriladi", test: (s) => s.name.startsWith("@") && s.voice },
   { id: "users", label: "Foydalanuvchilarniki", test: (s) => s.addedBy != null },
   { id: "quiet", label: "24 soatda jim", test: (s) => s.enabled && !s.stats?.posts },
 ];

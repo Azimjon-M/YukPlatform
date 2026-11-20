@@ -245,6 +245,10 @@ function migrate(db) {
   // sender_phone (2026-11-20) — yopiq guruhda e'lon bergan odamning PROFIL raqami (Telegram'da hamma ko'radigan qilib
   // qo'ygan bo'lsa; matnda raqam bo'lmasa haydovchiga shu ko'rsatiladi). Faqat yopiq guruhlar uchun yoziladi (collector live.js)
   if (!columns.includes("sender_phone")) db.exec("ALTER TABLE posts ADD COLUMN sender_phone TEXT");
+  // sources.voice (2026-11-20, Azimjon: «audio va dumaloq video yuklarini faqat yopiq va dashboardda men tasdiqlagan
+  // guruhlardan chek qilsin! publik guruhlardan check qilsak AI token oqib ketadi»): 1 — ochiq guruhning ovozli xabarlari ham
+  // matnga o'giriladi (boshqaruv markazi «Manbalar» → «🎤 Ovozli xabarlar»). Yopiq guruhlar — doim, ustun ularga ta'sir qilmaydi
+  if (!db.prepare("PRAGMA table_info(sources)").all().some((c) => c.name === "voice")) db.exec("ALTER TABLE sources ADD COLUMN voice INTEGER");
   // Guruh bo'yicha «shu vaqtdan keyin» (trialStats — sinovdagi har guruh, bot har daqiqada va «Manbalar» sahifasi):
   // indekssiz guruhning hamma e'lonlari aylanardi (~700 ms × 12 guruh = 8 s, 2026-11-16) — indeks bilan ~1 ms.
   // Birinchi ishga tushishda ~2 s quriladi

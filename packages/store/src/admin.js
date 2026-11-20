@@ -332,6 +332,8 @@ export function createAdminQueries(db, now) {
           checkStats: parse(row.check_stats),
           // Qaysi Telegram akkaunti o'qiydi (tgAccounts.js): null — asosiy; nom — yopiq guruhga a'zo qo'shimcha akkaunt
           account: row.account ?? null,
+          // Ovozli xabar / dumaloq video matnga o'giriladimi: yopiq guruh — doim; ochiq — faqat admin yoqqan bo'lsa (sources.voice)
+          voice: !String(row.name).startsWith("@") || row.voice === 1,
         }));
     },
 
@@ -399,6 +401,16 @@ export function createAdminQueries(db, now) {
 
     setSourceEnabled(name, enabled) {
       return db.prepare("UPDATE sources SET enabled = ? WHERE name = ?").run(enabled ? 1 : 0, name).changes > 0;
+    },
+
+    // Ochiq guruhning ovozli xabarlarini tekshirish (yopiq guruhga ma'nosiz — ular doim tekshiriladi)
+    setSourceVoice(name, on) {
+      return db.prepare("UPDATE sources SET voice = ? WHERE name = ?").run(on ? 1 : 0, name).changes > 0;
+    },
+
+    // Collector media.js: ovozli xabari matnga o'giriladigan OCHIQ guruhlar ("@nom", kichik harfda)
+    voiceSourceNames() {
+      return new Set(db.prepare("SELECT name FROM sources WHERE voice = 1").all().map((r) => String(r.name).toLowerCase()));
     },
 
     removeSource(name) {

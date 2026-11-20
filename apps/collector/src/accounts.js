@@ -78,7 +78,7 @@ export async function runAccount({ name, client, telegram, store, me = null, sou
   // Ovozli xabar / dumaloq video → matn (Premium bo'lsa Telegram, bo'lmasa Gemini) → odatdagi navbat
   // MEDIA_MODELS — faqat o'girish uchun Gemini modellari (vergul bilan; bo'sh qoldirilsa @yuk/parser TRANSCRIBE_MODELS)
   const models = process.env.MEDIA_MODELS?.trim() ? process.env.MEDIA_MODELS.split(/[,\s]+/).filter(Boolean) : TRANSCRIBE_MODELS;
-  if (connections) reader.media = createMediaQueue({ reader, store, connections, log, now, models, compare: process.env.MEDIA_COMPARE === "1", mediaDir: process.env.MEDIA_DIR?.trim() || MEDIA_DIR });
+  if (connections) reader.media = createMediaQueue({ reader, store, connections, log, now, models, compare: process.env.MEDIA_COMPARE === "1", mediaDir: process.env.MEDIA_DIR?.trim() || MEDIA_DIR, voiceSources: store.voiceSourceNames ? () => store.voiceSourceNames() : null });
   await runLive({
     ...live,
     sources: readSources,

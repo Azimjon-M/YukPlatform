@@ -456,8 +456,15 @@ export function createApp({
     res.json({ ok: true });
   });
 
+  // { enabled } — kuzatish; { voice } — ochiq guruhning ovozli xabarlari matnga o'giriladimi (yopiq guruhga 409: u doim tekshiriladi)
   api.patch("/sources/:name", (req, res) => {
-    if (!store.setSourceEnabled(req.params.name, bool(req.body?.enabled, "enabled"))) throw httpError(404, "Manba topilmadi");
+    const body = req.body ?? {};
+    if (!("enabled" in body) && !("voice" in body)) throw httpError(400, "enabled yoki voice kerak");
+    if ("voice" in body) {
+      if (!String(req.params.name).startsWith("@")) throw httpError(409, "Yopiq guruhning ovozli xabarlari doim tekshiriladi");
+      if (!store.setSourceVoice(req.params.name, bool(body.voice, "voice"))) throw httpError(404, "Manba topilmadi");
+    }
+    if ("enabled" in body && !store.setSourceEnabled(req.params.name, bool(body.enabled, "enabled"))) throw httpError(404, "Manba topilmadi");
     res.json({ ok: true });
   });
 

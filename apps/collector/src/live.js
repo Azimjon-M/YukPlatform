@@ -754,7 +754,7 @@ export async function runLive({
       const done = media.telegram + media.gemini;
       parts.push(
         `🎤 ovozli/dumaloq: ${done} tasi matnga o'girildi (Telegram ${media.telegram}, Gemini ${media.gemini}` +
-          `${done ? `, o'rtacha ${(media.totalMs / done / 1000).toFixed(1)} s` : ""}), ${media.empty} tasida gap yo'q, ${media.failed} ta xato`,
+          `${done ? `, o'rtacha ${(media.totalMs / done / 1000).toFixed(1)} s` : ""}), ${media.empty} tasida gap yo'q, ${media.failed} ta xato${media.notAllowed ? `, ${media.notAllowed} tasi ochiq guruhdan — tekshirilmadi («🎤 Ovozli xabarlar» yoqilmagan)` : ""}`,
       );
     }
     log(parts.join("; "));
