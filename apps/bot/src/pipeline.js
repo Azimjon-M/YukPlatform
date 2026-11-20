@@ -312,11 +312,11 @@ export function createWorker(
   const rawUsers = () => (deps.deliverRaw ? store.activeUsers("haydovchi").filter((u) => fastAll || usesRawFeed(u.profile)) : []);
 
   // Bitta e'lon: kimga kerak (rejim + guruh) → yuk e'lonimi (AI'siz) → tezkor rejimda chet el emasmi → yuborish navbatiga
-  function fast(post, users) {
+  function fast(post, users, getLook = () => lookOf(post.text, { voice: Boolean(post.media) })) {
     if (!users.length || post.shipper != null || !(post.postedAt >= now() - rawMaxAgeMs) || (!fastAll && !contactOf(post))) return;
     // Filtr (2026-11-19, Azimjon): «quruq gap» — hech kimga (shart); «🚚 Transport» va «📍 Qayerdan» — haydovchi tanlagan
     // bo'lsa. Bitta qoidaviy tahlil (~3 ms, AI'siz); e'londa transport yoki joy topilmasa — o'sha filtrdan o'tadi
-    const look = lookOf(post.text, { voice: Boolean(post.media) });
+    const look = getLook();
     if (look.chatter) return;
     const wanted = users.filter((u) => wantedFn(u.profile, post.source) && filtersWanted(u.profile, look));
     if (!wanted.length) return;
@@ -386,6 +386,23 @@ export function createWorker(
   // AI hammasi dam olayotganda ham ishlaydi: kunlik limit tugasa ham oddiy yuklar haydovchilarga ketaveradi.
   let ruleCursor = 0;
   let ruleCount = 0;
+
+  // Guruh bo'limlariga asl matn (deps.groupRaw — bot.js groupTopics pushRaw; 2026-11-20, Azimjon: guruhga ham AI'siz).
+  // Ochiq guruh e'loni, 30 daqiqadan eski emas, «quruq gap» emas. Yopiq guruh — yo'q (u Pro uchun), yuk beruvchining yuki —
+  // handleParsed → publish orqali. Bot ishga tushishidan oldin navbatga tushganlari yuborilmaydi: guruhda «yuborildi»
+  // belgisi saqlanmaydi, qayta yonganda oxirgi daqiqalar ikkinchi marta chiqmasin
+  const startedAt = now();
+  function toGroup(post, getLook) {
+    if (!deps.groupRaw || post.shipper != null || isClosedSource(post.source)) return;
+    if (!((post.queuedAt ?? post.postedAt) >= startedAt) || !(post.postedAt >= now() - rawMaxAgeMs)) return;
+    const look = getLook();
+    if (look.chatter) return;
+    try {
+      deps.groupRaw(post, { trucks: look.trucks ?? [], phones: extractPhones(post.text) });
+    } catch (error) {
+      log(`#${post.id}: guruhga navbatga qo'yilmadi — ${error.message}`);
+    }
+  }
   // Aloqasiz e'lonlar ham shu yerda (qoidaviy parserdan oldin) yopiladi.
   function quick() {
     let handled = 0;
@@ -406,11 +423,15 @@ export function createWorker(
           continue;
         }
         if (maxAgeMs > 0 && post.postedAt < now() - maxAgeMs) continue; // eskirgan — expire() yopadi
+        // Bitta e'longa fastLook bir marta (tezkor yo'l ham, guruh ham ishlatadi)
+        let look = null;
+        const getLook = () => (look ??= lookOf(post.text, { voice: Boolean(post.media) }));
+        toGroup(post, getLook);
         // Saralash o'chiq — aloqasiz e'lon ham haydovchiga ketadi (keyin AI'ga bormasdan yopiladi)
-        if (fastAll) fast(post, users);
+        if (fastAll) fast(post, users, getLook);
         if (contactless(post)) continue;
         // Tezkor rejimdagilarga asl matn — AI'ni ham, qoidaviy parserni ham kutmasdan (e'lon o'zi navbatda qoladi)
-        if (!fastAll) fast(post, users);
+        if (!fastAll) fast(post, users, getLook);
         if (!deps.rules) continue; // aloqasi bor — AI kutadi
         let result = null;
         try {

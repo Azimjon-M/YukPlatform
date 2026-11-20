@@ -240,9 +240,19 @@ export async function runLive({
     paceChain = turn.catch(() => {});
     return turn;
   }
+  // → false (FLOOD emas) | "resolve" (faqat manzil so'rash cheklangan — boshqa so'rovlar davom etadi) | true (hammasi to'xtaydi)
+  let resolveUntil = -Infinity;
   function handleFlood(error) {
     const seconds = floodSeconds(error);
     if (seconds == null) return false;
+    if (error?.resolveFlood) {
+      const until = now() + seconds * 1000;
+      if (until - resolveUntil > MINUTE) {
+        log(`Telegram guruh manzilini so'rashni chekladi (FLOOD_WAIT ${seconds} s): a'zo bo'lmagan guruhlar ${durationText(seconds * 1000)} dan keyin o'qiladi, qolganlari davom etadi`);
+      }
+      resolveUntil = until;
+      return "resolve";
+    }
     pauseUntil = now() + seconds * 1000;
     slowUntil = now() + HOUR;
     ratesAt = -Infinity; // oraliqlar qayta hisoblansin
@@ -680,7 +690,9 @@ export async function runLive({
       else if (c.added || c.duplicate) log(`${label}: +${c.added} yangi e'lon${c.duplicate ? `, ${c.duplicate} takror` : ""}`);
     } catch (error) {
       s.lastPoll = now();
-      if (handleFlood(error)) return;
+      const flood = handleFlood(error);
+      if (flood === "resolve") s.retryAt = resolveUntil; // faqat shu guruh kutadi
+      if (flood) return;
       // Bitta guruh xatosi (yopilgan, nomi o'zgargan) boshqalarini to'xtatmaydi; takrorlansa — tobora siyrakroq urinadi
       // (Telegram topilmagan nomni qayta-qayta qidirishni yoqtirmaydi)
       s.errors++;

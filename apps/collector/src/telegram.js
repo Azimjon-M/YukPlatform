@@ -379,9 +379,32 @@ export function createReader(client) {
   const freshStats = () => ({ updates: 0, messages: 0, matched: 0, types: {}, bySource: {} });
   let premium;
   const stats = freshStats();
+  // Manzil so'rash (resolveUsername) uchun FLOOD_WAIT (2026-11-20): Telegram aynan shu so'rovni soatlab cheklaydi — a'zo
+  // bo'lmagan guruhning @nomini har qayta yoqilishda qayta so'raymiz (a'zolari dialoglar ro'yxatidan keladi). O'sha kuni
+  // uchta restart 08:08 da ~4 soatlik cheklov oldi va collector HAMMA so'rovni to'xtatib qo'ydi — a'zo guruhlar ham
+  // o'qilmadi. Endi muddat shu yerda eslab qolinadi: shu vaqtgacha yangi manzil Telegram'ga so'ralmaydi (xato darhol,
+  // error.resolveFlood bilan), live.js esa faqat o'sha guruhni keyinga suradi
+  let resolveBlockedUntil = 0;
+  // GramJS FloodWaitError: { errorMessage: "FLOOD", seconds } (live.js floodSeconds bilan bir xil o'qiladi)
+  const floodOf = (error) =>
+    Number.isFinite(error?.seconds) && /FLOOD/.test(error?.errorMessage ?? "")
+      ? error.seconds
+      : Number(/FLOOD_WAIT_(\d+)/.exec(error?.errorMessage ?? error?.message ?? "")?.[1] ?? NaN);
   async function entityOf(source) {
     if (!entities.has(source.value)) {
-      const entity = await resolveEntity(client, source);
+      const left = Math.ceil((resolveBlockedUntil - Date.now()) / 1000);
+      if (left > 0) throw Object.assign(new Error(`FLOOD_WAIT_${left}`), { errorMessage: `FLOOD_WAIT_${left}`, resolveFlood: true });
+      let entity;
+      try {
+        entity = await resolveEntity(client, source);
+      } catch (error) {
+        const seconds = floodOf(error);
+        if (Number.isFinite(seconds)) {
+          resolveBlockedUntil = Date.now() + seconds * 1000;
+          error.resolveFlood = true;
+        }
+        throw error;
+      }
       entities.set(source.value, entity);
       byPeer.set(utils.getPeerId(entity), source);
     }

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "@yuk/store";
 import { TRUCK_CLASS_IDS } from "@yuk/shared";
-import { GROUP_TOPICS, createGroupPoster, topicFor } from "../src/groupTopics.js";
+import { GROUP_TOPICS, createGroupPoster, topicFor, topicForTrucks } from "../src/groupTopics.js";
 
 const LOAD = { fromCity: "Toshkent", toCity: "Samarqand", weightT: 20, phones: ["+998900000001"] };
 const POST = { source: "@yuk_guruh", link: "https://t.me/yuk_guruh/5", postedAt: Date.now() };
@@ -66,15 +66,15 @@ test("start bo'limlarni bir marta ochadi, id'lar bazada saqlanadi", async () => 
   assert.equal(other.calls.length, GROUP_TOPICS.length);
 });
 
-test("yuk mos bo'limga tugmalar bilan boradi; navbat bittadan yuboriladi", async () => {
+test("yuk mos bo'limga tugmalar bilan boradi; navbat bittadan, eng yangisi birinchi", async () => {
   const store = openStore({ file: ":memory:" });
   const api = fakeApi();
   const poster = createGroupPoster({ api, store, chat: "@guruh", botUsername: () => "Yuk_Ekspert_agent", log: () => {} });
   await poster.start();
   poster.stop();
   const { topics } = poster.stats();
-  poster.push({ ...LOAD, truckClass: "isuzu" }, POST);
   poster.push({ ...LOAD, truckClass: null }, POST);
+  poster.push({ ...LOAD, truckClass: "isuzu" }, POST);
   assert.equal(poster.stats().queued, 2);
   await poster.tick();
   const first = api.calls.filter((c) => c.method === "sendMessage");
@@ -124,4 +124,28 @@ test("navbatda uzoq turgan yuk tashlanadi, navbat chegarasi bor", async () => {
   for (let i = 0; i < 5; i++) poster.push(LOAD, POST);
   assert.equal(poster.stats().queued, 3);
   assert.equal(poster.stats().dropped, 3);
+});
+
+test("asl matn (AI'siz): bo'lim AI'siz topilgan mashina turidan, matn o'zgarmaydi, 📞 va tugmalar bor", async () => {
+  assert.equal(topicForTrucks(["isuzu"]), "isuzu");
+  assert.equal(topicForTrucks(["fura", "katta_fura"]), "fura");
+  assert.equal(topicForTrucks(["fura", "labo"]), "boshqa");
+  assert.equal(topicForTrucks([]), "boshqa");
+  const store = openStore({ file: ":memory:" });
+  const api = fakeApi();
+  const poster = createGroupPoster({ api, store, chat: "@guruh", botUsername: () => "Yuk_Ekspert_agent", log: () => {} });
+  await poster.start();
+  poster.stop();
+  const text = "Toshkentdan Samarqandga 20 tonna un bor, isuzu kerak 90 000 00 01 <b>";
+  poster.pushRaw({ ...POST, text }, { trucks: ["isuzu"], phones: ["+998900000001"] });
+  await poster.tick();
+  const [sent] = api.calls.filter((c) => c.method === "sendMessage");
+  assert.equal(sent.options.message_thread_id, poster.stats().topics.isuzu);
+  assert.ok(sent.text.startsWith("Toshkentdan Samarqandga 20 tonna un bor, isuzu kerak 90 000 00 01 &lt;b&gt;"));
+  assert.match(sent.text, /📞 \+998900000001/);
+  assert.match(sent.text, /⚡ Yangi e'lon/);
+  assert.deepEqual(sent.options.reply_markup.inline_keyboard.flat().map((b) => b.url), [
+    "https://t.me/yuk_guruh/5",
+    "https://t.me/Yuk_Ekspert_agent?start=guruh",
+  ]);
 });

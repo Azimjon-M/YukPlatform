@@ -1044,3 +1044,21 @@ test("tezkor navbat (2026-11-19 tiket): navbatda turganda pauza bosilsa — qolg
   // Boshqa haydovchining 3 ta e'loni sekin chatni kutmagan
   assert.ok(Math.max(...sent.filter(([c]) => c === 1).map(([, , t]) => t)) - started < 50, "1-haydovchi 7-ni kutmadi");
 });
+
+test("guruh bo'limlariga asl matn (AI'siz): ochiq guruh e'loni — ha; yopiq guruh, quruq gap, eski, bot yoqilishidan oldingisi — yo'q", async () => {
+  const { deps, post } = rawSetup();
+  deps.pool = noAi;
+  const group = [];
+  deps.groupRaw = (p, look) => group.push([p.messageId, look.phones]);
+  post("@g", 1, LOAD_TEXT); // bot yoqilishidan oldin navbatga tushgan — qayta yonganda ikkinchi marta chiqmasin
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+  await tick();
+  const worker = createWorker(deps, { log: () => {} });
+  await tick();
+  post("@g", 2, LOAD_TEXT.replace("0001", "0002"));
+  post("-1001234567890", 3, LOAD_TEXT.replace("0001", "0003")); // yopiq guruh — Pro uchun
+  post("@g", 4, CHAT_TEXT);
+  post("@g", 5, LOAD_TEXT.replace("0001", "0005"), Date.now() - 40 * 60_000);
+  await worker.runOnce();
+  assert.deepEqual(group, [[2, ["+998900000002"]]]);
+});

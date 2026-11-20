@@ -331,6 +331,30 @@ test("FLOOD_WAIT: Telegram aytgan vaqtgacha hech narsa so'ralmaydi", async () =>
   assert.ok(tg.pollTimes.some((t) => t >= floodAt + 30_000), "keyin davom etadi");
 });
 
+test("manzil so'rash FLOOD'i (resolveFlood): faqat o'sha guruh kutadi, a'zo guruh o'qilaveradi", async () => {
+  const { clock, store } = setup(["azo", "begona"]);
+  const tg = fakeTelegram(clock, { azo: 0, begona: 0 });
+  let tries = 0;
+  const reader = {
+    ...pollOnly(tg),
+    latestId: async (source) => {
+      if (source.value !== "begona") return tg.latestId(source);
+      tries++;
+      throw Object.assign(new Error("FLOOD_WAIT_600"), { errorMessage: "FLOOD_WAIT_600", resolveFlood: true });
+    },
+    since: async (source, ...rest) => {
+      if (source.value !== "begona") return tg.since(source, ...rest);
+      tries++;
+      throw Object.assign(new Error("FLOOD_WAIT_600"), { errorMessage: "FLOOD_WAIT_600", resolveFlood: true });
+    },
+  };
+  const logs = await simulate({ clock, minutes: 5, sources: [S("azo"), S("begona")], reader, store });
+  assert.ok(logs.some((l) => l.includes("guruh manzilini so'rashni chekladi (FLOOD_WAIT 600 s)")));
+  assert.ok(!logs.some((l) => l.includes("«sekinroq» dedi")), "hamma so'rov to'xtamadi");
+  assert.ok(tg.polls.azo >= 4, "a'zo guruh o'qilaveradi");
+  assert.equal(tries, 1, "begona guruh 10 daqiqa qayta so'ralmaydi");
+});
+
 test("topilmagan guruh tobora siyrakroq so'raladi, boshqalar ishlayveradi", async () => {
   const { clock, store } = setup(["yoq", "bor"]);
   store.db.prepare("DELETE FROM cursors WHERE source = '@yoq'").run();

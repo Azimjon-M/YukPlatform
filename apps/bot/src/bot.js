@@ -1851,7 +1851,8 @@ export function createBot({
     : null;
 
   async function publish(load, post) {
-    group?.push(load, post);
+    // Guruh bo'limlariga AI ko'rinishi faqat yuk beruvchining o'z yukiga; guruh e'lonlari asl matn bilan (groupRaw) ketadi
+    if (post.shipper != null) group?.push(load, post);
     if (!config.channel || !config.channelLoads) return null;
     const { text, url } = formatLoad(load, post);
     const keyboard = new InlineKeyboard();
@@ -1999,5 +2000,7 @@ export function createBot({
   // notices — server (apps/api) qo'ygan topshiriqlar (xaritada yo'nalish tanlandi): main.js notices.start()
   // sources — foydalanuvchi qo'shgan guruhlar kuzatuvchisi: main.js sources.start()
   // directDone — yuk beruvchiga natija (main.js worker deps.onDirect)
-  return { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, members, commands, notices, sources, group, holdReminder };
+  // Guruh bo'limlariga asl matn (pipeline.js quick chaqiradi; GROUP_LOADS bo'lmasa — null)
+  const groupRaw = group ? (post, look) => group.pushRaw(post, look) : null;
+  return { bot, init, publish, deliver, deliverRaw, groupRaw, isBusy, canReceive, directDone, members, commands, notices, sources, group, holdReminder };
 }
