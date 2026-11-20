@@ -209,6 +209,8 @@ export async function runLive({
   scanGapMs = 30_000,
   scanWaitMs = 0, // Auto scan oldidan guruhlar ro'yxati yangilanishini shuncha kutadi (accounts.js beradi — u ro'yxatni yangilaydi)
   scanExclude = [],
+  // Tasdiqlangan guruhga qo'shilish (2026-11-20): shu akkaunt nomi (accounts.js beradi — .env TG_READERS dagilar); null — o'chiq
+  readerJoins = null,
   // Har aylanish boshida chaqiriladi (accounts.js: guruhlar ro'yxatini vaqti-vaqti bilan yangilash). Xatosi — o'zida
   tick = null,
   emptyText = "Kuzatiladigan guruh yo'q: boshqaruv markazining «Manbalar» bo'limidan qo'shing.",
@@ -437,6 +439,46 @@ export async function runLive({
     store.setSourceMembership?.(label, true);
     const muted = await mute(source);
     log(`${label}: akkaunt guruhga qo'shildi${muted ? ", bildirishnomasi o'chirildi" : ""}${tail}`);
+  }
+
+  // --- Tasdiqlangan guruhga qo'shilish (2026-11-20, Azimjon: «haydovchi guruh qo'shish qilinganida o'sha guruh tasdiqlansa
+  // anashu asosiy accountlarni qo'shib qo'y o'sha guruhga. shunday qilib baribir a'zo qilib o'zi keladi») ---
+  // Foydalanuvchi qo'shgan / Auto scan topgan ochiq guruh 24 soatlik sinovdan o'tdi (check_state ok) — .env TG_READERS dagi
+  // har akkaunt unga bir marta qo'shiladi (store readerJoinCandidates; reader_joins jadvali). A'zo bo'lgach accounts.js
+  // accountSources uni a'zo akkauntga beradi: yangi xabari «yangisi bormi» so'rovida keladi, manzil so'ralmaydi.
+  // «A'zo bo'lish» navbati bilan bir xil ehtiyot: joinGapMs (5 daq) da bittadan, 24 soatda joinsPerDay (15) tadan ko'p emas
+  let nextReaderJoinAt = now() + 2 * MINUTE;
+  async function readerJoinNext() {
+    nextReaderJoinAt = now() + joinGapMs;
+    if (!store.readerJoinCandidates || !reader.join || joinsStopped || now() < pauseUntil) return;
+    const [row] = store.readerJoinCandidates(readerJoins, { limit: 1 });
+    if (!row) return;
+    if (store.readerJoinsSince(readerJoins, now() - DAY) >= joinsPerDay) {
+      nextReaderJoinAt = now() + 30 * MINUTE;
+      return;
+    }
+    const source = { kind: "username", value: row.name.replace(/^@/, "") };
+    await pace();
+    if (signal?.aborted) return;
+    try {
+      const result = await call(reader.join(source));
+      ok();
+      store.finishReaderJoin(row.name, readerJoins, { state: result === "requested" ? "requested" : "joined" });
+      store.requestDialogsRefresh?.(); // a'zolik tg_dialogs ga tushsin — guruh shu akkauntga o'tadi
+      const muted = result === "requested" ? false : await mute(source);
+      log(`${row.name}: tasdiqlangan guruh — akkaunt ${result === "requested" ? "a'zolik so'rovini yubordi (admin tasdiqlaydi)" : `qo'shildi${muted ? ", bildirishnomasi o'chirildi" : ""}`}`);
+    } catch (error) {
+      const seconds = floodSeconds(error);
+      if (seconds != null) {
+        nextReaderJoinAt = now() + seconds * 1000 + joinGapMs;
+        log(`Tasdiqlangan guruhga qo'shilish: Telegram vaqtincha chekladi (FLOOD_WAIT ${seconds} s)`);
+        return;
+      }
+      const code = errorText(error);
+      if (/CHANNELS_TOO_MUCH/.test(code)) joinsStopped = true;
+      store.finishReaderJoin(row.name, readerJoins, { state: "error", error: code });
+      log(`${row.name}: tasdiqlangan guruhga qo'shilib bo'lmadi — ${code}`);
+    }
   }
 
   // --- Foydalanuvchi qo'shgan guruh (probe.js; bot havolani qabul qilib, «probe» holatida qo'ygan) ---
@@ -837,6 +879,7 @@ export async function runLive({
         }
       }
       if (joins && reader.join && store.setJoinState && !joinsStopped && now() >= nextJoinAt && !signal?.aborted) await joinNext(list);
+      if (readerJoins && now() >= nextReaderJoinAt && !signal?.aborted) await readerJoinNext();
       report(list);
       if (signal?.aborted) break;
 

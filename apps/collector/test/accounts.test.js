@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "@yuk/store";
-import { accountSources, runAccount, sessionGone, superviseAccounts } from "../src/accounts.js";
+import { accountSources, readerAccounts, runAccount, sessionGone, superviseAccounts } from "../src/accounts.js";
 
 const MIN = 60_000;
 const long = (s) => `${s} — Toshkentdan Samarqandga 20 t tent kerak, +998 90 123 45 67`;
@@ -267,4 +267,54 @@ test("supervisor: sessiya fayli o'chirilsa — akkaunt to'xtaydi; collector o'ch
   assert.deepEqual([account(store, "ikkinchi").status, tg.disconnects], ["logged_out", ["ikkinchi"]]);
   controller.abort();
   await time.drain(run);
+});
+
+// --- O'quvchi akkauntlar (2026-11-20): ochiq guruhni a'zo akkaunt o'qiydi, tasdiqlangan guruhga qo'shiladi ---
+test("TG_READERS: asosiy doim birinchi; ochiq guruhni birinchi a'zo va ishlab turgan o'quvchi o'qiydi, hech kim a'zo emas — asosiy", () => {
+  assert.deepEqual(readerAccounts({ TG_READERS: "sarvar" }), ["asosiy", "sarvar"]);
+  assert.deepEqual(readerAccounts({}), ["asosiy"]);
+  const store = openStore({ file: ":memory:" });
+  for (const name of ["@Ikkalasi", "@Sarvarda", "@Hechkim", "@Uchinchida"]) store.addSource(name);
+  store.addSource("-1009", { account: "sarvar" });
+  store.saveTgAccount("sarvar", { userId: "2", status: "ok" });
+  store.saveTgAccount("boshqa", { userId: "3", status: "ok" });
+  store.setTgDialogs("asosiy", [{ id: "-1001", title: "A", username: "ikkalasi", type: "guruh" }]);
+  store.setTgDialogs("sarvar", [
+    { id: "-1001", title: "A", username: "Ikkalasi", type: "guruh" },
+    { id: "-1002", title: "B", username: "sarvarda", type: "guruh" },
+    { id: "-1009", title: "Yopiq", username: null, type: "guruh" },
+  ]);
+  // «boshqa» — haydovchining akkaunti, TG_READERS da yo'q: ochiq guruhlarni o'qimaydi
+  store.setTgDialogs("boshqa", [{ id: "-1004", title: "D", username: "uchinchida", type: "guruh" }]);
+  const readers = ["asosiy", "sarvar"];
+  const names = (account) => accountSources(store, account, { readers })().map((s) => s.value);
+  assert.deepEqual(names("asosiy").sort(), ["Hechkim", "Ikkalasi", "Uchinchida"]);
+  assert.deepEqual(names("sarvar").sort(), ["-1009", "Sarvarda"]);
+  assert.deepEqual(names("boshqa"), []);
+  // Sarvar ishlamay qolsa — uning ochiq guruhi asosiyga qaytadi (yopig'i — o'zida, boshqa hech kim o'qiy olmaydi)
+  store.saveTgAccount("sarvar", { userId: "2", status: "error" });
+  assert.deepEqual(names("asosiy").sort(), ["Hechkim", "Ikkalasi", "Sarvarda", "Uchinchida"]);
+  assert.deepEqual(names("sarvar"), ["-1009"]);
+  // TG_READERS faqat asosiy — avvalgidek: hamma ochiq guruh asosiyda
+  assert.equal(accountSources(store, "asosiy", { readers: ["asosiy"] })().length, 4);
+  store.close();
+});
+
+test("tasdiqlangan guruhga qo'shilish navbati: faqat sinovdan o'tgan, yangi tasdiqlangan, a'zo bo'lmagan; har akkaunt bir marta", () => {
+  const clock = { t: 1_000_000 };
+  const store = openStore({ file: ":memory:", now: () => clock.t });
+  assert.deepEqual(store.readerJoinCandidates("asosiy"), [], "birinchi chaqiruv — boshlanish vaqti yoziladi");
+  clock.t += 1000;
+  // Haydovchining akkauntidan topilgan guruh (Auto scan) → 24 soatlik sinov → tasdiqlandi
+  store.addScannedSource({ name: "@Yangi_yuk", addedBy: 5 });
+  assert.deepEqual(store.readerJoinCandidates("asosiy"), [], "sinovda — hali emas");
+  store.finishTrial("@Yangi_yuk", { ok: true });
+  assert.deepEqual(store.readerJoinCandidates("asosiy").map((r) => r.name), ["@Yangi_yuk"]);
+  // Sarvar allaqachon a'zo — unga kerak emas
+  store.setTgDialogs("sarvar", [{ id: "-1001", title: "Y", username: "yangi_yuk", type: "guruh" }]);
+  assert.deepEqual(store.readerJoinCandidates("sarvar"), []);
+  store.finishReaderJoin("@Yangi_yuk", "asosiy", { state: "joined" });
+  assert.deepEqual(store.readerJoinCandidates("asosiy"), [], "bir marta");
+  assert.equal(store.readerJoinsSince("asosiy", 0), 1);
+  store.close();
 });

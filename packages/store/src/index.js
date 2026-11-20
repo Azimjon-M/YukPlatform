@@ -190,6 +190,17 @@ CREATE TABLE IF NOT EXISTS dialog_scans (
   stats TEXT,                        -- JSON (probe.js judgeProbe stats)
   at INTEGER NOT NULL
 );
+-- Tasdiqlangan guruhga o'quvchi akkauntlar (.env TG_READERS) qo'shilishi (2026-11-20, Azimjon: «haydovchi guruh qo'shish
+-- qilinganida o'sha guruh tasdiqlansa anashu asosiy accountlarni qo'shib qo'y»): a'zo akkaunt guruhni «yangisi bormi»
+-- so'rovi bilan bir necha soniyada o'qiydi. Har (guruh, akkaunt) — bir marta
+CREATE TABLE IF NOT EXISTS reader_joins (
+  name TEXT NOT NULL,                -- @guruh
+  account TEXT NOT NULL,             -- tg_accounts.name
+  state TEXT NOT NULL,               -- joined | requested (admin tasdiqlaydi) | error
+  error TEXT,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (name, account)
+);
 -- Yopiq guruhning taklif havolasi (t.me/+…) «➕ Guruh qo'shish» da (2026-11-13): qaysi guruh ekanini faqat Telegram
 -- akkaunti bila oladi (messages.checkChatInvite). Bot so'rovni yozadi, collector foydalanuvchi ulagan akkaunt(lar)i bilan
 -- tekshiradi, natijani bot o'qib, qo'shadi va javob yozadi

@@ -320,16 +320,42 @@ export async function searchPublicChats(client, query, { limit = 50 } = {}) {
 // (akkaunt guruhlarini avtomatik tekshirish yuzlab id so'raydi — har biriga butun ro'yxatni qayta varaqlamaymiz);
 // topilmasa — ko'pi bilan DIALOGS_TTL_MS da bir marta qayta o'qiladi (yangi qo'shilgan guruh)
 const DIALOGS_TTL_MS = 10 * 60_000;
-const dialogCache = new WeakMap(); // client → { at, byId: Map("-100…" → entity) }
+const dialogCache = new WeakMap(); // client → { at, byId: Map("-100…" → entity), byUsername: Map("nom" → entity) }
+
+const dialogLoads = new WeakMap(); // client → yuklanayotgan ro'yxat (bir vaqtda bittadan; 4 ta parallel o'qish bor)
+function loadDialogs(client) {
+  if (!dialogLoads.has(client)) dialogLoads.set(client, readDialogs(client).finally(() => dialogLoads.delete(client)));
+  return dialogLoads.get(client);
+}
+
+async function readDialogs(client) {
+  const byId = new Map();
+  const byUsername = new Map();
+  for await (const dialog of client.iterDialogs({})) {
+    byId.set(String(dialog.id), dialog.entity);
+    const username = dialog.entity?.username;
+    if (username) byUsername.set(username.toLowerCase(), dialog.entity);
+  }
+  const cached = { at: Date.now(), byId, byUsername };
+  dialogCache.set(client, cached);
+  return cached;
+}
+
+// A'zo bo'lgan ochiq guruh @nomi bo'yicha — dialoglar ro'yxatidan (2026-11-20): resolveUsername so'ralmaydi, shuning uchun
+// Telegram uni cheklagan paytda ham (FLOOD_WAIT) a'zo guruhlar o'qilaveradi. Topilmasa — null
+async function memberEntity(client, username) {
+  let cached = dialogCache.get(client);
+  if (!cached || Date.now() - cached.at >= DIALOGS_TTL_MS) cached = await loadDialogs(client);
+  return cached.byUsername?.get(String(username).toLowerCase()) ?? null;
+}
+
 async function resolveEntity(client, source) {
   if (source.kind === "username") return client.getEntity(source.value);
   const cached = dialogCache.get(client);
   if (cached?.byId.has(source.value)) return cached.byId.get(source.value);
   if (!cached || Date.now() - cached.at >= DIALOGS_TTL_MS) {
-    const byId = new Map();
-    for await (const dialog of client.iterDialogs({})) byId.set(String(dialog.id), dialog.entity);
-    dialogCache.set(client, { at: Date.now(), byId });
-    if (byId.has(source.value)) return byId.get(source.value);
+    const fresh = await loadDialogs(client);
+    if (fresh.byId.has(source.value)) return fresh.byId.get(source.value);
   }
   throw new Error(`id ${source.value} topilmadi: akkaunt bu chatga a'zo emas (npm run tg:dialogs)`);
 }
@@ -395,6 +421,14 @@ export function createReader(client) {
       ? error.seconds
       : Number(/FLOOD_WAIT_(\d+)/.exec(error?.errorMessage ?? error?.message ?? "")?.[1] ?? NaN);
   async function entityOf(source) {
+    if (!entities.has(source.value) && source.kind === "username") {
+      // A'zo guruh — dialoglar ro'yxatidan, manzil so'ralmaydi (xato bo'lsa — odatdagi yo'l)
+      const entity = await memberEntity(client, source.value).catch(() => null);
+      if (entity) {
+        entities.set(source.value, entity);
+        byPeer.set(utils.getPeerId(entity), source);
+      }
+    }
     if (!entities.has(source.value)) {
       const left = Math.ceil((resolveBlockedUntil - Date.now()) / 1000);
       if (left > 0) throw Object.assign(new Error(`FLOOD_WAIT_${left}`), { errorMessage: `FLOOD_WAIT_${left}`, resolveFlood: true });

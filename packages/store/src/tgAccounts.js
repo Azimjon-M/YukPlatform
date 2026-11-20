@@ -323,6 +323,52 @@ export function createTgAccountQueries(db, now) {
     },
 
 
+    // --- O'quvchi akkauntlar (2026-11-20) ---
+    // Ochiq guruhga qaysi akkauntlar a'zo: «@nom» (kichik harf) → Set(akkaunt). collector accounts.js accountSources shu
+    // bilan a'zo bo'lmagan asosiy o'rniga a'zo akkauntga beradi (manzil so'ralmaydi, yangisi bir necha soniyada keladi)
+    openSourceMembers() {
+      const out = new Map();
+      for (const r of db.prepare("SELECT account, lower(username) AS u FROM tg_dialogs WHERE username IS NOT NULL").all()) {
+        const key = `@${r.u}`;
+        if (!out.has(key)) out.set(key, new Set());
+        out.get(key).add(r.account);
+      }
+      return out;
+    },
+
+    // Shu akkaunt qo'shilishi kerak bo'lgan guruhlar: foydalanuvchi qo'shgan (yoki Auto scan topgan) ochiq guruh sinovdan
+    // o'tib tasdiqlangan (check_state ok), yoqilgan, tasdig'i since dan keyin, akkaunt hali a'zo emas va urinilmagan.
+    // since — birinchi chaqiruvda settings.reader_joins_since ga yoziladi: eski tasdiqlanganlarga birdaniga qo'shilmaydi
+    readerJoinCandidates(account, { limit = 5 } = {}) {
+      let since = Number(db.prepare("SELECT value FROM settings WHERE key = 'reader_joins_since'").get()?.value);
+      if (!Number.isFinite(since)) {
+        since = now();
+        db.prepare("INSERT INTO settings (key, value) VALUES ('reader_joins_since', ?) ON CONFLICT (key) DO NOTHING").run(String(since));
+      }
+      return db
+        .prepare(
+          `SELECT s.name, s.title FROM sources s
+            WHERE s.enabled = 1 AND s.check_state = 'ok' AND s.added_by IS NOT NULL AND s.name LIKE '@%' AND s.check_at >= ?
+              AND NOT EXISTS (SELECT 1 FROM reader_joins j WHERE j.name = s.name AND j.account = ?)
+              AND NOT EXISTS (SELECT 1 FROM tg_dialogs d WHERE d.account = ? AND '@' || lower(d.username) = lower(s.name))
+            ORDER BY s.check_at LIMIT ?`,
+        )
+        .all(since, account, account, limit)
+        .map((r) => ({ name: r.name, title: r.title ?? null }));
+    },
+
+    finishReaderJoin(name, account, { state, error = null }) {
+      db.prepare(
+        `INSERT INTO reader_joins (name, account, state, error, at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (name, account) DO UPDATE SET state = excluded.state, error = excluded.error, at = excluded.at`,
+      ).run(name, account, state, error, now());
+    },
+
+    // 24 soatda nechta guruhga qo'shildi (spam bo'lib ko'rinmasin — collector cheklaydi)
+    readerJoinsSince(account, since) {
+      return db.prepare("SELECT COUNT(*) AS n FROM reader_joins WHERE account = ? AND at > ? AND state IN ('joined', 'requested')").get(account, since).n;
+    },
+
     // account berilsa — faqat o'shaniki
     tgDialogs({ account = null } = {}) {
       const rows = account

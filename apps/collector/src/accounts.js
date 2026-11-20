@@ -26,13 +26,37 @@ export const sessionGone = (error) => error?.code === "SESSION" || error?.code =
 
 export const accountTitle = (me) => [me.firstName, me.username ? `@${me.username}` : null].filter(Boolean).join(" ") || `id ${me.userId}`;
 
-// Shu akkaunt o'qiydigan yoqilgan manbalar (asosiy — account NULL bo'lganlari). Har aylanishda qayta o'qiladi
-export function accountSources(store, account) {
+// O'quvchi akkauntlar (2026-11-20, Azimjon: «bizda 2 ta asosiy account bor ular … guruhlarga a'zo qilingan»): ochiq guruhni
+// a'zo akkaunt o'qisin — a'zo guruhning yangi xabari «yangisi bormi» (tops) so'rovida keladi (~4 s), a'zo bo'lmagan guruh
+// esa navbat bilan so'raladi (median 45 s, ba'zan 5+ daqiqa) va har qayta yoqilishda manzili so'ralib, Telegram FLOOD_WAIT
+// beradi. .env TG_READERS=asosiy,u47qx60v-1 — tartib muhim: guruhga birinchisi a'zo bo'lsa — o'sha o'qiydi
+export function readerAccounts(env = process.env) {
+  const list = String(env.TG_READERS ?? "").split(/[,\s]+/).filter(Boolean);
+  return list.includes(MAIN_TG_ACCOUNT) ? list : [MAIN_TG_ACCOUNT, ...list];
+}
+
+// Ochiq guruh (account NULL) kimga: o'quvchilardan birinchi a'zo va ishlab turgani; hech kim a'zo emas — asosiy
+export function openSourceReader(name, { members, readers, working }) {
+  const accounts = members.get(String(name).toLowerCase());
+  if (accounts) for (const reader of readers) if (accounts.has(reader) && working(reader)) return reader;
+  return MAIN_TG_ACCOUNT;
+}
+
+// Shu akkaunt o'qiydigan yoqilgan manbalar: o'ziga biriktirilganlari (yopiq guruh — sources.account) va ochiq guruhlardan
+// openSourceReader shu akkauntga berganlari. Har aylanishda qayta o'qiladi (a'zolik tg_dialogs dan, 30 daqiqada yangilanadi)
+export function accountSources(store, account, { readers = readerAccounts() } = {}) {
   const own = account === MAIN_TG_ACCOUNT ? null : account;
-  return () =>
-    store
+  return () => {
+    const members = readers.length > 1 && store.openSourceMembers ? store.openSourceMembers() : new Map();
+    const status = new Map((store.listTgAccounts?.() ?? []).map((a) => [a.name, a.status]));
+    const working = (name) => name === MAIN_TG_ACCOUNT || status.get(name) === "ok";
+    return store
       .listSources()
-      .filter((s) => s.enabled && (s.account ?? null) === own)
+      .filter((s) => {
+        if (!s.enabled) return false;
+        if ((s.account ?? null) !== null) return s.account === own;
+        return openSourceReader(s.name, { members, readers, working }) === account;
+      })
       .flatMap((s) => {
         try {
           return [normalizeSource(s.name)];
@@ -40,6 +64,7 @@ export function accountSources(store, account) {
           return [];
         }
       });
+  };
 }
 
 // Bitta akkaunt: kimligi va guruhlari ro'yxati bazaga, keyin runLive (signal kelguncha yoki xatogacha).
@@ -94,6 +119,8 @@ export async function runAccount({ name, client, telegram, store, me = null, sou
     joins: main,
     scan: name, // «🔎 Auto scan» — boshqaruv markazidan so'ralganda (live.js scanNext)
     scanWaitMs: 3 * MINUTE, // scan oldidan tick ro'yxatni yangilab olsin (yangi qo'shilgan guruhlar)
+    // Tasdiqlangan guruhga qo'shilish (TG_READERS dagi akkauntlar; live.js readerJoinNext)
+    readerJoins: readerAccounts().includes(name) ? name : null,
     ...(main
       ? {}
       : { emptyText: "Bu akkauntga biriktirilgan guruh yo'q: boshqaruv markazi → «Manbalar» → «Yopiq guruh qo'shish» dan tanlang." }),
