@@ -240,3 +240,16 @@ test("filtrlar (2026-11-19): qayerdan va transport turi ixtiyoriy; profilga feed
   assert.equal(old.feed, "tezkor");
   assert.deepEqual(old.feedRegions, ["andijon"]);
 });
+
+test("guruhlar ro'yxati 20 tadan sahifalanadi", async () => {
+  const { pageOf, GROUPS_PAGE_SIZE } = await import("../src/feedGroups.js");
+  assert.equal(GROUPS_PAGE_SIZE, 20);
+  const items = Array.from({ length: 45 }, (_, i) => i + 1);
+  const first = pageOf(items, 0);
+  assert.deepEqual([first.items.length, first.pages, first.first, first.last, first.total], [20, 3, 1, 20, 45]);
+  const last = pageOf(items, 2);
+  assert.deepEqual([last.items, last.first, last.last], [[41, 42, 43, 44, 45], 41, 45]);
+  // ro'yxat qisqarsa (qidiruv) — oxirgi bor sahifa; bo'sh — bitta bo'sh sahifa
+  assert.equal(pageOf(items.slice(0, 15), 2).page, 0);
+  assert.deepEqual([pageOf([], 0).pages, pageOf([], 0).first], [1, 0]);
+});

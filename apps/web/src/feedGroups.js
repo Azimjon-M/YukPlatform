@@ -21,6 +21,19 @@ export function groupOptions(list, chosen) {
   }));
 }
 
+// Sahifalash (2026-11-20, Azimjon: «juda ko'p guruh bo'lgani sababli Pagination kerak. max 20 ta bo'lsin»)
+export const GROUPS_PAGE_SIZE = 20;
+
+// items — ko'rsatiladigan ro'yxat, page — 0 dan; ro'yxat qisqarsa — oxirgi bor sahifa
+// → { items, page, pages, first, last, total }
+export function pageOf(items, page, size = GROUPS_PAGE_SIZE) {
+  const total = items.length;
+  const pages = Math.max(1, Math.ceil(total / size));
+  const current = Math.min(Math.max(0, page), pages - 1);
+  const from = current * size;
+  return { items: items.slice(from, from + size), page: current, pages, first: total ? from + 1 : 0, last: Math.min(total, from + size), total };
+}
+
 export const CLOSED_PRO_HINT =
   "Yopiq guruhlardagi e'lonlar faqat Pro foydalanuvchilarga keladi. Pro avtomatik beriladi: raqamingizni ulashing va botda o'z Telegram akkauntingizni bog'lang (/account_qosh).";
 

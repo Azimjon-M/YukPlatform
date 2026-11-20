@@ -1464,6 +1464,26 @@ circle.truck-near {
   margin-bottom: 10px;
 }
 
+/* Guruhlar ro'yxati sahifalari (FeedGroups.jsx, 20 tadan) */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pager .pill:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pager-info {
+  color: var(--hint);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
 /* Sozlamalar: «📡 Telegram akkaunt ulash» — alohida karta (2026-11-19). Ichidagi kirish qadamlari ham .section —
    karta ichida karta bo'lmasin: ular tekis ko'rinadi */
 .tg-section .section {
