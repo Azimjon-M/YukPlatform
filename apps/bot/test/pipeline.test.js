@@ -1128,38 +1128,3 @@ test("catchUp (2026-11-20): e'lon olishni boshlagan haydovchiga oxirgi daqiqalar
   store.saveDriver(7, { active: false });
   assert.equal(worker.catchUp(7, now - 2 * 60_000), 0, "pauzada — hech narsa");
 });
-
-test("embedding (embedLook, live): ikkilangan e'lon javobni kutadi va aralash qaror bilan yopiladi; qolgani — kutmasdan", async () => {
-  const { store, deps, post } = rawSetup();
-  deps.pool = noAi;
-  deps.groupAi = false;
-  deps.rules = () => null;
-  let release;
-  const asked = [];
-  // Soxta: 2-e'lon «ikkilangan», embedding uni yuk deydi; qolganlari uchun so'ralmaydi
-  deps.embedLook = {
-    check(p, look) {
-      if (p.messageId !== 2) return null;
-      asked.push(p.messageId);
-      return new Promise((resolve) => (release = () => resolve({ ...look, chatter: false })));
-    },
-  };
-  post("@g", 1, CHAT_TEXT);
-  post("@g", 2, `${CHAT_TEXT} ikki`);
-  const worker = createWorker(deps, { log: () => {}, fillWaitMs: 0, liveWaitMs: 0 });
-  await worker.runOnce();
-  const status = () => Object.fromEntries(store.listPosts().items.map((p) => [p.messageId, [p.status, p.error]]));
-  assert.deepEqual(status()[1], ["done", "boshqa"], "1-e'lon darhol");
-  assert.deepEqual(status()[2][0], "new", "2-e'lon embedding'ni kutyapti");
-  release();
-  await new Promise((r) => setImmediate(r));
-  assert.deepEqual(status()[2], ["done", null], "embedding «yuk» dedi — e'lon sifatida yopildi");
-  assert.deepEqual(asked, [2]);
-
-  // check xato tashlasa — fastLook qarori, e'lon yo'qolmaydi
-  deps.embedLook = { check() { throw new Error("buzildi"); } };
-  post("@g", 3, `${CHAT_TEXT} uch`);
-  const w2 = createWorker(deps, { log: () => {}, fillWaitMs: 0, liveWaitMs: 0 });
-  await w2.runOnce();
-  assert.deepEqual(status()[3], ["done", "boshqa"]);
-});

@@ -41,6 +41,3 @@ data/avatars/
 # Operator akkaunt (apps/collector/src/ops.js): sessiya, shaxsiy xabarlar (inbox), buyruqlar navbati
 apps/collector/ops/
 data/media/
-
-# Embedding modeli va vektorlar keshi (train-embed.mjs) — bazadan yasaladi
-data/embed-*.json

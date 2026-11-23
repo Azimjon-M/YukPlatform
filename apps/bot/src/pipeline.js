@@ -443,55 +443,6 @@ export function createWorker(
       log(`#${post.id}: guruhga navbatga qo'yilmadi — ${error.message}`);
     }
   }
-  // Yangi e'lon: guruhga, tezkor yo'l, aloqasizlik, qoidaviy parser, AI'siz yopish (quick() va embedding kutgandan keyin)
-  function handleNew(post, users, getLook, ready, results) {
-    toGroup(post, getLook);
-    // Saralash o'chiq — aloqasiz e'lon ham haydovchiga ketadi (keyin AI'ga bormasdan yopiladi)
-    if (fastAll) fast(post, users, getLook);
-    if (contactless(post)) return;
-    // Tezkor rejimdagilarga asl matn — AI'ni ham, qoidaviy parserni ham kutmasdan (e'lon o'zi navbatda qoladi)
-    if (!fastAll) fast(post, users, getLook);
-    let result = null;
-    if (deps.rules) {
-      try {
-        result = deps.rules(post.text);
-      } catch (error) {
-        log(`#${post.id}: qoidaviy parser xatosi — ${error.message}${groupAi ? " (AI tahlil qiladi)" : ""}`);
-      }
-    }
-    if (!result) {
-      if (!groupAi) closeWithoutAi(post, getLook()); // AI'siz — model hukmi bilan yopiladi
-      return; // aks holda AI kutadi
-    }
-    claimed.add(post.id);
-    ready.push(post);
-    results.push({ ...result, by: "rules" });
-  }
-
-  // fastLook + embedding (deps.embedLook — bot embedLook.js). Faqat guruh e'lonlari AI'siz bo'lganda (aks holda AI kutish
-  // paytida e'lonni olib qo'yishi mumkin). → null (kutilmaydi) yoki Promise<look>. Xato — kutilmaydi, fastLook qarori
-  function refine(post, getLook) {
-    if (!deps.embedLook || groupAi || post.direct) return null;
-    try {
-      return deps.embedLook.check(post, getLook()) ?? null;
-    } catch (error) {
-      log(`#${post.id}: embedding tekshiruvi xatosi — ${error.message}`);
-      return null;
-    }
-  }
-  function afterRefine(post, look) {
-    if (controller.signal.aborted || claimed.has(post.id)) return;
-    try {
-      const ready = [];
-      const results = [];
-      handleNew(post, rawUsers(), () => look, ready, results);
-      if (ready.length) deliver(ready, results);
-      ruleCount += ready.length;
-    } catch (error) {
-      log(`#${post.id}: embedding'dan keyin xato — ${error.message}`);
-    }
-  }
-
   // Aloqasiz e'lonlar ham shu yerda (qoidaviy parserdan oldin) yopiladi.
   function quick() {
     let handled = 0;
@@ -515,13 +466,27 @@ export function createWorker(
         // Bitta e'longa fastLook bir marta (tezkor yo'l ham, guruh ham ishlatadi)
         let look = null;
         const getLook = () => (look ??= lookOf(post.text, { voice: Boolean(post.media) }));
-        // fastLook ikkilangan (embedLook.js, rejim live) — embedding javobini kutadi (≤ 1,5 s), keyin xuddi shu yo'l
-        const waiting = refine(post, getLook);
-        if (waiting) {
-          waiting.then((better) => afterRefine(post, better));
-          continue;
+        toGroup(post, getLook);
+        // Saralash o'chiq — aloqasiz e'lon ham haydovchiga ketadi (keyin AI'ga bormasdan yopiladi)
+        if (fastAll) fast(post, users, getLook);
+        if (contactless(post)) continue;
+        // Tezkor rejimdagilarga asl matn — AI'ni ham, qoidaviy parserni ham kutmasdan (e'lon o'zi navbatda qoladi)
+        if (!fastAll) fast(post, users, getLook);
+        let result = null;
+        if (deps.rules) {
+          try {
+            result = deps.rules(post.text);
+          } catch (error) {
+            log(`#${post.id}: qoidaviy parser xatosi — ${error.message}${groupAi ? " (AI tahlil qiladi)" : ""}`);
+          }
         }
-        handleNew(post, users, getLook, ready, results);
+        if (!result) {
+          if (!groupAi) closeWithoutAi(post, getLook()); // AI'siz — model hukmi bilan yopiladi
+          continue; // aks holda AI kutadi
+        }
+        claimed.add(post.id);
+        ready.push(post);
+        results.push({ ...result, by: "rules" });
       }
       if (ready.length) deliver(ready, results);
       handled += ready.length;
@@ -742,7 +707,6 @@ export function createWorker(
       let reportedNoContact = 0;
       let reportedRaw = 0;
       let reportedFast = 0;
-      let reportedEmbed = 0;
       while (!controller.signal.aborted) {
         // Hamma AI dam olayotgan bo'lsa ham: kechasi to'plangan e'lonlar navbatda "kutib" turmasin
         expire();
@@ -751,11 +715,6 @@ export function createWorker(
           if (ruleCount > reported) log(`Qoidaviy parser: oxirgi 10 daqiqada ${ruleCount - reported} ta e'lon AI'siz tushunildi`);
           if (fastCount > reportedFast) log(`AI'siz: oxirgi 10 daqiqada ${fastCount - reportedFast} ta e'lonni qoidalar to'liq tushunmadi — model hukmi bilan yopildi (AI'ga yuborilmadi)`);
           reportedFast = fastCount;
-          const es = deps.embedLook?.stats;
-          if (es && es.asked > reportedEmbed) {
-            log(`Embedding (${deps.embedLook.config().mode}): jami ${es.asked} ta ikkilangan e'lon so'raldi, ${es.changed} tasida qaror o'zgardi, ${es.failed} xato, ${es.late} kechikdi`);
-            reportedEmbed = es.asked;
-          }
           if (rawCount > reportedRaw) log(`Tezkor: oxirgi 10 daqiqada ${rawCount - reportedRaw} ta asl matnli xabar yuborildi`);
           reportedRaw = rawCount;
           if (noContactCount > reportedNoContact) {

@@ -14,7 +14,6 @@ import { createAiQueries } from "./ai.js";
 import { AUTO_PRO_SQL, createTgAccountQueries, hashPhone } from "./tgAccounts.js";
 import { createFeedQueries, migrateFeed } from "./feed.js";
 import { createAppLoginQueries } from "./appLogins.js";
-import { createEmbedVerdictQueries } from "./embedVerdicts.js";
 
 export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR } from "./lock.js";
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
@@ -196,19 +195,6 @@ CREATE TABLE IF NOT EXISTS dialog_scans (
 -- Tasdiqlangan guruhga o'quvchi akkauntlar (.env TG_READERS) qo'shilishi (2026-11-20, Azimjon: «haydovchi guruh qo'shish
 -- qilinganida o'sha guruh tasdiqlansa anashu asosiy accountlarni qo'shib qo'y»): a'zo akkaunt guruhni «yangisi bormi»
 -- so'rovi bilan bir necha soniyada o'qiydi. Har (guruh, akkaunt) — bir marta
--- fastLook + embedding aralashmasi hukmlari (embedVerdicts.js; faqat fastLook ikkilangan e'lonlar)
-CREATE TABLE IF NOT EXISTS embed_verdicts (
-  post_id INTEGER PRIMARY KEY,
-  p REAL NOT NULL,                   -- embedding: yuk e'loni ehtimoli
-  fast_score REAL,                   -- fastLook balli
-  fast INTEGER NOT NULL,             -- fastLook: 1 e'lon, 0 e'lon emas
-  mixed INTEGER NOT NULL,            -- aralashma: 1 e'lon, 0 e'lon emas
-  used INTEGER NOT NULL,             -- 1: aralash qaror haqiqatda ishlatildi (live, vaqtida)
-  ms INTEGER,                        -- 1pro javobi qancha kutildi
-  mode TEXT NOT NULL,                -- shadow | live
-  signature TEXT NOT NULL,           -- model/o'lcham/task
-  at INTEGER NOT NULL
-);
 -- Ilovaga «Telegram orqali kirish» kodi (appLogins.js): bot tasdiqlaydi, server bir marta token beradi
 CREATE TABLE IF NOT EXISTS app_logins (
   code TEXT PRIMARY KEY,
@@ -610,8 +596,6 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     ...createFeedQueries(db, now),
     // Ilovaga bot orqali kirish kodlari (appLogins.js)
     ...createAppLoginQueries(db, now),
-    // fastLook + embedding aralashmasi hukmlari (embedVerdicts.js)
-    ...createEmbedVerdictQueries(db, now),
 
     // --- E'lonlar navbati ---
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.
