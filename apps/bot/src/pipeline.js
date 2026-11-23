@@ -241,12 +241,12 @@ function formatHours(ms) {
 // va «yuk e'loni» bo'lsa — shu guruhni kutayotgan haydovchilarga asl matn bilan darhol ketadi (deps.deliverRaw).
 // Saralangan yo'l bunga tegmaydi: e'lon keyin odatdagidek (qoidalar yoki AI) tahlil qilinadi va saralangan rejimdagilarga boradi.
 // deps.deliverRaw(chatId, post, { phones }) → { ok, error? } | true/false — yo'q bo'lsa (testlar, eski main.js) tezkor yo'l o'chiq.
-// fastMs — quick() necha ms da bir ishlaydi (standart 1 s; avval asosiy aylanish bilan 5 s gacha kutardi).
+// fastMs — quick() necha ms da bir ishlaydi (standart 0,2 s — so'rov 0,02 ms, 2026-11-23 gacha 1 s edi; avval asosiy aylanish bilan 5 s gacha kutardi).
 // rawMaxAgeMs — joylanganiga shundan ko'p vaqt o'tgan e'lon tezkor yo'lga kirmaydi (bot qayta yoqilganda navbatdagi
 // eski e'lonlar bir to'da bo'lib «yangi» deb kelmasin; standart 30 daqiqa).
 export function createWorker(
   deps,
-  { idleMs = 5000, fastMs = 1000, rawMaxAgeMs = 30 * 60_000, batch, fillWaitMs, liveWaitMs, log = console.log, now = Date.now, maxParallel, maxAgeMs = 0 } = {},
+  { idleMs = 5000, fastMs = 200, rawMaxAgeMs = 30 * 60_000, batch, fillWaitMs, liveWaitMs, log = console.log, now = Date.now, maxParallel, maxAgeMs = 0 } = {},
 ) {
   const { store } = deps;
   const known = knownUser(store);

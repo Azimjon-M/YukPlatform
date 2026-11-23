@@ -26,6 +26,7 @@ import {
   CHATTER_PATTERNS,
   FREE_TRUCK_PATTERNS,
   LOAD_SURE,
+  withoutLoadHeader,
   PARTIAL_WORDS,
   PLACE_DETAILS,
   PLACE_NOUNS,
@@ -823,7 +824,7 @@ export function fastFacts(text) {
   // Joy bormi: yuk tuzilishi tushunilmagan bo'lsa ham, matnda biror joy nomi tanilgan bo'lsa — bor
   const placed = parsed.loads.some(hasPlace) || lines.some((l) => l.mentions.some((m) => m.entry));
   const phone = extractPhones(raw).length > 0;
-  const sure = LOAD_SURE.test(latin);
+  const sure = LOAD_SURE.test(withoutLoadHeader(latin));
   const free = !sure && FREE_TRUCK_PATTERNS.some((re) => re.test(latin));
   const junk = CHATTER_PATTERNS.some((re) => re.test(latin));
   const weight = lines.some((l) => l.facts.some((f) => f.weightT != null));

@@ -248,6 +248,19 @@ export const FREE_TRUCK_PATTERNS = [
   /(?:olib\s+ket(?:amiz|aman|averamiz)|opketamiz)/,
   // yo'lga chiqyapti: «Qarshiga yuramiz», «yo'lga chiqamiz», «qaytamiz»
   /(?:yuramiz|yuraman|yo'?lga\s+chi[qk]|qaytamiz|qaytaman)(?![a-z'])/,
+  // 2026-11-23: qo'lda belgilangan 2 000 e'londa (scripts/hand-labels.json) o'lchangan andozalar — har biriga tushgan
+  // e'lonlarning 90–100% i bo'sh mashina edi. «fura xizmati bor», «tent hizmati bor»
+  new RegExp(`(?:${TRUCK_NAMES})\\w*\\s+[hx]izmat\\w*\\s+bor(?![a-z'])`),
+  // «tent bor», «ref bor», «kia bor» (12/12), «furalar bor», «tent furasi bor»
+  /(?:^|[^a-z'])(?:tent|ref|kia|kiya)(?:li)?\s+bor(?![a-z'])/,
+  new RegExp(`(?:^|[^a-z'])(?:${TRUCK_OWN}|tent|ref|kia|kiya)(?:lar|si|lari|miz|imiz|larimiz)\\s+bor(?![a-z'])`),
+  // «bo'sh fura», «pustoy isuzu» — keyin «kerak» kelmasa («pustoy isuzu kerak» — yuk)
+  new RegExp(`(?:pustoy|bo'?sh|bush)\\s+(?:${TRUCK_NAMES}|kia|kiya)(?![a-z'])(?!\\s+(?:kerak|kk|kere))`),
+  // «yuki borlar aloqaga», «pochta olamiz», «yuk oladi / olishga tayyor», «ertalab ketamiz»
+  /yuk(?:i|lari)\s+bor(?:lar|la)(?![a-z'])/,
+  /(?:pochta|poshta|pochda)\s+ol[ai]m\w*/,
+  /yuk\w*\s+ol(?:adi|ishga)(?![a-z'])/,
+  /(?:^|[^a-z'])ket(?:amiz|amz|yapmiz|vommiz)(?![a-z'])/,
 ];
 
 // «Quruq gap»ning boshqa turlari (tezkor filtr, fastLook): sotuv e'lonlari, yo'lovchi taksi va h.k. — pastda to'ldiriladi
@@ -270,4 +283,7 @@ export const CHATTER_PATTERNS = [
 
 // Yuk e'lonining aniq belgisi: «yuk bor», «fura kerak». Bu bor matnda bo'sh mashina andozasi ishlamaydi — yuklar ro'yxatidagi
 // bitta «…yuk kerak» qatori butun e'lonni tashlab yubormasin (AI yorliqlangan e'lonlarda o'lchangan)
+// Ba'zi kanallar har e'lonni «📦 YUK BOR 🅰️ X → 🅱️ Y …» andozasiga o'raydi (ichida «tent fura bor, yuk kerak» bo'lsa ham) —
+// bu sarlavha yuk belgisi emas (2026-11-23: faqat sarlavha tufayli «aniq yuk» bo'lgan e'lonlarning 5% i bo'sh mashina edi)
+export const withoutLoadHeader = (latin) => latin.replace(/yuk bor\s*🅰/g, "🅰");
 export const LOAD_SURE = /(?:yuk|gruz)\w*\s+bor(?![a-z'])|(?:fura|isuz\w*|kamaz|labo|mashina|moshina|tent|ref|chakman|plashadka|shalanda)\w*\s+(?:kerak|kk|kere|kerek)(?![a-z'])/;

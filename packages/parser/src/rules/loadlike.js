@@ -1,12 +1,15 @@
 // «Yuk e'loni / e'lon emas» — o'rgatilgan yengil model (2026-11-19, Azimjon: «E'lon/E'lonEmas ni 90% va undan yuqori
 // aniqlikka olib chiq … yengil, tez»; misol: «sabr qilib turish kerak … yuk bo'lsa yozadi shu gruppaga» — yuk haqida gap, lekin
 // e'lon emas — andozalar buni ushlamaydi). Logistik regressiya: so'zlar, juft so'zlar va bir nechta belgi (joy bormi, telefon,
-// og'irlik…) → 2^16 katakka xeshlanadi, har katakda bitta vazn (loadModel.js — scripts/train-loadlike.mjs yasaydi).
+// og'irlik…) → 2^18 katakka xeshlanadi, har katakda bitta vazn (loadModel.js — scripts/train-loadlike.mjs yasaydi).
 // Xeshlangani uchun faylda so'zlar yo'q (ochiq repoga xavfsiz). Bir e'longa ~0,05 ms.
+// 2026-11-23 (Azimjon: «filter algoritmimizni o'rganib, nima takomillashtirish kerak bo'lsa qil — tez va aniq»): kataklar
+// 2^16 → 2^18 (ikki belgi bitta katakka tushib qolishi kamaydi) va o'rgatish sekinroq qadam bilan (yodlab olmaydi) —
+// qo'lda belgilangan sinovda (scripts/hand-labels.json) aniqlik 96,7% → 98,4%, xatolar 380 → ~190.
 import { MODEL } from "./loadModel.js";
 import { toLatin, wordKey } from "./text.js";
 
-export const BUCKETS = 1 << 16;
+export const BUCKETS = 1 << 18;
 
 // FNV-1a (32 bit) → katak raqami
 export function bucketOf(feature) {

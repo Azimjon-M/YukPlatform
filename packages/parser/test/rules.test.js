@@ -335,3 +335,25 @@ test("fastLook: ovozli xabarda joy + «yuk bor» — salom-alik bilan ham yuk e'
   assert.equal(fastLook(truck, { voice: true }).chatter, true);
   assert.equal(fastLook("Assalomu alaykum, shofyor akalar, yaxshimisizlar?", { voice: true }).chatter, true);
 });
+
+// 2026-11-23: model qayta o'rgatildi (2^18 katak, sekinroq qadam, qo'lda belgilangan sinov) + yangi bo'sh mashina andozalari
+test("fastLook: bo'sh mashina e'lonlari (tent bor, fura xizmati bor, yuk pochta olamiz) — e'lon emas", () => {
+  for (const text of [
+    "Навоидан Наманган фаргонага тент бор +998900000001",
+    "ФУРА ХИЗМАТИ БОР Ташкент ичида тент +998900000001",
+    "TOSHKENT-NAMANGAN TOSHKENT-ANDIJON TENT FURALAR BOR +998900000001",
+    "📦 YUK BOR 🅰️ Toshkent → 🅱️ Namangan 🚛 Fura Toshkent namangan tent fura bor yuk kerak +998900000001",
+    "Andijondan yuk pochta olamiz labo +998900000001",
+  ])
+    assert.equal(fastLook(text).chatter, true, text);
+});
+
+test("fastLook: qisqa dispetcher e'loni, bot andozasi, «… kerak» — yuk e'loni", () => {
+  for (const text of [
+    "SAMARQAND SHAXARDAN NUROBOD KIYA BONGO KERAK +998900000001",
+    "ANDIJON -> TOSHKENT 🚛 Fura 📦 Og'irlik: 25 tonna 💰 Naqd 📱 Tel: +998900000001",
+    "Chustdan Jizzaxga 60 velosiped bor +998900000001",
+    "Buxorodan pustoy isuzu kerak +998900000001",
+  ])
+    assert.equal(fastLook(text).chatter, false, text);
+});

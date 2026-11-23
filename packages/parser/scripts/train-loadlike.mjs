@@ -4,18 +4,23 @@
 // Manba: bazadagi AI va qoidalar tahlil qilgan e'lonlar (faqat o'qiladi). Yorliq: yuk e'loni (yuk, doiradan tashqari yuk) = 1,
 // bo'sh mashina / boshqa / xizmat xabari = 0. AI yorliqlari shovqinli, shuning uchun aniq andozalar bilan tuzatiladi:
 // «yuk olamiz», «yuramiz», taksi (FREE_TRUCK / CHATTER) → 0; «mashina» deb yorliqlangan, lekin «fura kerak / yuk bor» li → 1.
-// Oxirgi 48 soat — sinov to'plami (o'rgatishga kirmaydi). Natija: aniqlik, yukni yo'qotish va e'lon emasni o'tkazish ulushi.
+// Belgilangan e'lonlarning oxirgi 48 soati — sinov to'plami (o'rgatishga kirmaydi). Natija: aniqlik, yukni yo'qotish va
+// e'lon emasni o'tkazish ulushi. ALL=1 — sinovsiz, hamma e'londa o'rgatadi (sozlamalar sinovda tanlangach, yakuniy model).
+// 2026-11-23: (1) scripts/hand-labels.json — qo'lda (o'qib) belgilangan bahsli e'lonlar {post id: 1 | 0 | null (noaniq)}:
+// AI yorlig'i o'rniga shu ishlatiladi (2 006 tadan 318 tasida AI yorlig'i xato edi); (2) qadam LR 0,3 → 0,02, 12 → 6 aylanish —
+// eski sozlama o'quv to'plamini yodlab olardi (o'zi ko'rgan e'lonlarda 99,7%, yangisida 96,7%); (3) sinov davri «hozir»dan
+// emas, oxirgi belgilangan e'londan sanaladi (20.11 dan beri guruh e'lonlari AI'ga bormaydi — yangi yorliq yo'q).
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import { fastFacts } from "../src/rules/index.js";
 import { BUCKETS, featuresOf } from "../src/rules/loadlike.js";
 
-const days = Number(process.argv[2] ?? 22);
+const days = Number(process.argv[2] ?? 40);
 const showErrors = Number(process.argv[3] ?? 0);
 const db = new DatabaseSync(process.env.YUK_DB ?? new URL("../../../data/yuk.db", import.meta.url).pathname, { readOnly: true });
 const now = Date.now();
 const since = now - days * 86400e3;
-const testFrom = now - 48 * 3600e3;
+const hand = JSON.parse(fs.readFileSync(new URL("./hand-labels.json", import.meta.url)));
 
 function collect() {
   const posts = db
@@ -39,7 +44,7 @@ function collect() {
     else if (/^Boshqa yo'nalish/.test(p.error ?? "")) type = "tashqi";
     else if (p.parsed_by === "rules" && p.error == null) type = "qoida"; // xizmat xabari YOKI takror yuk (yuk yozuvi yo'q) — pastda ajratiladi
     else continue;
-    out.push({ id: p.id, text: p.text, type, by: p.parsed_by, test: p.created_at > testFrom });
+    out.push({ id: p.id, text: p.text, type, by: p.parsed_by, at: p.created_at });
   }
   return out;
 }
@@ -70,9 +75,19 @@ for (const r of rows) {
   let y = r.type === "yuk" || r.type === "tashqi" ? 1 : 0;
   if (y === 1 && (f.free || f.junk || f.service)) y = 0;
   if (r.type === "mashina" && f.sure && !f.free && !f.junk) y = 1;
+  // Qisqa dispetcher e'loni («Toshkent Andijon Fura [telefon]», «Самарканд Охангарон реф [telefon]»): AI 16% ini «bo'sh
+  // mashina» degan, qo'lda belgilanganda 156 tadan 151 tasi yuk — bo'sh mashina andozasi bo'lmasa, yuk
+  if (y === 0 && r.type === "mashina" && !f.free && !f.junk && !f.service && f.place && f.phone) {
+    const words = (r.masked.replace(/\[telefon\]/g, " ").match(/[\p{L}']+/gu) ?? []).length;
+    if (((f.truck || f.weight) && words <= 6) || words <= 4) y = 1;
+  }
+  if (hand[r.id] !== undefined) y = hand[r.id]; // qo'lda belgilangan; null — noaniq, olinmaydi
   r.y = y;
   r.x = featuresOf(r.masked, f);
 }
+rows = rows.filter((r) => r.y != null);
+const testFrom = process.env.ALL === "1" ? Infinity : Math.max(...rows.filter((r) => r.by === "ai").map((r) => r.at)) - 48 * 3600e3;
+for (const r of rows) r.test = r.at > testFrom;
 const train = rows.filter((r) => !r.test);
 const test = rows.filter((r) => r.test);
 const count = (list) => `${list.length} (yuk ${list.filter((r) => r.y).length}, emas ${list.filter((r) => !r.y).length})`;
@@ -85,11 +100,11 @@ let bias = 0;
 let gb = 1e-8;
 const pos = train.filter((r) => r.y).length;
 const weightOf = (y) => (y ? train.length / (2 * pos) : train.length / (2 * (train.length - pos)));
-const LR = 0.3;
+const LR = 0.02;
 const L2 = 2e-6;
 let seed = 7;
 const rand = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
-for (let epoch = 0; epoch < 12; epoch++) {
+for (let epoch = 0; epoch < 6; epoch++) {
   for (let i = train.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
     [train[i], train[j]] = [train[j], train[i]];
@@ -135,9 +150,9 @@ function report(list, threshold, name) {
     `${name} @${threshold}: aniqlik ${pct(tp + tn, list.length)}% | yuk e'lonidan yo'qotildi ${pct(fn, tp + fn)}% (${fn}) | e'lon emasdan o'tib ketdi ${pct(fp, fp + tn)}% (${fp}) | o'tganlar ichida yuk ${pct(tp, tp + fp)}%`,
   );
 }
-for (const t of [0.3, 0.4, 0.5, 0.6]) report(test, t, "sinov");
+if (test.length) for (const t of [0.2, 0.3, 0.4, 0.5]) report(test, t, "sinov");
 report(train, 0.5, "o'rgatish");
-const threshold = Number(process.env.THRESHOLD ?? 0.5);
+const threshold = Number(process.env.THRESHOLD ?? 0.3);
 
 if (showErrors) {
   const mask = (t) => t.replace(/\s+/g, " ").slice(0, 150);
@@ -148,7 +163,7 @@ if (showErrors) {
 
 if (process.env.DRY !== "1") {
   const text = `// scripts/train-loadlike.mjs yasaydi — qo'lda tahrirlanmaydi. ${new Date().toISOString().slice(0, 10)}: ${train.length} e'londa o'rgatildi.
-// weights — 2^16 ta int8 vazn (base64); xeshlangan belgilar (loadlike.js featuresOf), so'zlarning o'zi yo'q
+// weights — 2^18 ta int8 vazn (base64); xeshlangan belgilar (loadlike.js featuresOf), so'zlarning o'zi yo'q
 export const MODEL = {
   bias: ${bias.toFixed(5)},
   scale: ${scale.toFixed(7)},
