@@ -397,7 +397,8 @@ export function createBot({
   bot.use(async (ctx, next) => {
     if (!members || ctx.chat?.type !== "private" || !ctx.from || !(ctx.message || ctx.callbackQuery)) return next();
     const data = ctx.callbackQuery?.data ?? "";
-    if (data === SUB_CHECK || /^del:/.test(data) || FREE_COMMAND.test(ctx.message?.text ?? "")) return next();
+    // Ilovaga kirish (/start app_…, al:…) ham — a'zolikdan keyin «/start» payload'i yo'qolardi, ilova esa kutib qolardi
+    if (data === SUB_CHECK || /^(del|al):/.test(data) || FREE_COMMAND.test(ctx.message?.text ?? "") || /^\/start(@\w+)? app_/.test(ctx.message?.text ?? "")) return next();
     if (isAdmin(store.getDriver(ctx.from.id) ?? { chatId: ctx.from.id }, config.admins ?? [])) return next();
     rememberUser(ctx); // yangi odam ham boshqaruv markazida ko'rinsin (va a'zoligi yozilsin)
     const result = await members.check(ctx.from.id, { fresh: true });
@@ -1160,7 +1161,33 @@ export function createBot({
     await ctx.reply(hello, html(driver));
     await pickMode(ctx, NEW_DRIVER_FEED_MODE, { auto: true });
   }
-  privateChat.command("start", showStart);
+  // Ilovaga kirish (2026-11-23, store appLogins.js): ilova t.me/<bot>?start=app_<kod> ni ochadi — odam o'zi tasdiqlaydi.
+  // Tasdiqsiz kirgizmaymiz: begona odam havolani yuborib, uni bosgan kishining hisobiga kirib olmasin
+  const APP_LOGIN_START = /^app_([A-Za-z0-9_-]{20,48})$/;
+  async function askAppLogin(ctx, code) {
+    rememberUser(ctx);
+    const keyboard = new InlineKeyboard().text("✅ Ha, kiraman", `al:ok:${code}`).row().text("❌ Yo'q", "al:no");
+    await ctx.reply(
+      "📱 <b>Ilovaga kirish</b>\n\nYukPlatform ilovasi sizning hisobingiz bilan kirmoqchi.\n" +
+        "Agar ilovada «Telegram orqali kirish» ni hozir <b>o'zingiz</b> bosgan bo'lsangiz — tasdiqlang.\n" +
+        "Havolani boshqa birov yuborgan bo'lsa — <b>bosmang</b>.",
+      { parse_mode: "HTML", reply_markup: keyboard },
+    );
+  }
+  privateChat.command("start", (ctx) => {
+    const app = APP_LOGIN_START.exec(ctx.match ?? "");
+    return app ? askAppLogin(ctx, app[1]) : showStart(ctx);
+  });
+  bot.callbackQuery(/^al:(?:ok:([A-Za-z0-9_-]{20,48})|no)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (ctx.chat?.type !== "private") return;
+    const code = ctx.match[1];
+    if (!code) return ctx.editMessageText("Kirish bekor qilindi.").catch(() => {});
+    const ok = store.confirmAppLogin(code, ctx.chat.id);
+    await ctx
+      .editMessageText(ok ? "✅ Tasdiqlandi — ilovaga qayting." : "⌛️ Bu kirish kodi eskirgan yoki ishlatilgan. Ilovada qaytadan «Telegram orqali kirish» ni bosing.")
+      .catch(() => {});
+  });
 
   // /rol va «🔄 Rolni almashtirish»: rol bor — hozirgisi va ikki tugma; rol yo'q — /start ekrani
   const switchRolePrompt = (ctx) => {

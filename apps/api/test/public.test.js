@@ -832,3 +832,33 @@ test("tezkor e'londagi «📞 Telefon qilish»: e'lon tokeni → raqam e'lon mat
     assert.ok(!r.body.includes("tel:"));
   }
 });
+
+test("ilova kirishi: kod → botda tasdiq → token bir marta; begona kod va tasdiqsiz — yo'q", async () => {
+  const start = await call("POST", "/pub/auth/app");
+  assert.equal(start.status, 200);
+  const { code, url, tgUrl, expiresIn } = start.body;
+  assert.match(code, /^[A-Za-z0-9_-]{32}$/);
+  assert.equal(url, `https://t.me/Yuk_Ekspert_agent?start=app_${code}`);
+  assert.equal(tgUrl, `tg://resolve?domain=Yuk_Ekspert_agent&start=app_${code}`);
+  assert.equal(expiresIn, 600);
+
+  // hali tasdiqlanmagan — kutadi
+  assert.deepEqual((await call("GET", `/pub/auth/app/${code}`)).body, { status: "pending" });
+  assert.equal((await call("GET", `/pub/auth/app/${code}`)).status, 202);
+  // yo'q kod
+  assert.equal((await call("GET", "/pub/auth/app/yoqkod-yoqkod-yoqkod-yoq")).status, 410);
+
+  // bot tasdiqladi (bot.js al:ok) — ikkinchi odam endi tasdiqlay olmaydi
+  store.saveDriver(USER.id, { name: "Ali Valiyev", username: USER.username });
+  assert.equal(store.confirmAppLogin(code, USER.id), true);
+  assert.equal(store.confirmAppLogin(code, 999), false);
+
+  const done = await call("GET", `/pub/auth/app/${code}`);
+  assert.equal(done.status, 200);
+  assert.equal(done.body.me.chatId, USER.id);
+  const me = await call("GET", "/pub/me", { token: done.body.token });
+  assert.equal(me.status, 200);
+  assert.equal(me.body.chatId, USER.id);
+  // token faqat bir marta
+  assert.equal((await call("GET", `/pub/auth/app/${code}`)).status, 410);
+});

@@ -5,6 +5,9 @@
 //
 //   GET  /pub/config           bot username (saytdagi «Telegram bilan kirish» uchun), yo'nalish doirasi
 //   POST /pub/auth             { initData } (Mini App) yoki { widget } (sayt) → { token, me }
+//   POST /pub/auth/app         mobil/kompyuter ilova: → { code, url, tgUrl, expiresIn, pollMs } — ilova url ni ochadi,
+//                              odam botda «✅ Ha, kiraman» ni bosadi (store appLogins.js)
+//   GET  /pub/auth/app/:code   ilova so'rab turadi: 202 { status: "pending" } | 200 { token, me } (bir marta) | 410 (eskirgan)
 //   GET  /pub/call?c=<token>   «📞 Telefon qilish» tugmasi (bot yuk xabari yoki tezkor e'lon ostida): HTML sahifa → tel:+998… (kirishsiz)
 //   GET  /pub/me               foydalanuvchi: ism, rol, obuna, admin, profil, faolmi, o'z raqami (ulashgan bo'lsa)
 //   PUT  /pub/me/role          { role } — haydovchi | yuk_beruvchi (har rolning sozlamalari saqlanadi, qaytganda tiklanadi)
@@ -39,6 +42,7 @@
 //   POST /pub/admin/tg-accounts/login/:id/password  { password } — 2FA bo'lsa
 //   DELETE /pub/admin/tg-accounts/login/:id         bekor qilish / yopish
 //   GET/POST/DELETE /pub/me/tg-accounts…   xuddi shular, lekin istalgan foydalanuvchi — faqat o'z akkauntlari (Sozlamalar)
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -76,7 +80,7 @@ import {
   withPrevFeed,
   withRoute,
 } from "@yuk/shared";
-import { MAIN_TG_ACCOUNT } from "@yuk/store";
+import { APP_LOGIN_TTL_MS, MAIN_TG_ACCOUNT } from "@yuk/store";
 import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -308,12 +312,44 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (result.error) throw httpError(401, result.error, "auth");
     const { id, name, username } = result.user;
     // Boshqaruv markazidan bloklangan (id, username yoki raqam) — kiritmaymiz, ilova «Uzr...» ekranini ko'rsatadi
+    res.json(signIn(id, { name, username }, "web"));
+  });
+
+  // Kirish ruxsati: bloklangan bo'lsa — 403, hisobini o'chirgan bo'lsa — qaytdi (boshidan boshlaydi)
+  const signIn = (id, { name, username }, via) => {
     if (!adminIds.includes(id) && store.banOf({ chatId: id, username, phone: store.getDriver(id)?.phone })) {
       throw httpError(403, BLOCKED_TEXT, "blocked");
     }
-    store.comeBack(id, "web"); // hisobini o'chirgan bo'lsa — qaytdi (boshidan boshlaydi, tarixga yoziladi)
+    store.comeBack(id, via);
     const driver = store.saveDriver(id, { name, username });
-    res.json({ token: sessions.issue(id), me: meOf(driver) });
+    return { token: sessions.issue(id), me: meOf(driver) };
+  };
+
+  // Ilova uchun kirish (mobil/kompyuter): Telegram imzosi yo'q, shuning uchun bot tasdiqlaydi. Kod — 24 bayt tasodif,
+  // uni bilgan kishigina tokenni oladi, shuning uchun uni faqat ilova biladi (manzilda/logda ko'rsatmang)
+  pub.post("/auth/app", (req, res) => {
+    if (!limitAuth(clientIp(req))) throw httpError(429, "Juda ko'p urinish — bir daqiqadan keyin qayta urinib ko'ring");
+    const bot = store.getSetting("bot_username") ?? env.BOT_USERNAME;
+    if (!botToken || !bot) throw httpError(503, "Server sozlanmagan: bot topilmadi");
+    const code = randomBytes(24).toString("base64url");
+    store.createAppLogin(code);
+    res.json({
+      code,
+      url: `https://t.me/${bot}?start=app_${code}`,
+      tgUrl: `tg://resolve?domain=${bot}&start=app_${code}`,
+      expiresIn: APP_LOGIN_TTL_MS / 1000,
+      pollMs: 2000,
+    });
+  });
+
+  pub.get("/auth/app/:code", (req, res) => {
+    const code = req.params.code;
+    const state = store.appLoginState(code);
+    if (state === "pending") return res.status(202).json({ status: "pending" });
+    const chatId = state === "confirmed" ? store.consumeAppLogin(code) : null;
+    if (chatId == null) throw httpError(410, "Kirish kodi eskirgan — qaytadan «Telegram orqali kirish» ni bosing", "expired");
+    const known = store.getDriver(chatId) ?? {};
+    res.json(signIn(chatId, { name: known.name ?? null, username: known.username ?? null }, "app"));
   });
 
   // «📞 Telefon qilish» (bot.js loadButtons). Kirish kerak emas: havola faqat shu odamning chatida, imzosiz token yaroqsiz.

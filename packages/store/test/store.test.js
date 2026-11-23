@@ -656,3 +656,23 @@ test("backfillTextFold: eski e'lonlar (text_fold yo'q) eng yangisidan to'ldirila
   assert.equal(store.backfillTextFold(3), 0);
   store.close();
 });
+
+test("ilova kirish kodi: 10 daqiqadan keyin eskiradi, tasdiqsiz token yo'q", () => {
+  let time = 1_000_000;
+  const store = openStore({ file: ":memory:", now: () => time });
+  const code = "a".repeat(32);
+  store.createAppLogin(code);
+  assert.equal(store.appLoginState(code), "pending");
+  assert.equal(store.consumeAppLogin(code), null);
+  assert.throws(() => store.createAppLogin("qisqa"));
+  time += 11 * 60 * 1000;
+  assert.equal(store.appLoginState(code), "expired");
+  assert.equal(store.confirmAppLogin(code, 5), false);
+  const second = "b".repeat(32);
+  store.createAppLogin(second);
+  assert.equal(store.confirmAppLogin(second, 5), true);
+  assert.equal(store.appLoginState(second), "confirmed");
+  assert.equal(store.consumeAppLogin(second), 5);
+  assert.equal(store.appLoginState(second), "used");
+  store.close();
+});

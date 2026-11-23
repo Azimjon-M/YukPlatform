@@ -2076,3 +2076,24 @@ test("e'lon olish boshlanganda (✅ Tayyor / ▶️) — oxirgi 2 daqiqa uchun c
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.ok(calls.length >= 2, "▶️ dan keyin ham");
 });
+
+test("ilovaga kirish: /start app_<kod> → tasdiq so'raladi, «✅ Ha, kiraman» kodni shu odamga bog'laydi", async () => {
+  const { store, calls, command, press } = setup({ config: { requiredChats: ["@Yuk_Ekspert"] }, answer: (m) => (m === "getChatMember" ? { status: "left" } : undefined) });
+  const code = "k".repeat(32);
+  store.createAppLogin(code);
+  await command(`/start app_${code}`);
+  const ask = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.match(ask.payload.text, /Ilovaga kirish[\s\S]*bosmang/);
+  assert.deepEqual(inlineButtons(ask).map((b) => b.callback_data), [`al:ok:${code}`, "al:no"]);
+  assert.equal(store.appLoginState(code), "pending", "a'zo bo'lmasa ham so'raladi, lekin bosmaguncha kutadi");
+
+  await press(`al:ok:${code}`);
+  assert.equal(store.appLoginState(code), "confirmed");
+  assert.equal(store.consumeAppLogin(code), 42);
+  assert.match(texts(calls, "editMessageText").at(-1), /Tasdiqlandi/);
+  // ikkinchi marta — eskirgan
+  await press(`al:ok:${code}`);
+  assert.match(texts(calls, "editMessageText").at(-1), /eskirgan/);
+  await press("al:no");
+  assert.equal(texts(calls, "editMessageText").at(-1), "Kirish bekor qilindi.");
+});
