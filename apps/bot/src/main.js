@@ -14,6 +14,8 @@ import { createIdleWatcher } from "./idle.js";
 import { readConfig, requireContactOn, ruleParserOn, groupAiOn, sortingOffOn } from "./config.js";
 import { formatLoad } from "./format.js";
 import { createWorker, ruleParse } from "./pipeline.js";
+import { createEmbedLook } from "./embedLook.js";
+import { createEmbedder, loadEmbedModel } from "@yuk/parser/embed";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const time = () => new Date().toLocaleTimeString("ru-RU", { timeZone: "Asia/Tashkent" });
@@ -235,8 +237,16 @@ async function main() {
   // canReceive — kanal va guruhga a'zomi (bot.js; a'zo emas — yuk o'rniga «a'zo bo'ling» eslatmasi).
   // onDirect — yuk beruvchining yuki yuborildi: natijani unga yozadi.
   // deliverRaw — «⚡ Tezkor» / «📌 Mening guruhlarim» rejimidagilarga asl matn, AI'siz (pipeline.js tezkor yo'l)
+  // fastLook + embedding (embedLook.js): kalit ONEPRO_EMBED_API_KEY va data/embed-model.json bo'lsa. Rejim — bazadagi
+  // embed_config.mode (off | shadow | live; standart shadow — faqat yozadi, qaror fastLook'niki)
+  const embedModel = loadEmbedModel(path.join(ROOT, "data/embed-model.json"));
+  const embedLook =
+    embedModel && process.env.ONEPRO_EMBED_API_KEY
+      ? createEmbedLook({ store, model: embedModel, log, embedder: createEmbedder({ apiKey: process.env.ONEPRO_EMBED_API_KEY, task: embedModel.task, dimensions: embedModel.dimensions }) })
+      : null;
+  if (embedLook) log(`🧪 Embedding: fastLook ikkilangan e'lonlarda 1pro ${embedModel.signature} — rejim «${embedLook.config().mode}» (sozlama embed_config)`);
   worker = createWorker(
-    { pool, store, publish, deliver, deliverRaw, groupRaw, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone, sortingOff: sortingOffOn(), held: isBusy, groupAi: groupAiOn() },
+    { pool, store, publish, deliver, deliverRaw, groupRaw, rules, requireContact: config.requireContact, routeScope, canReceive, onDirect: directDone, sortingOff: sortingOffOn(), held: isBusy, groupAi: groupAiOn(), embedLook },
     { log, maxAgeMs: maxPostAgeMs },
   );
   // Haydovchi e'lon olishni boshlaganda (filtr saqlandi, ▶️, ro'yxatdan o'tdi) — oxirgi 2 daqiqadagi mos e'lonlar ham
