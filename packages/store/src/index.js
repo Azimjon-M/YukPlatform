@@ -557,7 +557,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     insertLoad: db.prepare("INSERT INTO loads (post_id, key, data, kind, created_at) VALUES (?, ?, ?, ?, ?)"),
     loadDelivery: db.prepare("UPDATE loads SET sent_to = ?, channel_message_id = ? WHERE id = ?"),
     recentLoads: db.prepare(
-      `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at, p.sender, p.shipper, p.media, p.sender_id
+      `SELECT l.id, l.data, l.created_at, p.source, p.link, p.posted_at, p.sender, p.shipper, p.media, p.sender_id, p.text
        FROM loads l JOIN posts p ON p.id = l.post_id
        WHERE l.created_at > ? AND l.kind = ? ORDER BY l.id DESC LIMIT ?`,
     ),
@@ -757,7 +757,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     },
 
     // Oxirgi yuklar, eng yangisi birinchi ("📋 Mos yuklar" / "🚚 Bo'sh mashinalar" tugmalari uchun).
-    // → [{ id, load, post: { source, link, postedAt, sender, fromShipper }, createdAt }]
+    // → [{ id, load, post: { source, link, postedAt, sender, fromShipper, media, senderId, text }, createdAt }]
     // fromShipper — yuk egasining o'zi yuborgan («📦 Yuk berish»). Uning chat id'si BERILMAYDI: bu ro'yxat web'ga ham ketadi
     recentLoads({ sinceMs = 24 * 60 * 60 * 1000, limit = 500, kind = "yuk" } = {}) {
       return q.recentLoads.all(now() - sinceMs, kind, limit).map((row) => ({
@@ -772,6 +772,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
           fromShipper: row.shipper != null,
           media: row.media ?? null,
           senderId: row.sender_id ?? null,
+          // Asl e'lon matni — ilova kartasida tahrirsiz ko'rsatiladi (/pub/loads faqat kirgan foydalanuvchiga)
+          text: row.text ?? null,
         },
         createdAt: row.created_at,
       }));
