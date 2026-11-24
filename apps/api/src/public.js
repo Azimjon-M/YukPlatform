@@ -25,6 +25,8 @@
 //                              notify: true (botdagi «🗺 Xaritadan tanlash») — bot chatda javob beradi va mos yuklarni yuboradi
 //   GET  /pub/loads            ?view=mine|all&from&to&hours&limit&offset — yuklar (haydovchiga), eng yangisi birinchi
 //   GET  /pub/trucks           xuddi shunday — bo'sh mashinalar (yuk beruvchiga)
+//   GET  /pub/feed             ?minutes=10&limit=200 — ilova lentasi: bot haydovchiga asl matn bilan yuboradigan e'lonlar
+//                              (feedList.js; filtr bo'yicha, AI'siz), eng yangisi birinchi. Faqat haydovchi (profili bilan)
 //   --- «📦 Yuk berish» (faqat yuk beruvchi; bot shipperLoads.js bilan bir qoida) ---
 //   GET  /pub/me/load-form     forma uchun: botda tushunilgan qoralama (d=1 — «✏️ Formada tuzatish»), oxirgi raqamlari,
 //                              24 soatda nechta yubordi va chegara
@@ -82,6 +84,7 @@ import {
   withRoute,
 } from "@yuk/shared";
 import { APP_LOGIN_TTL_MS, MAIN_TG_ACCOUNT } from "@yuk/store";
+import { createFeedList } from "./feedList.js";
 import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -585,6 +588,18 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     });
   };
   pub.get("/loads", listing("yuk"));
+
+  // Ilova lentasi — botdagidek asl e'lonlar (feedList.js)
+  const feedList = createFeedList({ store, now });
+  pub.get("/feed", (req, res) => {
+    const role = roleOf(req.driver);
+    if (!role) throw httpError(409, NEED_ROLE, "no_role");
+    if (role !== "haydovchi") throw httpError(409, "Lenta — haydovchilar uchun", "role");
+    if (!req.driver.profile) throw httpError(409, NEED_PROFILE.haydovchi, "no_profile");
+    const minutes = clamp(Number(req.query.minutes) || 10, 1, 60);
+    const limit = clamp(Number(req.query.limit) || 200, 1, MAX_LIMIT);
+    res.json(feedList.list(req.driver, { minutes, limit }));
+  });
   pub.get("/trucks", listing("mashina"));
 
   // --- «📦 Yuk berish» ---
