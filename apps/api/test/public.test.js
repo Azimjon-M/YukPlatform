@@ -772,10 +772,10 @@ test("rejim: guruhlar ro'yxati; profilda rejim saqlanadi, begona guruh tushadi; 
   assert.equal(fast.body.profile.vehicle, null);
   assert.deepEqual(fast.body.profile.feed, { mode: "tezkor", sources: [] });
   assert.equal(fast.body.active, true);
-  // Saralanmaydi: «Menga mos» va yo'nalish — 409 feed; «Hammasi» ishlaydi
+  // Saralanmaydi: «Menga mos» — bot yuboradiganlari (guruh + filtrlar), yo'nalish — 409 feed; «Hammasi» ishlaydi
   const mine = await call("GET", "/pub/loads", { token });
-  assert.equal(mine.status, 409);
-  assert.equal(mine.body.code, "feed");
+  assert.equal(mine.status, 200);
+  assert.equal(mine.body.view, "mine");
   assert.equal((await call("GET", "/pub/loads?view=all", { token })).status, 200);
   assert.equal((await call("GET", "/pub/me/route", { token })).body.code, "feed");
   assert.equal((await call("PUT", "/pub/me/route", { token, body: { from: "*", to: "*" } })).body.code, "feed");
@@ -799,7 +799,7 @@ test("rejim: guruhlar ro'yxati; profilda rejim saqlanadi, begona guruh tushadi; 
   const old = await call("PUT", "/pub/me/profile", { token, body: { profile: vehicleForm } });
   assert.deepEqual(old.body.profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"] });
   assert.equal(old.body.profile.vehicle.truckClass, "fura");
-  assert.equal((await call("GET", "/pub/loads", { token })).body.code, "feed", "faqat guruhlarim — mashina bo'lsa ham saralanmaydi");
+  assert.equal((await call("GET", "/pub/me/route", { token })).body.code, "feed", "faqat guruhlarim — mashina bo'lsa ham saralanmaydi");
 
   // «Guruhlarim + saralangan» va mashina bor — «Menga mos» ishlaydi
   const plus = await call("PUT", "/pub/me/profile", { token, body: { profile: { ...vehicleForm, feed: { mode: "guruhlarim_plus", sources: ["@TutGruz"] } } } });

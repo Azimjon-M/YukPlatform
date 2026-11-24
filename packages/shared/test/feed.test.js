@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  rawLoadWanted,
   describeProfile,
   feedLabel,
   feedNeedsVehicle,
@@ -163,4 +164,15 @@ test("regionWanted: «qayerdan» aytilmagan — hammaga; aytilgan, lekin noma'lu
   assert.equal(filtersWanted(fargona, { origins: [], originUnknown: true, trucks: [] }), false);
   assert.equal(filtersWanted(fargona, { origins: ["xorazm"], trucks: [] }), false);
   assert.equal(filtersWanted(fargona, { origins: ["fargona"], trucks: [] }), true);
+});
+
+test("rawLoadWanted: ilovadagi «Menga mos» — guruh + Qayerdan + Transport (bot qoidasi)", () => {
+  const fast = { feed: { mode: "tezkor", sources: [], regions: ["fargona"], trucks: ["isuzu"] } };
+  assert.equal(rawLoadWanted(fast, { fromRegion: "fargona", truckClass: "isuzu" }, "@a"), true);
+  assert.equal(rawLoadWanted(fast, { fromRegion: "toshkent", truckClass: "isuzu" }, "@a"), false, "boshqa viloyat");
+  assert.equal(rawLoadWanted(fast, { fromRegion: "fargona", truckClass: "fura" }, "@a"), false, "boshqa transport");
+  assert.equal(rawLoadWanted(fast, { fromRegion: null, truckClass: null }, "@a"), true, "joyi va mashinasi yo'q — hammaga");
+  const mine = { feed: { mode: "guruhlarim", sources: ["@Bizniki"] } };
+  assert.equal(rawLoadWanted(mine, { fromRegion: "fargona" }, "@bizniki"), true);
+  assert.equal(rawLoadWanted(mine, { fromRegion: "fargona" }, "@begona"), false, "tanlanmagan guruh");
 });

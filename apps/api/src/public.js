@@ -64,6 +64,7 @@ import {
   placePoint,
   placeText,
   planFilter,
+  rawLoadWanted,
   roleOf,
   routeCounts,
   routeInScope,
@@ -536,8 +537,9 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     }
     // Haydovchiga mos yuklar profil (transport) bo'lmasa hisoblanmaydi; yuk beruvchiga esa sozlamalar shart emas
     if (view === "mine" && kind === "yuk" && role === "haydovchi" && !profile) throw httpError(409, NEED_PROFILE.haydovchi, "no_profile");
-    // Saralanmaydigan rejim (mashina yo'q) — «Menga mos» hisoblanmaydi, ilova «Hammasi» ni ko'rsatadi
-    if (view === "mine" && kind === "yuk" && role === "haydovchi" && !sortedReady(profile)) throw httpError(409, NO_SORTED, "feed");
+    // Saralanmaydigan rejim (🌐 Hamma guruhlar / 📌 Mening guruhlarim) — «Menga mos» = bot yuboradiganlari: tanlagan guruhlari
+    // va «Qayerdan» / «Transport» filtrlari (shared rawLoadWanted). Saralangan rejim — avvalgidek matchLoad
+    const rawFeed = view === "mine" && kind === "yuk" && role === "haydovchi" && !sortedReady(profile);
     // near=lat,lng — shu nuqtaga yaqin e'lonlar (km, default 50, <5000 km). Yuk beruvchi «🚚 Mashinalar» da
     // xaritadan tanlagan nuqta; masofa @yuk/shared geo.js distanceKm bilan hisoblanadi
     const nearPoint = parseNear(req.query.near);
@@ -551,7 +553,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
       .filter(({ post }) => allowed(post.source))
       .filter(({ load }) => routeInScope(load, scope) && atArea(load, "from", from) && atArea(load, "to", to))
       // profile = null (ro'yxatdan o'tmagan) — matchTruck bo'sh profil bilan ishlaydi (cheklovlar yo'q)
-      .filter(({ load }) => view === "all" || matches(load, profile ?? {}).ok);
+      .filter(({ load, post }) => view === "all" || (rawFeed ? rawLoadWanted(profile, load, post.source) : matches(load, profile ?? {}).ok));
     if (nearPoint) {
       // Yaqinligi noma'lum (joyi yozilmagan / bilmaymiz) e'lonlar ro'yxatga kirmaydi
       rows = rows

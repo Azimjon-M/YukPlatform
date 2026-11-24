@@ -188,6 +188,13 @@ export function rawWanted(profile, source) {
   return sources.some((name) => sourceKey(name) === key);
 }
 
+// Ilovadagi «Menga mos» (GET /pub/loads view=mine) saralanmaydigan rejimda (🌐 Hamma guruhlar / 📌 Mening guruhlarim):
+// bot yuborganidek — guruh (rawWanted) + «📍 Qayerdan» va «🚚 Transport» filtrlari (bot pipeline.js handleParsed bilan bir qoida)
+export const rawLoadWanted = (profile, load, source) =>
+  rawWanted(profile, source) &&
+  regionWanted(profile, load?.fromRegion ? [load.fromRegion] : []) &&
+  truckWanted(profile, load?.truckClass ? [load.truckClass] : []);
+
 // Shu manbadagi e'lonning saralangan (AI / qoidalar → matchLoad) yuki haydovchiga boradimi.
 // Tanlagan guruhidagi e'lon u yerga kirmaydi — u allaqachon asl matn bilan ketgan (rawWanted)
 export function sortedWanted(profile, source) {
