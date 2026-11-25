@@ -818,6 +818,24 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       return driverRow(q.getDriver.get(chatId));
     },
 
+    // Ilovaga «kod bilan kirish» (2026-11-25, Azimjon: «ilova global bo'lishi kerak»): raqam (istalgan davlat) yoki
+    // @username bo'yicha egasi. Raqam: avval aniq (+raqamlar), bo'lmasa oxirgi 9 raqami bo'yicha — faqat bitta odamga
+    // to'g'ri kelsa (turkcha «0532…», o'zbekcha «90…» kabi mahalliy yozilishlar). O'chirilgan hisob — yo'q. → driver | null
+    findLoginDriver({ phone = null, username = null } = {}) {
+      if (username) {
+        const row = db.prepare("SELECT chat_id FROM drivers WHERE lower(username) = lower(?) AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1").get(String(username));
+        return row ? this.getDriver(row.chat_id) : null;
+      }
+      const digits = String(phone ?? "").replace(/\D/g, "");
+      if (digits.length < 7) return null;
+      const exact = db.prepare("SELECT chat_id FROM drivers WHERE phone = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1").get(`+${digits}`);
+      if (exact) return this.getDriver(exact.chat_id);
+      if (digits.length < 9) return null;
+      const tail = digits.slice(-9);
+      const rows = db.prepare("SELECT chat_id FROM drivers WHERE phone LIKE ? AND deleted_at IS NULL LIMIT 2").all(`%${tail}`);
+      return rows.length === 1 ? this.getDriver(rows[0].chat_id) : null;
+    },
+
     // fields: name, username, role, profile, draft, active (bot), appActive (ilova), plan, isAdmin, phone, phoneAskedAt — faqat berilganlari o'zgaradi.
     // Rol berilsa (qayta kirdi) — «hisobdan chiqqan» belgisi tozalanadi.
     // Rolni tekshirish (haydovchi | yuk_beruvchi) va raqamni tozalash (@yuk/shared normalizeContactPhone) chaqiruvchining ishi.

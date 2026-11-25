@@ -967,3 +967,37 @@ test("POST /pub/me/push: ilova tokeni saqlanadi, noto'g'risi — 400, chiqqanda 
   await call("POST", "/pub/me/logout", { token });
   assert.equal(store.pushTokens().some((t) => t.chatId === 561), false);
 });
+
+// Azimjon, 2026-11-25: «turk yoki chet el raqami orqali ilovaga kirish qila olmayapman — ilova global bo'lishi kerak»
+test("kod bilan kirish: istalgan davlat raqami yoki @username → botdan kod → token", async () => {
+  store.saveDriver(7001, { name: "Mehmet", username: "mehmet_tr", phone: "+905321234567" });
+  store.saveDriver(7002, { name: "Ali", phone: "+998901230099" });
+  const ip = { "cf-connecting-ip": "10.9.9.9" }; // boshqa testlardagi kirishlar cheklovini yemasin
+  const ask = async (login) => call("POST", "/pub/auth/code", { body: { login }, headers: ip });
+  const codeOf = (chatId) => /<code>(\d{6})<\/code>/.exec(notified.filter((n) => n.chatId === chatId).at(-1)?.text ?? "")?.[1];
+
+  // Turk raqami: xalqaro yozilishi ham, mahalliy «0532…» ham topiladi
+  const tr = await ask("+90 532 123 45 67");
+  assert.equal(tr.status, 200);
+  assert.equal(tr.body.digits, 6);
+  const code = codeOf(7001);
+  assert.ok(code, "bot kod yubordi");
+  assert.equal((await ask("0532 123 45 67")).body.code, "limit", "60 soniyada bir marta");
+
+  const wrong = await call("POST", "/pub/auth/code/verify", { body: { requestId: tr.body.requestId, code: code === "000000" ? "111111" : "000000" }, headers: ip });
+  assert.equal(wrong.status, 400);
+  assert.equal(wrong.body.attemptsLeft, 4);
+  const ok = await call("POST", "/pub/auth/code/verify", { body: { requestId: tr.body.requestId, code }, headers: ip });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.me.chatId, 7001);
+  assert.ok(sessions.verify(ok.body.token));
+  assert.equal((await call("POST", "/pub/auth/code/verify", { body: { requestId: tr.body.requestId, code }, headers: ip })).status, 410, "bir martalik");
+
+  // O'zbek raqami qisqa yozilishda, username — katta-kichik harfsiz
+  assert.equal((await ask("90 123 00 99")).status, 200);
+  assert.equal((await ask("@Mehmet_TR")).body.code, "limit", "username ham o'sha odam");
+  // bizda yo'q / noto'g'ri
+  const de = await ask("+49 151 2345 6789");
+  assert.equal(de.body.code, "not_found", JSON.stringify(de));
+  assert.equal((await ask("12")).status, 400);
+});

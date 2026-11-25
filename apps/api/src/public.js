@@ -57,7 +57,7 @@
 //   POST /pub/admin/tg-accounts/login/:id/password  { password } — 2FA bo'lsa
 //   DELETE /pub/admin/tg-accounts/login/:id         bekor qilish / yopish
 //   GET/POST/DELETE /pub/me/tg-accounts…   xuddi shular, lekin istalgan foydalanuvchi — faqat o'z akkauntlari (Sozlamalar)
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -91,6 +91,7 @@ import {
   shipperLoadText,
   sortedReady,
   telegramUsername,
+  typedPhone,
   truckPlaceText,
   validRole,
   validRouteArea,
@@ -400,6 +401,93 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (chatId == null) throw httpError(410, "Kirish kodi eskirgan — qaytadan «Telegram orqali kirish» ni bosing", "expired");
     const known = store.getDriver(chatId) ?? {};
     res.json(signIn(chatId, { name: known.name ?? null, username: known.username ?? null }, "app"));
+  });
+
+  // --- Ilovaga «kod bilan kirish» (YukApp codeLogin.js) ---
+  // Azimjon, 2026-11-24: «telefon raqami yoki username ni kiritsin, agar bizda bo'lsagina botdan kod olsin»;
+  // 2026-11-25: «turk yoki chet el raqami orqali kirish qila olmayapman — ilova global bo'lishi kerak».
+  // Raqam istalgan davlatniki (7–15 raqam): bazadagi raqam bilan aniq yoki oxirgi 9 raqami bo'yicha (store.findLoginDriver).
+  // Kod — 6 raqam, 5 daqiqa, 5 urinish; bir odamga 60 soniyada bir marta. Kodlar faqat xotirada (server qayta yonsa —
+  // qaytadan so'raladi). requestId va kod logga yozilmaydi
+  const LOGIN_CODE_TTL_MS = 5 * 60_000;
+  const LOGIN_RESEND_MS = 60_000;
+  const LOGIN_ATTEMPTS = 5;
+  const loginCodes = new Map(); // requestId → { chatId, code, expiresAt, attempts }
+  const lastCodeAt = new Map(); // chatId → oxirgi kod yuborilgan vaqt
+  const sweepCodes = () => {
+    const time = now();
+    for (const [id, entry] of loginCodes) if (entry.expiresAt <= time) loginCodes.delete(id);
+    for (const [chatId, at] of lastCodeAt) if (time - at > LOGIN_RESEND_MS) lastCodeAt.delete(chatId);
+  };
+  // "+90 532 123 45 67", "0532…", "90 123 45 67", "@Ali_99" → { phone } | { username } | null
+  const loginOf = (raw) => {
+    const text = String(raw ?? "").trim().slice(0, 64);
+    if (/[A-Za-z]/.test(text)) {
+      const name = telegramUsername(text);
+      return name ? { username: name } : null;
+    }
+    const digits = text.replace(/\D/g, "");
+    if (digits.length < 7 || digits.length > 15) return null;
+    // O'zbekcha qisqa yozilish (90 123 45 67) — +998 bilan; boshqasi — xalqaro raqam sifatida
+    const uz = typedPhone(text);
+    return { phone: uz ?? `+${digits}` };
+  };
+
+  pub.post("/auth/code", async (req, res) => {
+    if (!limitAuth(clientIp(req))) throw httpError(429, "Juda ko'p urinish — bir daqiqadan keyin qayta urinib ko'ring", "limit");
+    if (!notify) throw httpError(503, "Server sozlanmagan: bot topilmadi");
+    const login = loginOf(req.body?.login);
+    if (!login) throw httpError(400, "Telefon raqamini (xalqaro, masalan +90 532 123 45 67) yoki @username yozing");
+    const driver = store.findLoginDriver(login);
+    if (!driver) throw httpError(404, "Bu raqam yoki username bizda yo'q — avval botda ro'yxatdan o'ting", "not_found");
+    const chatId = driver.chatId;
+    if (!adminIds.includes(chatId) && store.banOf({ chatId, username: driver.username, phone: driver.phone })) throw httpError(403, BLOCKED_TEXT, "blocked");
+    if (driver.subOk === false) {
+      return res.status(403).json({ error: "Avval kanal va guruhga a'zo bo'ling", code: "not_member", missing: driver.subMissing ?? [] });
+    }
+    sweepCodes();
+    const last = lastCodeAt.get(chatId);
+    if (last && now() - last < LOGIN_RESEND_MS) {
+      const retryIn = Math.ceil((LOGIN_RESEND_MS - (now() - last)) / 1000);
+      return res.status(429).json({ error: `Kod yaqinda yuborildi — ${retryIn} soniyadan keyin qayta so'rang`, code: "limit", retryIn });
+    }
+    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    const sent = await notify(
+      chatId,
+      `🔐 Yuk Ekspert ilovasiga kirish kodi: <code>${code}</code>\n\n5 daqiqa amal qiladi. Kodni hech kimga bermang — agar siz so'ramagan bo'lsangiz, e'tibor bermang.`,
+      { parse_mode: "HTML" },
+    );
+    if (!sent) throw httpError(409, "Bot sizga yoza olmadi — Telegram'da botni oching va «Start» ni bosing", "bot_blocked");
+    lastCodeAt.set(chatId, now());
+    // Bir odamga bitta amaldagi kod: eski so'rovlar yopiladi
+    for (const [id, entry] of loginCodes) if (entry.chatId === chatId) loginCodes.delete(id);
+    const requestId = randomBytes(18).toString("base64url");
+    loginCodes.set(requestId, { chatId, code, expiresAt: now() + LOGIN_CODE_TTL_MS, attempts: 0 });
+    res.json({ requestId, expiresIn: LOGIN_CODE_TTL_MS / 1000, resendIn: LOGIN_RESEND_MS / 1000, digits: 6 });
+  });
+
+  pub.post("/auth/code/verify", (req, res) => {
+    if (!limitAuth(clientIp(req))) throw httpError(429, "Juda ko'p urinish — bir daqiqadan keyin qayta urinib ko'ring", "limit");
+    const requestId = String(req.body?.requestId ?? "");
+    const code = String(req.body?.code ?? "").replace(/\D/g, "");
+    const entry = loginCodes.get(requestId);
+    if (!entry || entry.expiresAt <= now()) {
+      loginCodes.delete(requestId);
+      throw httpError(410, "Kod eskirdi — qaytadan so'rang", "expired");
+    }
+    const ok = code.length === entry.code.length && timingSafeEqual(Buffer.from(code), Buffer.from(entry.code));
+    if (!ok) {
+      entry.attempts++;
+      const attemptsLeft = LOGIN_ATTEMPTS - entry.attempts;
+      if (attemptsLeft <= 0) {
+        loginCodes.delete(requestId);
+        throw httpError(410, "Urinishlar tugadi — kodni qaytadan so'rang", "expired");
+      }
+      return res.status(400).json({ error: "Kod noto'g'ri", code: "wrong", attemptsLeft });
+    }
+    loginCodes.delete(requestId);
+    const known = store.getDriver(entry.chatId) ?? {};
+    res.json(signIn(entry.chatId, { name: known.name ?? null, username: known.username ?? null }, "app"));
   });
 
   // «📞 Telefon qilish» (bot.js loadButtons). Kirish kerak emas: havola faqat shu odamning chatida, imzosiz token yaroqsiz.
@@ -1051,7 +1139,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
       errors?.add({ source: "web", level: "error", kind: "server", text: `${req.method} ${req.originalUrl.split("?")[0]}: ${error.message}`, details: error.stack });
     }
     // code — web nima qilishini biladi: auth → qayta kirish, no_profile → sozlamalarga, no_role → rol tanlash
-    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit", "feed", "update", "stale", "phone"].includes(error.code) ? { code: error.code } : {};
+    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit", "feed", "update", "stale", "phone", "not_found", "bot_blocked", "expired"].includes(error.code) ? { code: error.code } : {};
     res.status(status).json({ error: status >= 500 ? "Server xatosi" : error.message, ...code });
   });
 
