@@ -40,3 +40,10 @@ test("lenta: «📌 Mening guruhlarim», «📍 Qayerdan» filtri va yopiq guruh
   assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] })).items.map((i) => i.post.source), ["@yuk_bbb", "@yuk_aaa"]);
   assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] }, { plan: "pro" })).items.map((i) => i.post.source), ["-1001", "@yuk_bbb", "@yuk_aaa"]);
 });
+
+test("lenta: pauzada — bo'sh, active: false", () => {
+  const { add, feed } = setup();
+  add("@yuk_aaa", LOAD, 60_000);
+  assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] }, { active: false })), { minutes: 10, active: false, total: 0, items: [] });
+  assert.equal(feed.list(driver({ mode: "tezkor", sources: [] })).active, true);
+});

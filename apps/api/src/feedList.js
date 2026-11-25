@@ -41,8 +41,11 @@ export function createFeedList({ store, now = Date.now }) {
   const closedContact = (post) =>
     extractPhones(post.text ?? "").length > 0 || Boolean(post.senderPhone) || Boolean(post.sender) || Boolean(post.senderId && known(post.senderId));
 
-  // → { minutes, total, items: [{ id, load: {…yo'nalish, phones}, post: {source, link, postedAt, sender, senderId, media, text} }] }
+  // → { minutes, active, total, items: [{ id, load: {…yo'nalish, phones}, post: {source, link, postedAt, sender, senderId, media, text} }] }
+  // Pauzada (botdagi «⏸ Pauza» yoki ilovadagi) — bot ham yubormaydi, lenta ham bo'sh; active ilovaga holatni bildiradi
   function list(driver, { minutes = 10, limit = 200 } = {}) {
+    const active = driver.active !== false;
+    if (!active) return { minutes, active, total: 0, items: [] };
     const { profile } = driver;
     const guruhlarim = feedMode(profile) === "guruhlarim";
     const owners = new Map();
@@ -74,7 +77,7 @@ export function createFeedList({ store, now = Date.now }) {
         },
       });
     }
-    return { minutes, total: items.length, items: items.slice(0, limit) };
+    return { minutes, active, total: items.length, items: items.slice(0, limit) };
   }
 
   return { list };
