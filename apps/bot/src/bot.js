@@ -708,7 +708,9 @@ export function createBot({
       const prev = store.getDriver(ctx.chat.id)?.profile;
       profile = withRoute(withPrevFeed(profile, prev), prev);
     }
-    const driver = store.saveDriver(ctx.chat.id, { role, profile, draft: null, active: true });
+    // Pauza saqlanadi (2026-11-25): sozlamani saqlash pauzani bekor qilmaydi, faqat birinchi ro'yxatdan o'tish yoqadi
+    const wasSet = Boolean(store.getDriver(ctx.chat.id)?.profile);
+    const driver = store.saveDriver(ctx.chat.id, { role, profile, draft: null, ...(wasSet ? {} : { active: true }) });
     const t = ROLE_TEXT[role];
     // Yangi haydovchi: yo'nalish tanlanmaguncha yuk yuborilmaydi. Tartib (Azimjon, 2026-11-10): forma → raqam (bir marta,
     // ixtiyoriy) → yo'nalish. Raqamga javob bergach (ulashdi yoki «Keyinroq») — afterPhone() yo'nalishni so'raydi.
@@ -913,6 +915,7 @@ export function createBot({
     const feed = feedOf(profile);
     const needsVehicle = FEED_MODES[feed.mode].vehicle && !profile.vehicle;
     await ctx.reply(feedSavedText(feed, { needsVehicle }), html(driver));
+    if (driver.active === false) await ctx.reply(`⏸ Siz pauzadasiz — e'lonlar kelmaydi. Yoqish — «${MENU.resume}».`, menu(driver));
     if (needsVehicle && !FEED_MODES[feed.mode].groups) return registerPaths(ctx, driver, "👇 Mashinangizni kiriting.");
     if (sortedReady(profile) && !routeChosen(profile)) {
       await ctx.reply(ROUTE_NEXT, menu(driver));
@@ -955,11 +958,11 @@ export function createBot({
     if (mode === "saralangan") {
       // Profili yo'q yangi haydovchi — rejim standart saralangan, profil forma bilan yaratiladi
       if (!driver.profile) return registerPaths(ctx, driver, "🎯 Saralangan: mashinangiz va yo'nalishingizga mos yuklar keladi.");
-      const updated = store.saveDriver(ctx.chat.id, { profile: { ...driver.profile, feed }, active: true });
+      const updated = store.saveDriver(ctx.chat.id, { profile: { ...driver.profile, feed } }); // pauza bo'lsa — qoladi
       return feedSaved(ctx, updated);
     }
     // Tezkor — mashina kerak emas (bori saqlanadi: saralanganga qaytsa, qayta kiritmaydi)
-    const updated = store.saveDriver(ctx.chat.id, { role: "haydovchi", profile: rawProfile(feed, driver.profile), draft: null, active: true });
+    const updated = store.saveDriver(ctx.chat.id, { role: "haydovchi", profile: rawProfile(feed, driver.profile), draft: null, ...(driver.profile ? {} : { active: true }) });
     await feedSaved(ctx, updated);
   }
 

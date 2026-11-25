@@ -464,7 +464,9 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     // Haydovchi formasida yo'nalish yo'q (u botdagi «📋 Mos yuklar» da tanlanadi) — eskisi qoladi
     const before = store.getDriver(req.driver.chatId)?.profile;
     const profile = role === "haydovchi" ? withRoute(result.profile, before) : result.profile;
-    res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile, draft: null, active: true })));
+    // Pauza saqlanadi (Azimjon, 2026-11-25: «Bot Pauzadaham ishlayabdi»): filtr/sozlamani saqlash pauzani bekor qilmaydi —
+    // faqat «▶️ Davom etish». Birinchi marta ro'yxatdan o'tsa (profil yo'q edi) — yoqiladi
+    res.json(meOf(store.saveDriver(req.driver.chatId, { role, profile, draft: null, ...(before ? {} : { active: true }) })));
   });
 
   // «📌 Mening guruhlarim» ro'yxati (store feed.js feedSources): ochiq va yopiq guruhlar (yopig'ini Pro tanlaydi — boshqalarga

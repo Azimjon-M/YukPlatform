@@ -329,6 +329,12 @@ test("pauza / davom", async () => {
   assert.equal((await call("PATCH", "/pub/me", { token, body: { active: "ha" } })).status, 400);
   assert.equal((await call("PATCH", "/pub/me", { token, body: { active: false } })).body.active, false);
   assert.equal(store.getDriver(555).active, false);
+  // Pauzada filtr/sozlamani saqlash pauzani bekor qilmaydi (Azimjon, 2026-11-25: «Bot Pauzadaham ishlayabdi»)
+  const profile = store.getDriver(555).profile;
+  const kept = await call("PUT", "/pub/me/profile", { token, body: { profile: { ...profile, feed: { mode: "tezkor" } } } });
+  assert.equal(kept.status, 200);
+  assert.equal(kept.body.active, false);
+  assert.equal(store.getDriver(555).active, false);
   assert.equal((await call("PATCH", "/pub/me", { token, body: { active: true } })).body.active, true);
   // profili yo'q haydovchi yoqa olmaydi
   const fresh = sessions.issue(556);
