@@ -14,12 +14,14 @@ import { createAiQueries } from "./ai.js";
 import { AUTO_PRO_SQL, createTgAccountQueries, hashPhone } from "./tgAccounts.js";
 import { createFeedQueries, migrateFeed } from "./feed.js";
 import { createAppLoginQueries } from "./appLogins.js";
+import { createPushQueries } from "./push.js";
 
 export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR } from "./lock.js";
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
 export { createCallLinks, createSessions, LINK_PERIOD_S, SESSION_TTL_S } from "./sessions.js";
 export { TUNNEL_URL_KEY, tunnelUrl } from "./tunnel.js";
 export { APP_LOGIN_CODE, APP_LOGIN_TTL_MS } from "./appLogins.js";
+export { PUSH_TOKEN } from "./push.js";
 export { hashPhone, MAIN_TG_ACCOUNT, SCAN_RECHECK, TG_ACCOUNT_NAME } from "./tgAccounts.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -596,6 +598,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     ...createFeedQueries(db, now),
     // Ilovaga bot orqali kirish kodlari (appLogins.js)
     ...createAppLoginQueries(db, now),
+    // Ilova bildirishnomalari: telefon tokenlari (push.js)
+    ...createPushQueries(db, now),
 
     // --- E'lonlar navbati ---
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.

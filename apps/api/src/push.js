@@ -1,0 +1,86 @@
+// Ilovaga bildirishnoma (Azimjon, 2026-11-25: «ilovadan chiqib ketsam e'lon kelmayabdi … backgroundda ham ishlashi kerak»).
+// Har 5 soniyada: telefon tokeni bor haydovchilarga ilova lentasining AYNAN o'zi (feedList.js, so'nggi 3 daqiqa) — undagi
+// shu tokenga hali yuborilmagan e'lonlar FCM bilan ketadi: sarlavha «📍 Qayerdan → Qayerga», matn — e'lon boshi,
+// «📞 Qo'ng'iroq qilish» — e'londagi birinchi raqam. Bir aylanishda bitta telefonga ko'pi bilan 3 ta (qolgani — lentada).
+// Pauzada / filtrsiz / hisobdan chiqqan — yuborilmaydi. Yuk beruvchiga (bo'sh mashinalar) — hali yo'q.
+import { placeText, roleOf } from "@yuk/shared";
+
+export const PUSH_EVERY_MS = 5_000;
+export const PUSH_MINUTES = 3;
+export const PUSH_PER_TICK = 3;
+
+const hasPlace = (load, side) => Boolean(load[`${side}City`] || load[`${side}Region`] || load[`${side}Country`]);
+
+// FCM data (hamma qiymat — matn): expo-notifications NotificationData — title, message, channelId, categoryId, body (JSON)
+export function pushMessage(item) {
+  const { load = {}, post = {} } = item;
+  const route = hasPlace(load, "from") || hasPlace(load, "to") ? `📍 ${placeText(load, "from")} → ${placeText(load, "to")}` : "🚚 Yangi yuk";
+  const text = String(post.text ?? "").replace(/\s+/g, " ").trim();
+  const phone = load.phones?.[0] ?? "";
+  return {
+    title: route,
+    message: text.length > 180 ? `${text.slice(0, 179)}…` : text,
+    channelId: "yuklar",
+    categoryId: phone ? "yuk" : "",
+    body: JSON.stringify({ postId: item.id, phone }),
+  };
+}
+
+export function createPusher({ store, feedList, send, log = () => {}, everyMs = PUSH_EVERY_MS }) {
+  let busy = false;
+  let timer = null;
+
+  async function tick() {
+    if (busy) return;
+    busy = true;
+    try {
+      const byChat = new Map();
+      for (const row of store.pushTokens()) {
+        if (!byChat.has(row.chatId)) byChat.set(row.chatId, []);
+        byChat.get(row.chatId).push(row);
+      }
+      for (const [chatId, rows] of byChat) {
+        const driver = store.getDriver(chatId);
+        if (!driver || driver.deletedAt || roleOf(driver) !== "haydovchi" || !driver.profile || driver.active === false) continue;
+        const items = feedList.list(driver, { minutes: PUSH_MINUTES, limit: 50 }).items; // eng yangisi birinchi
+        const top = items.reduce((max, item) => Math.max(max, Number(item.id)), 0);
+        for (const row of rows) {
+          // Birinchi marta — eskilari yuborilmaydi, faqat bundan keyingilari
+          if (row.lastPostId == null) {
+            store.setPushCursor(row.token, top);
+            continue;
+          }
+          const fresh = items.filter((item) => Number(item.id) > row.lastPostId).slice(0, PUSH_PER_TICK).reverse();
+          if (!fresh.length) continue;
+          store.setPushCursor(row.token, top);
+          for (const item of fresh) {
+            const result = await send(row.token, pushMessage(item)).catch((error) => {
+              log(`Bildirishnoma yuborilmadi: ${error.message}`);
+              return "error";
+            });
+            if (result === "gone") {
+              store.dropPushToken(row.token); // ilova o'chirilgan / token eskirgan
+              break;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      log(`Bildirishnoma aylanishida xato: ${error.message}`);
+    } finally {
+      busy = false;
+    }
+  }
+
+  return {
+    tick,
+    start() {
+      timer ??= setInterval(tick, everyMs);
+      timer.unref?.();
+    },
+    stop() {
+      clearInterval(timer);
+      timer = null;
+    },
+  };
+}

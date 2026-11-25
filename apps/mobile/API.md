@@ -42,6 +42,7 @@ Token 30 kun amal qiladi. Muddati o'tsa server `401` qaytaradi, shunda yuqoridag
 | `GET /pub/me/feed-sources` | guruh va kanallar ro'yxati |
 | `GET /pub/me/load-form`, `POST /pub/loads` `{ load }` | yuk berish (yuk beruvchi) |
 | `POST /pub/me/logout` | hisobdan chiqish |
+| `POST /pub/me/push` | `{ token, platform }` — FCM tokeni (ilova bildirishnomasi; server `apps/api/src/push.js` har 5 s da lentadagi yangi e'lonni yuboradi, chiqqanda/o'chirganda tokenlar o'chadi) |
 
 Javoblarning to'liq ko'rinishi `apps/api/test/public.test.js` faylida misollar bilan berilgan. Mini App
 (`apps/web/src/api.js` va sahifalar) shu API'ni qanday chaqirishini ko'rib chiqing, ilovada ham xuddi shunday qiling.

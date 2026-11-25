@@ -862,3 +862,15 @@ test("ilova kirishi: kod → botda tasdiq → token bir marta; begona kod va tas
   // token faqat bir marta
   assert.equal((await call("GET", `/pub/auth/app/${code}`)).status, 410);
 });
+
+test("POST /pub/me/push: ilova tokeni saqlanadi, noto'g'risi — 400, chiqqanda o'chadi", async () => {
+  store.saveDriver(561, { name: "Push", role: "haydovchi", active: true });
+  const token = sessions.issue(561);
+  const fcm = "fcm-token-zzzzzzzzzzzzzzzzzzzzzzzz:abc";
+  assert.equal((await call("POST", "/pub/me/push", { body: { token: fcm } })).status, 401);
+  assert.equal((await call("POST", "/pub/me/push", { token, body: { token: "x y" } })).status, 400);
+  assert.equal((await call("POST", "/pub/me/push", { token, body: { token: fcm, platform: "android" } })).status, 200);
+  assert.deepEqual(store.pushTokens().filter((t) => t.chatId === 561).map((t) => t.token), [fcm]);
+  await call("POST", "/pub/me/logout", { token });
+  assert.equal(store.pushTokens().some((t) => t.chatId === 561), false);
+});

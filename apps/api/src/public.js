@@ -15,6 +15,7 @@
 //                              profile.feed — yetkazish rejimi (kelmasa — eskisi qoladi), guruhlar faqat ro'yxatdagilar
 //   GET  /pub/me/feed-sources  «📌 Mening guruhlarim» uchun tanlasa bo'ladigan guruh/kanallar (eng faoli birinchi)
 //   PATCH /pub/me              { active } — pauza / davom
+//   POST /pub/me/push          { token, platform } — ilova (YukApp) bildirishnomasi uchun FCM tokeni (push.js yuboradi)
 //   POST /pub/me/logout        hisobdan chiqish: rol va sozlamalar yashiriladi, bot yubormaydi (qayta kirsa — tiklanadi)
 //   DELETE /pub/me             hisobni o'chirish (botdagi /ochirish → «Hammasini o'chirish» bilan bir xil)
 //   DELETE /pub/me/phone       faqat o'z raqamini o'chirish (botdagi «📱 Faqat raqamni o'chirish» bilan bir xil); qayta
@@ -83,7 +84,7 @@ import {
   withPrevFeed,
   withRoute,
 } from "@yuk/shared";
-import { APP_LOGIN_TTL_MS, MAIN_TG_ACCOUNT } from "@yuk/store";
+import { APP_LOGIN_TTL_MS, MAIN_TG_ACCOUNT, PUSH_TOKEN } from "@yuk/store";
 import { createFeedList } from "./feedList.js";
 import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
@@ -459,8 +460,18 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   pub.post("/me/logout", (req, res) => {
     const { chatId } = req.driver;
     const user = store.signOut(chatId);
+    store.dropPushTokensOf?.(chatId); // chiqdi — telefoniga bildirishnoma ketmaydi
     void notify?.(chatId, SIGNED_OUT_TEXT, { reply_markup: { remove_keyboard: true } }); // xatoni o'zi yutadi
     res.json(meOf(user));
+  });
+
+  // Ilova bildirishnomasi: telefonning FCM tokeni. Har ochilishda keladi (token almashib qolishi mumkin)
+  pub.post("/me/push", (req, res) => {
+    const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    if (!PUSH_TOKEN.test(token)) throw httpError(400, "Token noto'g'ri");
+    const platform = req.body?.platform === "ios" ? "ios" : "android";
+    store.savePushToken(req.driver.chatId, token, platform);
+    res.json({ ok: true });
   });
 
   // Sozlamalardagi «🗑 Raqamni o'chirish» (Azimjon, 2026-11-10). Botdagi /ochirish → «Faqat raqamni o'chirish» bilan
@@ -480,6 +491,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   pub.delete("/me", (req, res) => {
     const { chatId } = req.driver;
     store.deleteDriver(chatId, { via: "web" });
+    store.dropPushTokensOf?.(chatId);
     // Javobni kutmaymiz: chatdagi pastki menyu eskirdi — bot nomidan «o'chirildi» deb yozib, menyuni olib tashlaymiz
     void notify?.(chatId, DELETED_TEXT, { reply_markup: { remove_keyboard: true } }); // xatoni o'zi yutadi
     res.json({ deleted: true });

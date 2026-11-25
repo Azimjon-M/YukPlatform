@@ -18,6 +18,9 @@ import { createApp, normalizeSourceName } from "./app.js";
 import { createErrorLog } from "./errorLog.js";
 import { createProcessManager } from "./processes.js";
 import { createPublicApp } from "./public.js";
+import { createFeedList } from "./feedList.js";
+import { FCM_KEY_FILE, createFcm, loadFcmKey } from "./fcm.js";
+import { createPusher } from "./push.js";
 import { createBotMessenger } from "./botMessage.js";
 import { findCloudflared, findNginx, findTailscale } from "./edge/tools.js";
 import { createSessions } from "./telegramAuth.js";
@@ -109,6 +112,31 @@ const publicApp = createPublicApp({
   errors,
 });
 
+// Ilova bildirishnomalari (push.js): Firebase kaliti bo'lsa — har 5 soniyada yangi e'lonlar telefonlarga. Kalit fayli
+// keyin qo'yilsa ham server qayta yoqilmasdan, bir daqiqa ichida o'zi ulanadi
+let pusher = null;
+let fcmNote = "";
+function startPush() {
+  try {
+    const send = createFcm(loadFcmKey());
+    if (!send) {
+      if (!fcmNote) log(`Ilova bildirishnomalari: o'chiq — Firebase kaliti yo'q (${FCM_KEY_FILE}), har daqiqada tekshiriladi`);
+      fcmNote = "missing";
+      return;
+    }
+    pusher = createPusher({ store, feedList: createFeedList({ store }), send, log });
+    pusher.start();
+    clearInterval(pushWatch);
+    log("Ilova bildirishnomalari: yoqildi (FCM)");
+  } catch (error) {
+    if (fcmNote !== error.message) log(`Ilova bildirishnomalari: o'chiq — ${error.message}`);
+    fcmNote = error.message;
+  }
+}
+const pushWatch = setInterval(startPush, 60_000);
+pushWatch.unref();
+startPush();
+
 function failed(port, name) {
   return (error) => {
     if (error.code === "EADDRINUSE") log(`${port}-port band (${name}): allaqachon ochiq emasmi? Boshqa port: .env da API_PORT / PUBLIC_PORT`);
@@ -156,6 +184,8 @@ async function shutdown() {
   log("To'xtatilyapti: bot, collector, nginx va tunnel yumshoq to'xtatiladi...");
   await processes.shutdown();
   tgLogin.close();
+  clearInterval(pushWatch);
+  pusher?.stop();
   app.locals.live.close();
   server.close();
   publicServer.close();
