@@ -324,6 +324,21 @@ test("yo'nalish (web «Yuklar»): tugmalardagi sonlar, saqlash; noma'lum joy —
   assert.equal((await call("GET", "/pub/me/route", { token: fresh })).body.code, "role", "yuk beruvchining yo'nalishi sozlamalarida");
 });
 
+test("ilova yuk chati: faqat yuk beruvchi; matn tushunilmasa oddiy javob", async () => {
+  const { token } = await login(); // 555 — haydovchi
+  assert.equal((await call("GET", "/pub/me/load-chat", { token })).body.code, "role");
+  const shipper = sessions.issue(558);
+  store.saveDriver(558, { name: "Vali", role: "yuk_beruvchi", active: true });
+  const open = await call("GET", "/pub/me/load-chat", { token: shipper });
+  assert.equal(open.status, 200);
+  assert.equal(open.body.view, null);
+  assert.match(open.body.intro, /Masalan/);
+  const said = await call("POST", "/pub/me/load-chat", { token: shipper, body: { text: "salom qalaysiz" } });
+  assert.equal(said.status, 200);
+  assert.equal(said.body.stage, null);
+  assert.equal((await call("POST", "/pub/me/load-chat/send", { token: shipper })).body.code, "stale");
+});
+
 test("pauza / davom", async () => {
   const { token } = await login();
   assert.equal((await call("PATCH", "/pub/me", { token, body: { active: "ha" } })).status, 400);

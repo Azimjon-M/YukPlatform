@@ -11,7 +11,7 @@
 // tunnel (src/edge/tunnel.js) nginx'ni internetga chiqaradi. Ikkalasi ham bot va collector kabi jarayon.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { envSeedEntries, resolveSettings } from "@yuk/parser";
+import { createParserPool, envSeedEntries, parseByRules, resolveSettings } from "@yuk/parser";
 import { devAutostart, isDevMode, routeScopeFrom } from "@yuk/shared";
 import { APK_DIR, DEFAULT_DB_FILE, readRelease, createCallLinks, loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
@@ -101,6 +101,32 @@ const app = createApp({
 });
 // Collector uchun Telegram akkaunt qo'shish — Mini App «🛠 Boshqaruv» dan (raqam → kod → 2FA; alohida jarayonda)
 const tgLogin = createTgLogin({ store, log });
+// Ilovadagi «📝 E'lon berish» chati (loadChat.js): yuk beruvchi matnini tushunish — botdagi «📦 Yuk berish» bilan bir
+// xil yo'l: avval qoidaviy parser (~2 ms), tushunmasa — bo'sh AI ulanishi (20 s gacha kutadi). AI ulanishlari ro'yxati
+// boshqaruv markazidagi kalitlar; hovuz birinchi kerak bo'lganda yaratiladi (ilova chati kam ishlatiladi)
+let chatPool = null;
+async function parseLoad(text) {
+  const quick = parseByRules(text);
+  if (quick.confident) return { ok: true, postType: quick.postType, loads: quick.loads, by: "rules" };
+  chatPool ??= createParserPool({ connections: () => store.aiConnections({ secret, env: process.env }), onState: () => {} });
+  const until = Date.now() + 20_000;
+  let lease = chatPool.acquire();
+  while (!lease && Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    lease = chatPool.acquire();
+  }
+  if (!lease) return null;
+  try {
+    return { ...(await lease.parser.parse(text)), by: "ai" };
+  } catch (error) {
+    lease.fail(error);
+    log(`Ilova «E'lon berish»: AI xatosi — ${lease.describe(error)}`);
+    return null;
+  } finally {
+    lease.release({ posts: 1 });
+  }
+}
+
 const publicApp = createPublicApp({
   store,
   sessions,
@@ -109,6 +135,7 @@ const publicApp = createPublicApp({
   scope: routeScopeFrom(),
   webDist: path.join(ROOT, "apps/web/dist"),
   apkDir: APK_DIR, // Android ilova (@yuk/store appRelease.js)
+  parseLoad, // ilova «📝 E'lon berish» chati
   notify: createBotMessenger(process.env.BOT_TOKEN?.trim()), // web'dan hisob o'chirilsa — chatdagi menyuni olib tashlash
   errors,
 });

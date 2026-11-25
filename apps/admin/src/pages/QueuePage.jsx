@@ -58,7 +58,7 @@ function PostRow({ item, now }) {
         {/* «📦 Yuk berish»: guruhdan emas — yuk beruvchining o'zi (botga yozdi yoki formadan). source = shipper:<chat id> */}
         {item.fromShipper && (
           <Badge tone="good" icon="✅" title="Yuk egasining o'zi yubordi — AI'ga bormaydi, darhol mos haydovchilarga">
-            {item.via === "web" ? "Formadan" : "Botga yozdi"}
+            {item.via === "web" ? "Formadan" : item.via === "app" ? "Ilovadan" : "Botga yozdi"}
           </Badge>
         )}
         {item.media && (

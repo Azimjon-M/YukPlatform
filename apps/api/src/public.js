@@ -35,6 +35,13 @@
 //                              24 soatda nechta yubordi va chegara
 //   POST /pub/loads            { load, fromDraft? } — yukni yuborish: tekshiriladi (sanitizeShipperLoad), navbatga tushadi,
 //                              bot uni darhol mos haydovchilarga yuboradi va natijani chatga yozadi
+//   --- Ilova «📝 E'lon berish» chati (loadChat.js; botdagi «📦 Yuk berish» bilan bir qoida, faqat yuk beruvchi) ---
+//   GET  /pub/me/load-chat              { intro, view | null, used, limit, posts: [{ id, text, at, result }] }
+//   POST /pub/me/load-chat              { text } → view { stage: "confirm"|"phone"|null, text, cards?, phones? }
+//   POST /pub/me/load-chat/phone        { phone } — oldin yozgan raqamidan biri → view
+//   POST /pub/me/load-chat/send         → { ok: true, id, text } | 409 { code: stale|phone } | 429 limit
+//   DELETE /pub/me/load-chat            qoralamani bekor qilish
+//   GET  /pub/me/load-chat/posts/:id    yuborilgan yuk natijasi { done, ok, text }
 //   --- faqat adminlar (Mini App'dagi «🛠 Boshqaruv»), boshqalarga 403 ---
 //   GET  /pub/admin/overview   ko'rsatkichlar (navbat, yuklar, foydalanuvchilar) va AI ulanishlari holati
 //   GET  /pub/admin/users      ?q&role — foydalanuvchilar ro'yxati
@@ -51,6 +58,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
+import { CHAT_TEXT, createLoadChat, postResult } from "./loadChat.js";
 import { extractPhones, pacificDay } from "@yuk/parser";
 import {
   BLOCKED_TEXT,
@@ -257,7 +265,7 @@ export function callPage(call) {
 // calls — «📞 Telefon qilish» havolalari (@yuk/store createCallLinks, bot bilan bir kalit); null — /pub/call 404
 // errors — boshqaruv markazining xatolar jurnali (errorLog.js); server xatolari u yerda ham ko'rinadi
 // tgLogin — collector uchun Telegram akkaunt qo'shish (tgLogin.js); null — «server qayta ishga tushirilgach»
-export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, apkDir = null, notify = null, errors = null, tgLogin = null, now = () => Date.now() }) {
+export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, apkDir = null, parseLoad = null, notify = null, errors = null, tgLogin = null, now = () => Date.now() }) {
   const app = express();
   app.disable("x-powered-by");
   const botToken = env.BOT_TOKEN?.trim() || null;
@@ -690,6 +698,48 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     res.status(201).json({ ok: true, id, load });
   });
 
+  // --- Ilova «📝 E'lon berish» chati ---
+  const chat = createLoadChat({ store, scope, now, parse: async (text) => (parseLoad ? parseLoad(text) : null) });
+  const chatPosts = (chatId) =>
+    store.shipperPosts(chatId, { limit: 10 }).map((post) => ({ id: post.id, text: post.text, at: post.createdAt, via: post.via, result: postResult(post) }));
+  pub.get("/me/load-chat", (req, res) => {
+    shipperOnly(req.driver);
+    const { chatId } = req.driver;
+    res.json({ intro: CHAT_TEXT.intro, view: chat.current(chatId, req.driver), used: store.shipperPostCount(chatId), limit: SHIPPER_LOAD_LIMIT, posts: chatPosts(chatId) });
+  });
+  pub.post("/me/load-chat", async (req, res) => {
+    shipperOnly(req.driver);
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text) throw httpError(400, "Matn bo'sh");
+    if (text.length > 3000) throw httpError(400, "Matn juda uzun — 3000 belgigacha yozing");
+    res.json(await chat.read(req.driver.chatId, text, req.driver));
+  });
+  pub.post("/me/load-chat/phone", (req, res) => {
+    shipperOnly(req.driver);
+    const view = chat.pickPhone(req.driver.chatId, String(req.body?.phone ?? ""), req.driver);
+    if (!view) throw httpError(409, CHAT_TEXT.stale, "stale");
+    res.json(view);
+  });
+  pub.post("/me/load-chat/send", (req, res) => {
+    shipperOnly(req.driver);
+    const sent = chat.send(req.driver.chatId, req.driver, { sender: telegramUsername(req.driver.username) });
+    if (sent.ok) return res.json({ ok: true, id: sent.id, text: CHAT_TEXT.sending });
+    if (sent.reason === "limit") throw httpError(429, CHAT_TEXT.limit(SHIPPER_LOAD_LIMIT), "limit");
+    if (sent.reason === "phone") throw httpError(409, "Avval raqamni yozing", "phone");
+    throw httpError(409, CHAT_TEXT.stale, "stale");
+  });
+  pub.delete("/me/load-chat", (req, res) => {
+    shipperOnly(req.driver);
+    chat.cancel(req.driver.chatId);
+    res.json({ ok: true, text: CHAT_TEXT.cancelled });
+  });
+  pub.get("/me/load-chat/posts/:id", (req, res) => {
+    shipperOnly(req.driver);
+    const post = store.shipperPosts(req.driver.chatId, { limit: 30 }).find((one) => one.id === Number(req.params.id));
+    if (!post) throw httpError(404, "Topilmadi");
+    res.json(postResult(post));
+  });
+
   // --- Admin ---
   // Admin — .env dagi ADMIN_IDS yoki boshqaruv markazida (localhost) yoqilgan belgi. Bu server internetga chiqadi,
   // shuning uchun har bir so'rovda shu yerda tekshiriladi (web'dagi tugmani yashirish — himoya emas).
@@ -913,7 +963,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
       errors?.add({ source: "web", level: "error", kind: "server", text: `${req.method} ${req.originalUrl.split("?")[0]}: ${error.message}`, details: error.stack });
     }
     // code — web nima qilishini biladi: auth → qayta kirish, no_profile → sozlamalarga, no_role → rol tanlash
-    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit", "feed", "update"].includes(error.code) ? { code: error.code } : {};
+    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit", "feed", "update", "stale", "phone"].includes(error.code) ? { code: error.code } : {};
     res.status(status).json({ error: status >= 500 ? "Server xatosi" : error.message, ...code });
   });
 
