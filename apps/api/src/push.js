@@ -63,7 +63,7 @@ export function createPusher({ store, feedList, send, log = () => {}, everyMs = 
       }
       for (const [chatId, rows] of byChat) {
         const driver = store.getDriver(chatId);
-        if (!driver || driver.deletedAt || roleOf(driver) !== "haydovchi" || !driver.profile || driver.active === false) continue;
+        if (!driver || driver.deletedAt || roleOf(driver) !== "haydovchi" || !driver.profile || driver.appActive === false) continue; // ilova pauzasi
         const items = feedList.list(driver, { minutes: PUSH_MINUTES, limit: 50 }).items; // eng yangisi birinchi
         const top = items.reduce((max, item) => Math.max(max, Number(item.id)), 0);
         for (const row of rows) {

@@ -987,7 +987,11 @@ export function createBot({
     if (!driver.profile && roleOf(driver) !== "yuk_beruvchi") return openSettings(ctx);
     const updated = store.saveDriver(ctx.chat.id, { active });
     if (!active) await drain(ctx.chat.id); // yo'ldagi e'lon yetib borsin — «⏸ To'xtatildi» undan keyin, oxirgi xabar bo'ladi
-    await ctx.reply(active ? "▶️ Yoqildi — yuklar yana keladi." : `⏸ To'xtatildi — yuk kelmaydi.\nQayta yoqish — «${MENU.resume}».`, menu(updated));
+    // Bot pauzasi faqat botniki — ilova (Yuk Ekspert) o'z pauzasi bilan alohida (Azimjon, 2026-11-25: «Ajrat!»)
+    await ctx.reply(
+      active ? "▶️ Yoqildi — botga yuklar yana keladi." : `⏸ To'xtatildi — botga yuk kelmaydi (ilovada alohida).\nQayta yoqish — «${MENU.resume}».`,
+      menu(updated),
+    );
   }
 
   // «📋 Mos yuklar» (haydovchi) yoki «🚚 Bo'sh mashinalar» (yuk beruvchi) — eski menyu tugmasi bosilsa ham hozirgi rol bo'yicha.

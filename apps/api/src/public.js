@@ -287,7 +287,8 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     plan: isPro(driver) ? "pro" : (driver.plan ?? "free"), // avtomatik Pro ham (raqam + bog'langan akkaunt)
     isAdmin: isAdmin(driver, adminIds),
     profile: driver.profile,
-    active: driver.active,
+    active: driver.active, // bot Telegram'ga yuboradimi
+    appActive: driver.appActive !== false, // ilova lentasi va bildirishnomalari (alohida pauza)
     // phoneAt — qachon ulashgan: «Raqamni almashtirish» da o'sha raqamni qayta ulashsa ham ilova saqlanganini ko'radi
     // loadPhones — yuk beruvchining oxirgi yukidagi raqamlar («📦 Yuk berish» formasi shular bilan ochiladi)
     ...(withPhone ? { phone: driver.phone ?? null, phoneAt: driver.phoneAt ?? null, loadPhones: driver.loadPhones ?? [] } : {}),
@@ -489,15 +490,26 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     res.json({ sources: store.feedSources(req.driver.chatId, { pro }), chosen: feed?.sources ?? [], max: FEED_SOURCES_MAX, pro });
   });
 
+  // { active } — bot pauzasi (Mini App, ilova Sozlamalari); { appActive } — ilova pauzasi (ilovadagi «⏸ Pauza» tugmasi).
+  // Ikkalasi alohida (Azimjon, 2026-11-25: «Ajrat!»). Eski ilova (versionCode ≤ 28) pauza tugmasida active yuborardi —
+  // u ilova pauzasi deb olinadi
   pub.patch("/me", (req, res) => {
-    const active = req.body?.active;
-    if (typeof active !== "boolean") throw httpError(400, "active: true yoki false bo'lishi kerak");
+    const body = req.body ?? {};
+    const appCode = Number(req.get("x-app-version")) || 0;
+    const fields = {};
+    if (typeof body.appActive === "boolean") fields.appActive = body.appActive;
+    if (typeof body.active === "boolean") {
+      if (appCode && appCode <= 28) fields.appActive = body.active;
+      else fields.active = body.active;
+    }
+    if (!Object.keys(fields).length) throw httpError(400, "active yoki appActive: true yoki false bo'lishi kerak");
+    const on = fields.active === true || fields.appActive === true;
     const role = roleOf(req.driver);
-    if (active && !role) throw httpError(409, NEED_ROLE, "no_role");
+    if (on && !role) throw httpError(409, NEED_ROLE, "no_role");
     // Yuk beruvchiga sozlamalar shart emas (Azimjon, 2026-11-12: «Ro'yxatdan o'tish kerak emas») — bo'sh profil
     // bilan ham yuborish yoqiladi; haydovchiga mos yuklar profil bo'lmasa hisoblanmaydi
-    if (active && !req.driver.profile && role === "haydovchi") throw httpError(409, NEED_PROFILE[role], "no_profile");
-    res.json(meOf(store.saveDriver(req.driver.chatId, { active })));
+    if (on && !req.driver.profile && role === "haydovchi") throw httpError(409, NEED_PROFILE[role], "no_profile");
+    res.json(meOf(store.saveDriver(req.driver.chatId, fields)));
   });
 
   // Hisobdan chiqish. Faqat tokenni o'chirish yetmaydi: Telegram'da bot odamni baribir taniydi va Mini App o'zi kiradi

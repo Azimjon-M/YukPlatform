@@ -175,7 +175,7 @@ test("config: bot username va doira; CORS va OPTIONS", async () => {
 test("kirish: Mini App initData → token; haydovchi bazaga yoziladi; xato imzo — 401", async () => {
   const { token, me } = await login();
   assert.ok(token);
-  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false, phone: null, phoneAt: null, loadPhones: [] });
+  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false, appActive: true, phone: null, phoneAt: null, loadPhones: [] });
   assert.equal(store.getDriver(555).name, "Ali Valiyev");
 
   const bad = await call("POST", "/pub/auth", { body: { initData: "user=%7B%22id%22%3A1%7D&auth_date=1&hash=00" } });
@@ -373,6 +373,29 @@ test("pauza / davom", async () => {
   assert.equal(kept.body.active, false);
   assert.equal(store.getDriver(555).active, false);
   assert.equal((await call("PATCH", "/pub/me", { token, body: { active: true } })).body.active, true);
+  // Ilova pauzasi alohida (Azimjon, 2026-11-25: «Ajrat!»): ilovadagi ⏸ botni to'xtatmaydi va aksincha
+  const app = await call("PATCH", "/pub/me", { token, body: { appActive: false } });
+  assert.equal(app.body.appActive, false);
+  assert.equal(app.body.active, true, "bot ishlayveradi");
+  assert.equal((await call("PATCH", "/pub/me", { token, body: { active: false } })).body.appActive, false, "bot pauzasi ilovaga tegmaydi");
+  assert.equal((await call("PATCH", "/pub/me", { token, body: { appActive: true } })).body.active, false);
+  // eski ilova (versionCode ≤ 28) pauza tugmasida active yuboradi — bu ilova pauzasi
+  const old = await fetch(`${base}/pub/me`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-app-version": "28" },
+    body: JSON.stringify({ active: false }),
+  }).then((r) => r.json());
+  assert.equal(old.appActive, false);
+  assert.equal(old.active, false);
+  assert.equal(store.getDriver(555).active, false, "bot o'zgarmadi (allaqachon pauzada)");
+  await call("PATCH", "/pub/me", { token, body: { active: true, appActive: true } });
+  const oldOn = await fetch(`${base}/pub/me`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-app-version": "28" },
+    body: JSON.stringify({ active: false }),
+  }).then((r) => r.json());
+  assert.equal(oldOn.active, true, "eski ilova botni to'xtatmaydi");
+  assert.equal(oldOn.appActive, false);
   // profili yo'q haydovchi yoqa olmaydi
   const fresh = sessions.issue(556);
   assert.equal((await call("PATCH", "/pub/me", { token: fresh, body: { active: true } })).status, 409);

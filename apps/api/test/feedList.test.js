@@ -41,9 +41,10 @@ test("lenta: «📌 Mening guruhlarim», «📍 Qayerdan» filtri va yopiq guruh
   assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] }, { plan: "pro" })).items.map((i) => i.post.source), ["-1001", "@yuk_bbb", "@yuk_aaa"]);
 });
 
-test("lenta: pauzada — bo'sh, active: false", () => {
+test("lenta: ilova pauzada — bo'sh, active: false; bot pauzasi lentaga ta'sir qilmaydi", () => {
   const { add, feed } = setup();
   add("@yuk_aaa", LOAD, 60_000);
-  assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] }, { active: false })), { minutes: 10, active: false, total: 0, items: [] });
+  assert.equal(feed.list(driver({ mode: "tezkor", sources: [] }, { active: false })).total, 1, "bot pauzada — ilova lentasi ishlaydi");
+  assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] }, { appActive: false })), { minutes: 10, active: false, total: 0, items: [] });
   assert.equal(feed.list(driver({ mode: "tezkor", sources: [] })).active, true);
 });

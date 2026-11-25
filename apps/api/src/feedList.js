@@ -42,9 +42,9 @@ export function createFeedList({ store, now = Date.now }) {
     extractPhones(post.text ?? "").length > 0 || Boolean(post.senderPhone) || Boolean(post.sender) || Boolean(post.senderId && known(post.senderId));
 
   // → { minutes, active, total, items: [{ id, load: {…yo'nalish, phones}, post: {source, link, postedAt, sender, senderId, media, text} }] }
-  // Pauzada (botdagi «⏸ Pauza» yoki ilovadagi) — bot ham yubormaydi, lenta ham bo'sh; active ilovaga holatni bildiradi
+  // Ilova pauzada (ilovadagi «⏸ Pauza» — botnikidan alohida, appActive) — lenta bo'sh; active ilovaga holatni bildiradi
   function list(driver, { minutes = 10, limit = 200 } = {}) {
-    const active = driver.active !== false;
+    const active = driver.appActive !== false;
     if (!active) return { minutes, active, total: 0, items: [] };
     const { profile } = driver;
     const guruhlarim = feedMode(profile) === "guruhlarim";

@@ -378,6 +378,13 @@ function migrate(db) {
   if (!users.includes("paused_at")) db.exec("ALTER TABLE drivers ADD COLUMN paused_at INTEGER");
   if (!users.includes("paused_by")) db.exec("ALTER TABLE drivers ADD COLUMN paused_by TEXT");
   if (!users.includes("idle_warned_at")) db.exec("ALTER TABLE drivers ADD COLUMN idle_warned_at INTEGER");
+  // Ilova pauzasi alohida (2026-11-25, Azimjon: «Ajrat!»): active — bot Telegram'ga yuboradimi, app_active — ilova lentasi
+  // va telefon bildirishnomalari. Ilovadagi «⏸ Pauza» faqat app_active ni, botdagisi faqat active ni o'zgartiradi.
+  // Birinchi marta — hozirgi holat ko'chiriladi (pauzada turganlar ikkala joyda pauzada qoladi)
+  if (!users.includes("app_active")) {
+    db.exec("ALTER TABLE drivers ADD COLUMN app_active INTEGER NOT NULL DEFAULT 1");
+    db.exec("UPDATE drivers SET app_active = active");
+  }
   // Kanal va guruhga a'zolik (2026-11-09, Azimjon: bot faqat @Yuk_Ekspert va @Yuk_Ekspert_chat a'zolariga ishlaydi).
   // sub_ok — 1 a'zo | 0 a'zo emas | NULL hali tekshirilmagan; sub_missing — qaysilariga a'zo emas (JSON ["@Yuk_Ekspert"]);
   // sub_checked_at — oxirgi tekshiruv; sub_reminded_at — «a'zo bo'ling, yuk yuborilmadi» eslatmasi yuborilgan vaqt
@@ -469,6 +476,7 @@ function driverRow(row) {
     // Pauza: qachon va kim (user | idle | blocked | admin); idleWarnedAt — «24 soat kirmadingiz» ogohlantirishi
     pausedAt: row.paused_at ?? null,
     pausedBy: row.paused_by ?? null,
+    appActive: row.app_active !== 0, // ilova pauzasi (bot pauzasidan alohida)
     idleWarnedAt: row.idle_warned_at ?? null,
     // Kanal va guruhga a'zolik: true | false | null (tekshirilmagan); subMissing — a'zo bo'lmaganlari (["@Yuk_Ekspert"])
     // (blok — driverRow da yo'q: store.banOf / listDrivers().banned)
@@ -810,7 +818,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       return driverRow(q.getDriver.get(chatId));
     },
 
-    // fields: name, username, role, profile, draft, active, plan, isAdmin, phone, phoneAskedAt — faqat berilganlari o'zgaradi.
+    // fields: name, username, role, profile, draft, active (bot), appActive (ilova), plan, isAdmin, phone, phoneAskedAt — faqat berilganlari o'zgaradi.
     // Rol berilsa (qayta kirdi) — «hisobdan chiqqan» belgisi tozalanadi.
     // Rolni tekshirish (haydovchi | yuk_beruvchi) va raqamni tozalash (@yuk/shared normalizeContactPhone) chaqiruvchining ishi.
     // phone: null — raqamni o'chiradi (phone_at ham).
@@ -833,6 +841,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
         }
         columns.active = columns.active ? 1 : 0;
       }
+      if (typeof fields.appActive === "boolean") columns.app_active = fields.appActive ? 1 : 0;
       if (typeof fields.isAdmin === "boolean") columns.is_admin = fields.isAdmin ? 1 : 0;
       if ("phone" in fields) {
         columns.phone = fields.phone ?? null;

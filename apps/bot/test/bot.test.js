@@ -1050,7 +1050,7 @@ test("avtomatik pauza tugmalari: «✅ Ha, davom etsin» — davom etadi; «▶�
   await press("idle:resume");
   const user = store.getDriver(42);
   assert.deepEqual([user.active, user.pausedBy], [true, null]);
-  assert.match(texts(calls).at(-1), /Yoqildi — yuklar yana keladi/);
+  assert.match(texts(calls).at(-1), /Yoqildi — botga yuklar yana keladi/);
   assert.deepEqual(
     store.driverDetails(42).events.slice(0, 2).map((e) => [e.type, e.detail]),
     [["resumed", null], ["paused", { by: "idle" }]],
@@ -1859,7 +1859,7 @@ test("charxpalak: e'lon yo'lda turganda «⏸ Pauza» — «To'xtatildi» oxirgi
   await message(PRIVATE, MENU.pause);
   assert.equal((await flying).ok, true);
   const mine = arrived.filter((a) => a.startsWith("42:"));
-  assert.deepEqual(mine, ["42:e'lon", "42:⏸ To'xtatildi — yuk kelmaydi."], "To'xtatildi — oxirgi");
+  assert.deepEqual(mine, ["42:e'lon", "42:⏸ To'xtatildi — botga yuk kelmaydi (ilovada alohida)."], "To'xtatildi — oxirgi");
   // uzildi: na tezkor, na yuk beruvchi yuki ketmaydi
   assert.equal((await deliverRaw(42, { ...post, id: 91 }, { phones: [] })).ok, false);
   assert.equal((await deliver(42, { fromRegion: "toshkent", phones: [] }, { ...post, id: 92 })).ok, false);

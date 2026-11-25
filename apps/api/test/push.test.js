@@ -41,13 +41,13 @@ test("pauzada yuborilmaydi; o'lik token o'chadi; chiqqanda tokenlar o'chadi", as
   const { store, add, sent, pusher } = setup();
   store.savePushToken(7, TOKEN);
   await pusher.tick();
-  store.saveDriver(7, { active: false });
+  store.saveDriver(7, { appActive: false }); // ilova pauzasi
   add(LOAD(3));
   await pusher.tick();
   assert.equal(sent.length, 0);
 
   const gone = createPusher({ store, feedList: createFeedList({ store, now: () => NOW }), send: async () => "gone" });
-  store.saveDriver(7, { active: true });
+  store.saveDriver(7, { appActive: true });
   add(LOAD(4));
   await gone.tick();
   assert.equal(store.pushTokens().length, 0);
