@@ -18,6 +18,7 @@ import { createApp, normalizeSourceName } from "./app.js";
 import { createErrorLog } from "./errorLog.js";
 import { createProcessManager } from "./processes.js";
 import { createPublicApp } from "./public.js";
+import { chatParser } from "./loadChat.js";
 import { createFeedList } from "./feedList.js";
 import { FCM_KEY_FILE, createFcm, loadFcmKey } from "./fcm.js";
 import { createPusher, createReleaseNotifier } from "./push.js";
@@ -105,15 +106,8 @@ const tgLogin = createTgLogin({ store, log });
 // xil yo'l: avval qoidaviy parser (~2 ms), tushunmasa — bo'sh AI ulanishi (20 s gacha kutadi). AI ulanishlari ro'yxati
 // boshqaruv markazidagi kalitlar; hovuz birinchi kerak bo'lganda yaratiladi (ilova chati kam ishlatiladi)
 let chatPool = null;
-async function parseLoad(text) {
-  const quick = parseByRules(text);
-  if (quick.confident) return { ok: true, postType: quick.postType, loads: quick.loads, by: "rules" };
-  // Ishonchli bo'lmasa ham, yo'nalishi (qayerdan + qayerga) aniq yuk topilgan bo'lsa — o'zimizning natija (Azimjon: «Textni
-  // o'zimizni model tekshirsin»): yuk beruvchi yuborishdan oldin kartani ko'radi va tasdiqlaydi / qayta yozadi
-  const placed = (quick.loads ?? []).filter((l) => (l.fromRegion || l.fromCountry) && (l.toRegion || l.toCountry));
-  if (quick.postType !== "mashina_bor" && placed.length) return { ok: true, postType: "yuk_bor", loads: placed, by: "rules" };
-  // Yuk e'loni emasligi ko'rinib turibdi («salom», «qalaysiz»): joy ham, raqam ham, yuk so'zi ham yo'q — AI'ga yubormaymiz
-  if (!(quick.loads ?? []).length && !/\d/.test(text) && text.trim().split(/\s+/).length < 6) return { ok: true, postType: "boshqa", loads: [], by: "rules" };
+// Qaysi tartibda — loadChat.js chatParser (algoritm → kerak bo'lsa AI → bo'lmasa algoritmning qisman natijasi)
+async function aiParse(text) {
   // AI — faqat ishonchli provayderlar (OpenRouter/Groq bepul modellari tez-tez yo'qoladi, 2026-11-25 «model topilmadi»)
   chatPool ??= createParserPool({
     connections: () => store.aiConnections({ secret, env: process.env }).filter((c) => c.provider === "gemini" || c.provider === "onepro"),
@@ -127,7 +121,7 @@ async function parseLoad(text) {
   }
   if (!lease) return null;
   try {
-    return { ...(await lease.parser.parse(text)), by: "ai" };
+    return await lease.parser.parse(text);
   } catch (error) {
     lease.fail(error);
     log(`Ilova «E'lon berish»: AI xatosi — ${lease.describe(error)}`);
@@ -136,6 +130,7 @@ async function parseLoad(text) {
     lease.release({ posts: 1 });
   }
 }
+const parseLoad = chatParser({ rules: parseByRules, ai: aiParse });
 
 // Ilova «E'lon berish» ovozli xabari → matn. Collector media.js bilan bir tartib: avval faqat o'girish uchun Gemini modellari
 // (TRANSCRIBE_MODELS — tahlil bilan umumiy limiti yo'q), keyin boshqaruv markazidagi Gemini ulanishlari; xato bergan model

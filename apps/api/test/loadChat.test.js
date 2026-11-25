@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "@yuk/store";
-import { CHAT_TEXT, createLoadChat, postResult } from "../src/loadChat.js";
+import { CHAT_TEXT, chatParser, createLoadChat, postResult } from "../src/loadChat.js";
 
 const LOAD = { fromRegion: "andijon", fromCity: "Andijon", toRegion: "toshkent_sh", toCity: "Toshkent", weightT: 20, cargo: "un", phones: [] };
 
@@ -86,4 +86,32 @@ test("postResult: natija matnlari", () => {
   assert.match(postResult({ status: "done", loads: 1, sent: 0 }).text, /mos haydovchi topilmadi/);
   assert.match(postResult({ status: "done", loads: 0, sent: 0 }).text, /allaqachon/);
   assert.equal(postResult({ status: "failed", error: "x" }).ok, false);
+});
+
+test("chatParser: bir xil matn — doim bir xil javob (AI tasodifiga bog'liq emas)", async () => {
+  const { parseByRules } = await import("@yuk/parser");
+  // AI «e'lon emas» desa ham, AI umuman javob bermasa ham — natija bir xil
+  for (const ai of [async () => ({ ok: true, postType: "boshqa", loads: [] }), async () => null, async () => { throw new Error("x"); }]) {
+    const parse = chatParser({ rules: parseByRules, ai });
+    const a = await parse("10 tonna shagʻal bor anjandan fargonaga");
+    assert.equal(a.postType, "yuk_bor");
+    assert.equal(a.loads[0].fromRegion, "andijon");
+    assert.equal(a.loads[0].toRegion, "fargona");
+    // tanilmagan joy: algoritmning qisman natijasi + qaysi so'z tanilmagani
+    const b = await parse("10 tonna shagʻal bor xyzobodan fargonaga");
+    assert.equal(b.postType, "yuk_bor");
+    assert.deepEqual(b.unknown, ["xyzobodan"]);
+  }
+});
+
+test("yuk chati: tanilmagan joy — aynan o'sha so'z so'raladi", async () => {
+  const { parseByRules } = await import("@yuk/parser");
+  const store = openStore({ file: ":memory:", now: () => 1_000 });
+  store.saveDriver(77, { name: "Ali", active: true });
+  const chat = createLoadChat({ store, scope: "qoshni", now: () => 1_000, parse: chatParser({ rules: parseByRules }) });
+  const view = await chat.read(77, "10 tonna shagʻal bor xyzobodan fargonaga", store.getDriver(77));
+  assert.equal(view.stage, null);
+  assert.match(view.text, /«xyzobodan» qaysi joy/);
+  assert.equal(view.editText, "10 tonna shagʻal bor xyzobodan fargonaga");
+  store.close();
 });

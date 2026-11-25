@@ -23,6 +23,9 @@ export const CHAT_TEXT = {
   askPhone: "📞 E'londa telefon raqami yo'q. Haydovchilar qaysi raqamga qo'ng'iroq qilsin? Raqamni tekshiring (o'zgartirsa bo'ladi) va «✅ Yuborish» ni bosing.",
   // Ma'lumot yetishmaydi — yozgani qaytariladi, «✏️ Tahrirlash» bilan to'ldirib qayta yuboradi (Azimjon, 2026-11-25)
   missing: (parts) => `✏️ E'londa ${parts.join(" va ")} yozilmagan. Pastdagi «✏️ Tahrirlash» ni bosing, qo'shib qayta yuboring.`,
+  // Tanilmagan joy nomi («anjandan») — aynan shuni so'raymiz (umumiy «e'longa o'xshamadi» emas)
+  unknownPlace: (words) =>
+    `📍 «${words.join("», «")}» qaysi joy ekanini tushunmadim. Shahar yoki viloyat nomini to'liqroq yozing (masalan: Andijondan Farg'onaga). Pastdagi «✏️ Tahrirlash» ni bosing.`,
   // Ovoz 3 marta ketma-ket tushunilmadi — yozib berishni taklif qilamiz
   voiceHelp: `🎤 Ovozingizni yaxshi tushuna olmayapman. Yaxshisi, e'lonni yozib yuboring — shunday:\n\n${EXAMPLE}\n\n📍 qayerdan → qayerga · 📦 nima yuk, necha tonna · 🚚 mashina · 💰 narx · 📞 telefon`,
   badPhone: "Raqamni tushunmadim. Masalan: 90 123 45 67",
@@ -62,6 +65,34 @@ export function missingParts(loads) {
   if (loads.some((l) => !(l.fromRegion || l.fromCountry) || !(l.toRegion || l.toCountry))) parts.push("📍 qayerdan → qayerga");
   if (loads.some((l) => !l.cargo && l.weightT == null && l.weightKg == null)) parts.push("📦 nima yuk, necha tonna");
   return parts;
+}
+
+// Qoidaviy parser sabablaridan tanilmagan joy so'zlari: "noma'lum joy: anjandan, xyz" → ["anjandan", "xyz"]
+export const unknownPlaces = (reasons = []) =>
+  reasons.flatMap((r) => r.match(/^noma'lum joy: (.+)$/)?.[1]?.split(/,\s*/) ?? []).filter(Boolean).slice(0, 3);
+
+// Ilova chatida matnni tushunish — doim bir xil natija berishi uchun tartib (Azimjon, 2026-11-25: bir xil matnga birinchi
+// safar «e'longa o'xshamadi», ikkinchi safar to'g'ri javob — AI'ning tasodifiy javobi edi):
+//   1) o'zimizning algoritm ishonchli → o'sha;  2) ishonchsiz, lekin qayerdan + qayerga topildi → o'sha (karta tasdiqlanadi);
+//   3) yuk e'loni emasligi aniq («salom») → AI'siz «boshqa»;  4) AI — faqat to'liq (yo'nalish + yuk) javobi qabul qilinadi;
+//   5) AI yo'q yoki chala / «e'lon emas» dedi, algoritm esa yukni qisman topgan → algoritm natijasi + tanilmagan joylar
+//      (chat nima yetishmasligini yoki qaysi so'z tanilmaganini aniq aytadi). rules(text) — parseByRules, ai(text) → javob | null
+export function chatParser({ rules, ai = async () => null }) {
+  return async (text) => {
+    const quick = rules(text);
+    const loads = quick.loads ?? [];
+    if (quick.confident) return { ok: true, postType: quick.postType, loads, by: "rules" };
+    const unknown = unknownPlaces(quick.reasons);
+    const placed = loads.filter((l) => (l.fromRegion || l.fromCountry) && (l.toRegion || l.toCountry));
+    if (quick.postType !== "mashina_bor" && placed.length) return { ok: true, postType: "yuk_bor", loads: placed, by: "rules" };
+    if (!loads.length && !unknown.length && !/\d/.test(text) && text.trim().split(/\s+/).length < 6) return { ok: true, postType: "boshqa", loads: [], by: "rules" };
+    const answer = await ai(text).catch(() => null);
+    if (answer?.ok && answer.postType === "yuk_bor" && answer.loads?.length && !missingParts(answer.loads).length) return { ...answer, by: "ai" };
+    if (answer?.ok && answer.postType === "mashina_bor" && !loads.length) return { ...answer, by: "ai" };
+    if (loads.length && quick.postType !== "mashina_bor") return { ok: true, postType: "yuk_bor", loads, by: "rules", unknown };
+    if (answer) return { ...answer, by: "ai", unknown };
+    return unknown.length ? { ok: true, postType: "boshqa", loads: [], by: "rules", unknown } : null;
+  };
 }
 
 // Yuk kartasi: qatorlar (yo'nalish, yuk, mashina, narx, qachon, izoh, raqam) — haydovchilarning ilova lentasidagi matn shu
@@ -107,9 +138,12 @@ export function createLoadChat({ store, parse, scope, now = Date.now, limit = SH
       const result = await parse(text);
       if (!result) return note(CHAT_TEXT.busy, { editText });
       if (result.ok && result.postType === "mashina_bor") return note(CHAT_TEXT.truck, { editText });
-      if (!result.ok || result.postType !== "yuk_bor" || !result.loads?.length) return note(CHAT_TEXT.notLoad, { editText, failed: true });
+      const unknown = result.unknown ?? [];
+      if (!result.ok || result.postType !== "yuk_bor" || !result.loads?.length) {
+        return note(unknown.length ? CHAT_TEXT.unknownPlace(unknown) : CHAT_TEXT.notLoad, { editText, failed: true });
+      }
       const missing = missingParts(result.loads);
-      if (missing.length) return note(CHAT_TEXT.missing(missing), { editText, failed: true });
+      if (missing.length) return note(unknown.length ? CHAT_TEXT.unknownPlace(unknown) : CHAT_TEXT.missing(missing), { editText, failed: true });
       const inScope = result.loads.filter((load) => routeInScope(load, scope));
       if (!inScope.length) return note(scopeText(result.loads, scope), { editText });
       const loads = inScope.slice(0, MAX_DRAFT_LOADS);

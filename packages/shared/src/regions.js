@@ -6,7 +6,7 @@ export const REGIONS = [
     id: "toshkent_sh",
     name: "Toshkent shahri",
     cities: ["Toshkent"],
-    aliases: { Toshkent: ["Ташкент", "Тошкент", "Тош", "Taskent", "Tashkent"] },
+    aliases: { Toshkent: ["Ташкент", "Тошкент", "Тош", "Taskent", "Tashkent", "Toshkand", "Тошканд"] },
   },
   {
     id: "toshkent",
@@ -28,7 +28,8 @@ export const REGIONS = [
       "Andijon", "Asaka", "Xonobod", "Shahrixon", "Qo'rg'ontepa", "Marhamat", "Paxtaobod", "Xo'jaobod", "Baliqchi",
       "Bo'z", "Buloqboshi", "Poytug'", "Jalaquduq", "Oltinko'l", "Oqoltin", "Qorasuv", "Ulug'nor",
     ],
-    aliases: { Andijon: ["Андижан"], "Qo'rg'ontepa": ["Кургантепа"] },
+    // «Anjan» — og'zaki (ilova chati, 2026-11-25: «10 tonna shag'al bor anjandan fargonaga» tushunilmagan edi)
+    aliases: { Andijon: ["Андижан", "Anjan", "Andijan", "Анжан", "Анжон"], "Qo'rg'ontepa": ["Кургантепа"] },
   },
   {
     id: "namangan",
