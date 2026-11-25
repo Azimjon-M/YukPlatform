@@ -22,6 +22,7 @@ export { createCallLinks, createSessions, LINK_PERIOD_S, SESSION_TTL_S } from ".
 export { TUNNEL_URL_KEY, tunnelUrl } from "./tunnel.js";
 export { APP_LOGIN_CODE, APP_LOGIN_TTL_MS } from "./appLogins.js";
 export { PUSH_TOKEN } from "./push.js";
+export { APK_PATH, readRelease, sizeText } from "./appRelease.js";
 export { hashPhone, MAIN_TG_ACCOUNT, SCAN_RECHECK, TG_ACCOUNT_NAME } from "./tgAccounts.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -29,6 +30,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 export const DEFAULT_DB_FILE = path.resolve(ROOT, process.env.YUK_DB || path.join("data", "yuk.db"));
 // Profil va guruh rasmlari (boshqaruv markazidagi ro'yxatlar uchun, 2026-11-16): users/<chat id>.jpg, sources/<nom>.jpg.
 // API (apps/api avatars.js) bot orqali oladi, yopiq guruhnikini collector (avatars.js) o'qiydigan akkaunt bilan yuklaydi
+// Android ilova APK va latest.json (appRelease.js; serverda /data/ops/yukapp-release.sh qo'yadi)
+export const APK_DIR = path.join(ROOT, "data", "apk");
 export const AVATAR_DIR = path.join(path.dirname(DEFAULT_DB_FILE), "avatars");
 // Ovozli xabar / dumaloq videoning asl fayli (2026-11-20, Azimjon: «audio va dumaloq video bar xato bo'lishi mumkin ekan, demak
 // biz uni asl audio va dumaloq videosini ham qo'shib yo'naltiramiz»): collector media.js yozadi (24 soat turadi), bot

@@ -46,6 +46,12 @@ export function showAlert(message) {
   else window.alert(message);
 }
 
+// Havolani tashqi brauzerda ochish (APK yuklab olish — Telegram oynasining o'zida fayl yuklanmaydi); saytda — yangi oyna
+export function openExternal(url) {
+  if (inTelegram && atLeast("6.1")) tg.openLink(url);
+  else window.open(url, "_blank", "noopener");
+}
+
 // "Ha / Yo'q" savoli → Promise<boolean>. Telegram ichida — Telegram oynasi, brauzerda — oddiy confirm
 export function confirmAction(message) {
   if (atLeast("6.2")) return new Promise((resolve) => tg.showConfirm(message, (ok) => resolve(Boolean(ok))));

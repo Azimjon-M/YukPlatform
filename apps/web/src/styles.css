@@ -354,3 +354,8 @@ main {
 .chip.locked {
   opacity: 0.55;
 }
+
+/* Sozlamalar → «📱 Ilova» (AppCard.jsx) */
+.app-version {
+  margin: 0 0 10px;
+}

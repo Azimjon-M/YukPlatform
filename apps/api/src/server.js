@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { envSeedEntries, resolveSettings } from "@yuk/parser";
 import { devAutostart, isDevMode, routeScopeFrom } from "@yuk/shared";
-import { DEFAULT_DB_FILE, createCallLinks, loadSecret, openStore } from "@yuk/store";
+import { APK_DIR, DEFAULT_DB_FILE, createCallLinks, loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
 import { createErrorLog } from "./errorLog.js";
 import { createProcessManager } from "./processes.js";
@@ -108,6 +108,7 @@ const publicApp = createPublicApp({
   calls: createCallLinks(secret), // «📞 Telefon qilish» sahifasi (/pub/call) — bot bilan bir kalit
   scope: routeScopeFrom(),
   webDist: path.join(ROOT, "apps/web/dist"),
+  apkDir: APK_DIR, // Android ilova (@yuk/store appRelease.js)
   notify: createBotMessenger(process.env.BOT_TOKEN?.trim()), // web'dan hisob o'chirilsa — chatdagi menyuni olib tashlash
   errors,
 });

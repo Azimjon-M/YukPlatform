@@ -8,6 +8,8 @@
 //   POST /pub/auth/app         mobil/kompyuter ilova: → { code, url, tgUrl, expiresIn, pollMs } — ilova url ni ochadi,
 //                              odam botda «✅ Ha, kiraman» ni bosadi (store appLogins.js)
 //   GET  /pub/auth/app/:code   ilova so'rab turadi: 202 { status: "pending" } | 200 { token, me } (bir marta) | 410 (eskirgan)
+//   GET  /pub/app              Android ilova: { android: { version, versionCode, size, url } | null } (kirishsiz, appRelease.js)
+//   GET  /pub/app/android      eng so'nggi APK faylning o'zi (yuklab olish)
 //   GET  /pub/call?c=<token>   «📞 Telefon qilish» tugmasi (bot yuk xabari yoki tezkor e'lon ostida): HTML sahifa → tel:+998… (kirishsiz)
 //   GET  /pub/me               foydalanuvchi: ism, rol, obuna, admin, profil, faolmi, o'z raqami (ulashgan bo'lsa)
 //   PUT  /pub/me/role          { role } — haydovchi | yuk_beruvchi (har rolning sozlamalari saqlanadi, qaytganda tiklanadi)
@@ -84,7 +86,7 @@ import {
   withPrevFeed,
   withRoute,
 } from "@yuk/shared";
-import { APP_LOGIN_TTL_MS, MAIN_TG_ACCOUNT, PUSH_TOKEN } from "@yuk/store";
+import { APK_PATH, APP_LOGIN_TTL_MS, MAIN_TG_ACCOUNT, PUSH_TOKEN, readRelease } from "@yuk/store";
 import { createFeedList } from "./feedList.js";
 import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
@@ -255,7 +257,7 @@ export function callPage(call) {
 // calls — «📞 Telefon qilish» havolalari (@yuk/store createCallLinks, bot bilan bir kalit); null — /pub/call 404
 // errors — boshqaruv markazining xatolar jurnali (errorLog.js); server xatolari u yerda ham ko'rinadi
 // tgLogin — collector uchun Telegram akkaunt qo'shish (tgLogin.js); null — «server qayta ishga tushirilgach»
-export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, notify = null, errors = null, tgLogin = null, now = () => Date.now() }) {
+export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, apkDir = null, notify = null, errors = null, tgLogin = null, now = () => Date.now() }) {
   const app = express();
   app.disable("x-powered-by");
   const botToken = env.BOT_TOKEN?.trim() || null;
@@ -302,6 +304,21 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   // Bot o'z username'ini bazaga yozadi (bot.js init) — sayt «Telegram bilan kirish» tugmasini shu bilan chizadi
   pub.get("/config", (req, res) => {
     res.json({ botUsername: store.getSetting("bot_username") ?? env.BOT_USERNAME ?? null, scope, login: Boolean(botToken) });
+  });
+
+  // Android ilova: versiya va yuklab olish (kirishsiz — havolani istalgan brauzerda ochsa bo'ladi)
+  pub.get("/app", (req, res) => {
+    const apk = apkDir ? readRelease(apkDir) : null;
+    res.set("cache-control", "no-cache").json({
+      android: apk ? { version: apk.version, versionCode: apk.versionCode, size: apk.size, sha256: apk.sha256, builtAt: apk.builtAt, url: APK_PATH } : null,
+    });
+  });
+  pub.get("/app/android", (req, res) => {
+    const apk = apkDir ? readRelease(apkDir) : null;
+    if (!apk) throw httpError(404, "Ilova fayli hali yo'q");
+    res.set("cache-control", "no-cache");
+    res.type("application/vnd.android.package-archive");
+    res.download(path.join(apkDir, apk.file), apk.file);
   });
 
   pub.post("/auth", (req, res) => {

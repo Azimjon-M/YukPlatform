@@ -124,6 +124,8 @@ async function requestOnce(method, path, { body, token = tokenStore.get() } = {}
 }
 
 export const getConfig = () => request("GET", "/pub/config", { token: null });
+// Android ilova: { android: { version, size, url } | null } (kirishsiz, AppCard.jsx)
+export const getAppRelease = () => request("GET", "/pub/app", { token: null });
 
 // Kirish: Telegram ichida — initData bilan; saytda — vidjet ma'lumoti bilan. → me (token saqlanadi)
 export async function login({ widget } = {}) {

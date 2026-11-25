@@ -75,7 +75,7 @@ test("cheklov: oynada limitdan ortig'i rad etiladi, keyingi oynada yana ruxsat",
 });
 
 // --- Server ---
-let server, base, store, sessions, calls, adminServer, adminBase;
+let server, base, store, sessions, calls, adminServer, adminBase, apkDir;
 const loadIds = {}; // e'lon raqami → bazadagi yuk id
 const env = { BOT_TOKEN, ADMIN_IDS: "558" };
 const HOUR = 3600 * 1000;
@@ -104,7 +104,8 @@ before(async () => {
   const dist = mkdtempSync(path.join(tmpdir(), "yuk-web-"));
   writeFileSync(path.join(dist, "index.html"), "<!doctype html><title>Yuk Ekspert</title>");
   const notify = async (chatId, text, extra) => notified.push({ chatId, text, extra });
-  const app = createPublicApp({ store, env, sessions, calls, scope: "qoshni", webDist: dist, notify, now: () => NOW });
+  apkDir = mkdtempSync(path.join(tmpdir(), "yuk-apk-"));
+  const app = createPublicApp({ store, env, sessions, calls, scope: "qoshni", webDist: dist, apkDir, notify, now: () => NOW });
   await new Promise((resolve) => (server = app.listen(0, "127.0.0.1", resolve)));
   base = `http://127.0.0.1:${server.address().port}`;
 
@@ -136,6 +137,22 @@ async function login() {
   assert.equal(status, 200);
   return body;
 }
+
+test("Android ilova: fayl yo'q — null/404; latest.json bor — versiya va yuklab olish (kirishsiz)", async () => {
+  let res = await call("GET", "/pub/app");
+  assert.deepEqual(res.body, { android: null });
+  assert.equal((await call("GET", "/pub/app/android")).status, 404);
+  writeFileSync(path.join(apkDir, "yuk-ekspert-1.2.3.apk"), "APK");
+  writeFileSync(path.join(apkDir, "latest.json"), JSON.stringify({ version: "1.2.3", versionCode: 7, file: "../../yuk-ekspert-1.2.3.apk", size: 3 }));
+  res = await call("GET", "/pub/app");
+  assert.equal(res.body.android.version, "1.2.3");
+  assert.equal(res.body.android.url, "/pub/app/android");
+  res = await call("GET", "/pub/app/android");
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "application/vnd.android.package-archive");
+  assert.match(res.headers.get("content-disposition"), /yuk-ekspert-1\.2\.3\.apk/);
+  assert.equal(res.body, "APK");
+});
 
 test("config: bot username va doira; CORS va OPTIONS", async () => {
   const { status, body, headers } = await call("GET", "/pub/config");

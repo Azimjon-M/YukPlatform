@@ -51,7 +51,7 @@ import { createCommandSync } from "./commands.js";
 import { profileFromText } from "./driverText.js";
 import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, REGION_CALLBACK, TRUCK_CALLBACK, feedSavedText, groupStep, modeStep, regionStep, toggleSource, truckStep } from "./feed.js";
 import { SENDER_TEXT, escapeHtml, formatLoad, formatRaw, formatRawCaption, formatTruck } from "./format.js";
-import { mediaFileOf } from "@yuk/store";
+import { APK_DIR, APK_PATH, mediaFileOf, readRelease, sizeText } from "@yuk/store";
 import { IDLE_BUTTONS } from "./idle.js";
 import { REMIND_EVERY_MS, SUB_CHECK, createMembership, isMember, joinPrompt, remindText } from "./members.js";
 import { MENU, OLD_MENU, PHONE, mainMenu, matchesLabel, miniAppUrl, phoneKeyboard, settingsLabel } from "./menu.js";
@@ -310,6 +310,7 @@ export function createBot({
   postCallLink = () => null,
   parseLoad = async () => null,
   onLoadQueued = () => {},
+  apkDir = APK_DIR, // Android ilova (serverda yig'ilgan APK + latest.json, @yuk/store appRelease.js)
   mediaDir, // ovozli xabar / dumaloq videoning asl fayllari (collector yozadi); berilmasa — @yuk/store MEDIA_DIR
   catchUpMs = 2 * 60_000, // e'lon olish boshlanganda shuncha oldingi e'lonlar ham (pipeline catchUp)
   catchUpDelayMs = 1500, // javob xabari («✅ Tayyor!») oldin borsin
@@ -1076,12 +1077,20 @@ export function createBot({
     const driver = rememberUser(ctx);
     const link = (url, text) => `<a href="${escapeHtml(url)}">${text}</a>`;
     const lines = ["📱 <b>Yuk Ekspert ilovalari</b>", ""];
-    lines.push(`🤖 Android: ${config.androidUrl ? link(config.androidUrl, "yuklab olish") : config.apkFile ? "o'rnatish fayli pastda 👇" : "tez orada"}`);
+    // Serverda yig'ilgan eng so'nggi APK — sayt orqali yuklab olinadi (botga 25 MB dan kattasi sig'maydi, 2026-11-25)
+    const apk = readRelease(apkDir);
+    const base = appUrl();
+    const apkUrl = apk && base ? new URL(APK_PATH, base).href : null;
+    if (apkUrl) {
+      lines.push(`🤖 Android: ${link(apkUrl, "yuklab olish")} — versiya ${escapeHtml(apk.version)}, ${sizeText(apk.size)}`);
+      lines.push("   Telefon «noma'lum manbadan o'rnatish» ga ruxsat so'rasa — ruxsat bering. Yangi versiya eskisining ustidan o'rnatiladi.");
+    } else lines.push(`🤖 Android: ${config.androidUrl ? link(config.androidUrl, "yuklab olish") : config.apkFile ? "o'rnatish fayli pastda 👇" : "tez orada"}`);
     lines.push(`🍏 iPhone: ${config.iosUrl ? link(config.iosUrl, "App Store") : "tez orada"}`);
     if (appUrl() && roleOf(driver)) lines.push(`💬 Telegram ichida: pastdagi «${settingsLabel(driver)}» tugmasi ilovani ochadi`);
     if (config.channelLoads && config.channel?.startsWith("@")) lines.push(`📢 Hamma yangi yuklar kanalda: ${config.channel}`);
-    await ctx.reply(lines.join("\n"), html(driver));
-    if (!config.apkFile) return;
+    const extra = apkUrl ? { ...html(driver), reply_markup: new InlineKeyboard().url(`⬇️ Android ilovani yuklab olish (${apk.version})`, apkUrl) } : html(driver);
+    await ctx.reply(lines.join("\n"), extra);
+    if (apkUrl || !config.apkFile) return;
     if (!apkFileId && !existsSync(config.apkFile)) {
       log(`APK fayl topilmadi: ${config.apkFile}`);
       return;

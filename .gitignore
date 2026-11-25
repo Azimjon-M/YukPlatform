@@ -24,6 +24,7 @@ data/*.tar*
 
 # Ishlayotgan dasturlar (bot, collector) — PID fayllari
 data/run/
+data/apk/
 
 # AI kalitlarini shifrlash kaliti (boshqaruv markazi yaratadi). Yo'qolsa — bazadagi kalitlarni qayta qo'shish kerak
 data/secret.key

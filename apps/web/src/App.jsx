@@ -18,6 +18,7 @@ import { LoadsPage } from "./LoadsPage.jsx";
 import { LoginPage } from "./LoginPage.jsx";
 import { MapPage } from "./MapPage.jsx";
 import { PhoneCard } from "./PhoneCard.jsx";
+import { AppCard } from "./AppCard.jsx";
 import { RolePage } from "./RolePage.jsx";
 import { RouteMapPage } from "./RouteMapPage.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
@@ -465,6 +466,8 @@ export function App() {
             <TgAccounts mine onAuthLost={onAuthLost} />
           </section>
         )}
+        {/* Android ilovani yuklab olish (AppCard.jsx; APK bo'lmasa — ko'rinmaydi) */}
+        {online && !registering && <AppCard />}
         {online && !registering && <AccountCard me={me} onSignedOut={onSignedOut} onDeleted={onDeleted} />}
       </>
     );
