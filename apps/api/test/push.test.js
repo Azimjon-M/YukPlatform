@@ -93,3 +93,16 @@ test("FCM: JWT bilan token oladi, yuboradi; 404 — gone", async () => {
   assert.equal(await send(TOKEN, {}), "gone");
   assert.equal(calls.filter((c) => c.url.includes("oauth2")).length, 1); // token keshda
 });
+
+test("body ichida e'lonning o'zi, 4 KB dan oshmaydi (uzun kirill matn qisqartiriladi)", () => {
+  const item = { id: 9, load: { fromRegion: "toshkent", phones: ["+998900000001"] }, post: { source: "@a", postedAt: 1, text: "Юк бор ".repeat(800) } };
+  const msg = pushMessage(item);
+  const body = JSON.parse(msg.body);
+  assert.equal(body.item.id, 9);
+  assert.equal(body.item.post.source, "@a");
+  assert.ok(body.item.post.text.endsWith("…"));
+  const total = Object.entries(msg).reduce((n, [k, v]) => n + Buffer.byteLength(k) + Buffer.byteLength(v), 0);
+  assert.ok(total < 4096, `jami ${total} bayt`);
+  const short = JSON.parse(pushMessage({ ...item, post: { ...item.post, text: "qisqa" } }).body);
+  assert.equal(short.item.post.text, "qisqa");
+});

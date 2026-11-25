@@ -22,8 +22,30 @@ export function pushMessage(item) {
     message: text.length > 180 ? `${text.slice(0, 179)}…` : text,
     channelId: "yuklar",
     categoryId: phone ? "yuk" : "",
-    body: JSON.stringify({ postId: item.id, phone }),
+    body: itemBody(item, phone),
   };
+}
+
+// FCM xabari ko'pi bilan 4 KB. body ichida e'lonning o'zi (lenta kartasi) — bosilganda ilova serverni kutmasdan ko'rsatadi
+// (Azimjon, 2026-11-25: «~3 s dan so'ng scroll … umuman qotmaydigan qil»). Uzun matn baytlar bo'yicha qisqartiriladi
+// (kirill — 2 bayt), to'liq matn ilovaning keyingi so'rovida keladi
+export const BODY_MAX_BYTES = 2800;
+function itemBody(item, phone) {
+  const post = item.post ?? {};
+  let text = String(post.text ?? "");
+  const make = () =>
+    JSON.stringify({
+      postId: item.id,
+      phone,
+      item: { id: item.id, load: item.load ?? {}, post: { ...post, text } },
+    });
+  let body = make();
+  while (Buffer.byteLength(body) > BODY_MAX_BYTES && text.length > 0) {
+    const over = Buffer.byteLength(body) - BODY_MAX_BYTES;
+    text = `${text.slice(0, Math.max(0, text.length - Math.max(over, 20) - 1))}…`;
+    body = make();
+  }
+  return Buffer.byteLength(body) > BODY_MAX_BYTES ? JSON.stringify({ postId: item.id, phone }) : body;
 }
 
 export function createPusher({ store, feedList, send, log = () => {}, everyMs = PUSH_EVERY_MS }) {
