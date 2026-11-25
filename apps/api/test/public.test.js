@@ -324,9 +324,11 @@ test("yo'nalish (web «Yuklar»): tugmalardagi sonlar, saqlash; noma'lum joy —
   assert.equal((await call("GET", "/pub/me/route", { token: fresh })).body.code, "role", "yuk beruvchining yo'nalishi sozlamalarida");
 });
 
-test("ilova yuk chati: faqat yuk beruvchi; matn tushunilmasa oddiy javob", async () => {
+test("ilova yuk chati: rolsiz — haydovchi ham yoza oladi; matn tushunilmasa oddiy javob; ovoz o'girgichsiz — 503", async () => {
   const { token } = await login(); // 555 — haydovchi
-  assert.equal((await call("GET", "/pub/me/load-chat", { token })).body.code, "role");
+  assert.equal((await call("GET", "/pub/me/load-chat", { token })).status, 200);
+  const voice = await fetch(`${base}/pub/me/load-chat/voice`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "audio/aac" }, body: Buffer.from("abc") });
+  assert.equal(voice.status, 503);
   const shipper = sessions.issue(558);
   store.saveDriver(558, { name: "Vali", role: "yuk_beruvchi", active: true });
   const open = await call("GET", "/pub/me/load-chat", { token: shipper });

@@ -146,6 +146,8 @@ export async function handleParsed(post, result, deps) {
     let count = 0;
     for (const user of users) {
       if (kind === "yuk" && deps.sortingOff && post.shipper == null) break;
+      // Yukni ilovada haydovchining o'zi bergan bo'lishi mumkin (ilovada rol yo'q, 2026-11-25) — o'ziga qaytib kelmasin
+      if (post.shipper != null && user.chatId === post.shipper) continue;
       // «📍 Qayerdan» va «🚚 Transport» filtrlari — yuk beruvchining o'z yukida ham
       if (kind === "yuk" && !regionWanted(user.profile, load.fromRegion ? [load.fromRegion] : [])) continue;
       if (kind === "yuk" && !truckWanted(user.profile, load.truckClass ? [load.truckClass] : [])) continue;

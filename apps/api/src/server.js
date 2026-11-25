@@ -11,7 +11,7 @@
 // tunnel (src/edge/tunnel.js) nginx'ni internetga chiqaradi. Ikkalasi ham bot va collector kabi jarayon.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createParserPool, envSeedEntries, parseByRules, resolveSettings } from "@yuk/parser";
+import { TRANSCRIBE_MODELS, createParserPool, envSeedEntries, parseByRules, resolveSettings, transcribePauseMs, transcribeWithGemini } from "@yuk/parser";
 import { devAutostart, isDevMode, routeScopeFrom } from "@yuk/shared";
 import { APK_DIR, DEFAULT_DB_FILE, readRelease, createCallLinks, loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
@@ -127,6 +127,32 @@ async function parseLoad(text) {
   }
 }
 
+// Ilova «E'lon berish» ovozli xabari → matn. Collector media.js bilan bir tartib: avval faqat o'girish uchun Gemini modellari
+// (TRANSCRIBE_MODELS — tahlil bilan umumiy limiti yo'q), keyin boshqaruv markazidagi Gemini ulanishlari; xato bergan model
+// bir muddat dam oladi (transcribePauseMs). → matn yoki null (hammasi band)
+const voiceRest = new Map();
+async function transcribeVoice(data, mime) {
+  const gemini = store.aiConnections({ secret, env: process.env }).filter((c) => c.provider === "gemini" && c.enabled !== false);
+  const seen = new Set();
+  const list = [];
+  for (const apiKey of new Set(gemini.map((c) => c.apiKey))) for (const model of TRANSCRIBE_MODELS) list.push({ apiKey, model });
+  for (const c of gemini) list.push({ apiKey: c.apiKey, model: c.model });
+  for (const c of list) {
+    const key = `${c.apiKey}|${c.model}`;
+    if (seen.has(key) || (voiceRest.get(key) ?? 0) > Date.now()) continue;
+    seen.add(key);
+    try {
+      const { text } = await transcribeWithGemini({ apiKey: c.apiKey, model: c.model, data, mime, timeoutMs: 20_000 });
+      return text;
+    } catch (error) {
+      voiceRest.set(key, Date.now() + transcribePauseMs(error));
+      log(`Ilova ovozli e'loni: ${c.model} — ${String(error.message ?? error).slice(0, 160)}`);
+    }
+    if (seen.size >= 4) break;
+  }
+  return null;
+}
+
 const publicApp = createPublicApp({
   store,
   sessions,
@@ -136,6 +162,7 @@ const publicApp = createPublicApp({
   webDist: path.join(ROOT, "apps/web/dist"),
   apkDir: APK_DIR, // Android ilova (@yuk/store appRelease.js)
   parseLoad, // ilova «📝 E'lon berish» chati
+  transcribeVoice, // … va uning ovozli xabari
   notify: createBotMessenger(process.env.BOT_TOKEN?.trim()), // web'dan hisob o'chirilsa — chatdagi menyuni olib tashlash
   errors,
 });
