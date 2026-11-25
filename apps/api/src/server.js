@@ -108,7 +108,15 @@ let chatPool = null;
 async function parseLoad(text) {
   const quick = parseByRules(text);
   if (quick.confident) return { ok: true, postType: quick.postType, loads: quick.loads, by: "rules" };
-  chatPool ??= createParserPool({ connections: () => store.aiConnections({ secret, env: process.env }), onState: () => {} });
+  // Ishonchli bo'lmasa ham, yo'nalishi (qayerdan + qayerga) aniq yuk topilgan bo'lsa — o'zimizning natija (Azimjon: «Textni
+  // o'zimizni model tekshirsin»): yuk beruvchi yuborishdan oldin kartani ko'radi va tasdiqlaydi / qayta yozadi
+  const placed = (quick.loads ?? []).filter((l) => (l.fromRegion || l.fromCountry) && (l.toRegion || l.toCountry));
+  if (quick.postType !== "mashina_bor" && placed.length) return { ok: true, postType: "yuk_bor", loads: placed, by: "rules" };
+  // AI — faqat ishonchli provayderlar (OpenRouter/Groq bepul modellari tez-tez yo'qoladi, 2026-11-25 «model topilmadi»)
+  chatPool ??= createParserPool({
+    connections: () => store.aiConnections({ secret, env: process.env }).filter((c) => c.provider === "gemini" || c.provider === "onepro"),
+    onState: () => {},
+  });
   const until = Date.now() + 20_000;
   let lease = chatPool.acquire();
   while (!lease && Date.now() < until) {

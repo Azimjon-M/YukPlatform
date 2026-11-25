@@ -42,3 +42,4 @@ data/avatars/
 # Operator akkaunt (apps/collector/src/ops.js): sessiya, shaxsiy xabarlar (inbox), buyruqlar navbati
 apps/collector/ops/
 data/media/
+data/chat-audio/

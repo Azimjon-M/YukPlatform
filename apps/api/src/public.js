@@ -36,13 +36,15 @@
 //   POST /pub/loads            { load, fromDraft? } — yukni yuborish: tekshiriladi (sanitizeShipperLoad), navbatga tushadi,
 //                              bot uni darhol mos haydovchilarga yuboradi va natijani chatga yozadi
 //   --- Ilova «📝 E'lon berish» chati (loadChat.js; botdagi «📦 Yuk berish» bilan bir qoida; ilovada rol yo'q — hamma) ---
-//   GET  /pub/me/load-chat              { intro, view | null, used, limit, posts: [{ id, text, at, result }] }
-//   POST /pub/me/load-chat              { text } → view { stage: "confirm"|"phone"|null, text, cards?, phones? }
-//   POST /pub/me/load-chat/voice        audio (AAC) → { transcript, view } (Gemini matnga o'giradi)
-//   POST /pub/me/load-chat/phone        { phone } — oldin yozgan raqamidan biri → view
-//   POST /pub/me/load-chat/send         → { ok: true, id, text } | 409 { code: stale|phone } | 429 limit
+//   Suhbat serverda (store loadChatLog.js). Har o'zgartiruvchi so'rov → { messages: [yangi xabarlar], used, limit }.
+//   Xabar: { id, from: me|bot, text, audio (bor/yo'q), durationMs, transcript?, cards?, stage?, phones?, active, postId?, at }
+//   GET  /pub/me/load-chat              ?after=<id> → { intro, messages, used, limit } (yuborilgan yuk natijasi shu yerda qo'shiladi)
+//   POST /pub/me/load-chat              { text }
+//   POST /pub/me/load-chat/voice        audio (AAC), X-Duration-Ms — saqlanadi, Gemini matnga o'giradi
+//   GET  /pub/me/load-chat/audio/:id    ovozli xabar fayli (faqat o'ziniki)
+//   POST /pub/me/load-chat/phone        { phone } — oldin yozgan raqamidan biri
+//   POST /pub/me/load-chat/send         409 { code: stale|phone } | 429 limit
 //   DELETE /pub/me/load-chat            qoralamani bekor qilish
-//   GET  /pub/me/load-chat/posts/:id    yuborilgan yuk natijasi { done, ok, text }
 //   --- faqat adminlar (Mini App'dagi «🛠 Boshqaruv»), boshqalarga 403 ---
 //   GET  /pub/admin/overview   ko'rsatkichlar (navbat, yuklar, foydalanuvchilar) va AI ulanishlari holati
 //   GET  /pub/admin/users      ?q&role — foydalanuvchilar ro'yxati
@@ -56,7 +58,7 @@
 //   DELETE /pub/admin/tg-accounts/login/:id         bekor qilish / yopish
 //   GET/POST/DELETE /pub/me/tg-accounts…   xuddi shular, lekin istalgan foydalanuvchi — faqat o'z akkauntlari (Sozlamalar)
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import express from "express";
 import { CHAT_TEXT, createLoadChat, postResult } from "./loadChat.js";
@@ -95,7 +97,7 @@ import {
   withPrevFeed,
   withRoute,
 } from "@yuk/shared";
-import { APK_PATH, APP_LOGIN_TTL_MS, MAIN_TG_ACCOUNT, PUSH_TOKEN, readRelease } from "@yuk/store";
+import { APK_PATH, APP_LOGIN_TTL_MS, CHAT_AUDIO_DIR, MAIN_TG_ACCOUNT, PUSH_TOKEN, readRelease } from "@yuk/store";
 import { createFeedList } from "./feedList.js";
 import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
@@ -266,7 +268,7 @@ export function callPage(call) {
 // calls — «📞 Telefon qilish» havolalari (@yuk/store createCallLinks, bot bilan bir kalit); null — /pub/call 404
 // errors — boshqaruv markazining xatolar jurnali (errorLog.js); server xatolari u yerda ham ko'rinadi
 // tgLogin — collector uchun Telegram akkaunt qo'shish (tgLogin.js); null — «server qayta ishga tushirilgach»
-export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, apkDir = null, parseLoad = null, transcribeVoice = null, notify = null, errors = null, tgLogin = null, now = () => Date.now() }) {
+export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, apkDir = null, chatAudioDir = CHAT_AUDIO_DIR, parseLoad = null, transcribeVoice = null, notify = null, errors = null, tgLogin = null, now = () => Date.now() }) {
   const app = express();
   app.disable("x-powered-by");
   const botToken = env.BOT_TOKEN?.trim() || null;
@@ -700,61 +702,103 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   });
 
   // --- Ilova «📝 E'lon berish» chati ---
-  const chat = createLoadChat({ store, scope, now, parse: async (text) => (parseLoad ? parseLoad(text) : null) });
   // Ilovada rol yo'q (Azimjon, 2026-11-25: «Ilovamizda Rol narsa bo'lmasin!») — e'lonni istalgan kirgan foydalanuvchi beradi.
-  // Botdagi «📦 Yuk berish» esa avvalgidek faqat yuk beruvchida
-  const appUser = (driver) => driver;
-  const chatPosts = (chatId) =>
-    store.shipperPosts(chatId, { limit: 10 }).map((post) => ({ id: post.id, text: post.text, at: post.createdAt, via: post.via, result: postResult(post) }));
+  // Botdagi «📦 Yuk berish» esa avvalgidek faqat yuk beruvchida. Suhbat serverda saqlanadi (store loadChatLog.js) —
+  // ilovani qayta o'rnatsa yoki boshqa telefondan kirsa ham, ovozli xabarlari bilan joyida (Telegram'dagidek)
+  const chat = createLoadChat({ store, scope, now, parse: async (text) => (parseLoad ? parseLoad(text) : null) });
+  const say = (chatId, text, extra = null) => store.addChatMessage(chatId, { from: "bot", text, extra });
+  const said = (chatId, view) => say(chatId, view.text, { cards: view.cards, stage: view.stage, phones: view.phones });
+  const fromMe = (chatId, text, more = {}) => store.addChatMessage(chatId, { from: "me", text, ...more });
+  // Ilovaga beriladigan ko'rinish: ovoz — bor/yo'q (fayl nomi emas); tugmalar faqat oxirgi, hali amal qiladigan savolda
+  function chatView(chatId, messages) {
+    const draft = chat.current(chatId, null);
+    const lastStage = [...messages].reverse().find((m) => m.stage)?.id ?? null;
+    return messages.map(({ audio, ...m }) => ({ ...m, audio: Boolean(audio), active: Boolean(m.stage && m.id === lastStage && draft && draft.stage === m.stage) }));
+  }
+  // Yuborilgan yuklarning natijasi tayyor bo'lsa — bir marta alohida xabar bo'lib yoziladi
+  function settleResults(chatId) {
+    for (const m of store.chatMessages(chatId, 30)) {
+      if (!m.postId || m.resultLogged) continue;
+      const post = store.shipperPosts(chatId, { limit: 30 }).find((one) => one.id === m.postId);
+      const result = postResult(post);
+      if (!result.done && now() - m.at < 10 * 60_000) continue;
+      store.setChatExtra(chatId, m.id, { resultLogged: true });
+      if (result.done) say(chatId, result.text);
+    }
+  }
+  const quota = (chatId) => ({ used: store.shipperPostCount(chatId), limit: SHIPPER_LOAD_LIMIT });
+
+  // ?after=<id> — faqat shundan keyingilar (ilova natijani shu bilan kutadi)
   pub.get("/me/load-chat", (req, res) => {
-    appUser(req.driver);
     const { chatId } = req.driver;
-    res.json({ intro: CHAT_TEXT.intro, view: chat.current(chatId, req.driver), used: store.shipperPostCount(chatId), limit: SHIPPER_LOAD_LIMIT, posts: chatPosts(chatId) });
+    settleResults(chatId);
+    const after = Number(req.query.after) || 0;
+    res.json({ intro: CHAT_TEXT.intro, messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id > after), ...quota(chatId) });
   });
   pub.post("/me/load-chat", async (req, res) => {
-    appUser(req.driver);
+    const { chatId } = req.driver;
     const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
     if (!text) throw httpError(400, "Matn bo'sh");
     if (text.length > 3000) throw httpError(400, "Matn juda uzun — 3000 belgigacha yozing");
-    res.json(await chat.read(req.driver.chatId, text, req.driver));
+    const me = fromMe(chatId, text);
+    said(chatId, await chat.read(chatId, text, req.driver));
+    res.json({ messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id >= me.id), ...quota(chatId) });
   });
-  // Ovozli e'lon: ilova yozib olgan audio (AAC) → Gemini matnga o'giradi (server.js transcribeVoice) → matn kabi davom etadi.
-  // → { transcript, view } | 503 «AI band» | 422 «ovoz tushunilmadi»
+  // Ovozli e'lon: ilova yozib olgan audio (AAC) saqlanadi (keyin o'zi ham, boshqa telefondan ham eshitadi) → Gemini matnga
+  // o'giradi (server.js transcribeVoice) → matn kabi davom etadi. Sarlavha X-Duration-Ms — necha ms
   pub.post("/me/load-chat/voice", express.raw({ type: ["audio/*", "application/octet-stream"], limit: "8mb" }), async (req, res) => {
-    appUser(req.driver);
+    const { chatId } = req.driver;
     const data = Buffer.isBuffer(req.body) ? req.body : null;
     if (!data?.length) throw httpError(400, "Ovoz yozuvi bo'sh");
-    if (!transcribeVoice) throw httpError(503, "Ovozni matnga o'girish hozir yo'q — yozib yuboring");
+    const durationMs = clamp(Number(req.get("x-duration-ms")) || 0, 0, 10 * 60_000) || null;
     const mime = String(req.get("content-type") ?? "audio/aac").split(";")[0];
-    const heard = await transcribeVoice(data, mime);
-    if (!heard) throw httpError(503, "⏳ Hozir ovozni tushuna olmadim (AI band). Birozdan keyin qayta urinib ko'ring yoki yozib yuboring");
-    if (heard.length < 8) throw httpError(422, "🤔 Ovozdan gap tushunilmadi. Qaytadan, aniqroq aytib ko'ring");
-    res.json({ transcript: heard, view: await chat.read(req.driver.chatId, heard, req.driver) });
+    const file = `${now()}-${randomBytes(4).toString("hex")}.aac`;
+    const dir = path.join(chatAudioDir, String(chatId));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, file), data);
+    const me = fromMe(chatId, "", { audio: file, durationMs });
+    const heard = transcribeVoice ? await transcribeVoice(data, mime) : null;
+    if (heard) store.setChatExtra(chatId, me.id, { transcript: heard });
+    if (!heard) say(chatId, "⏳ Hozir ovozni tushuna olmadim (AI band). Birozdan keyin qayta aytib ko'ring yoki yozib yuboring.");
+    else if (heard.length < 8) say(chatId, "🤔 Ovozdan gap tushunilmadi. Qaytadan, aniqroq aytib ko'ring.");
+    else said(chatId, await chat.read(chatId, heard, req.driver));
+    res.json({ messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id >= me.id), ...quota(chatId) });
+  });
+  // Ovozli xabarning o'zi (tinglash uchun) — faqat o'z chatidagi
+  pub.get("/me/load-chat/audio/:id", (req, res) => {
+    const m = store.chatMessage(req.driver.chatId, req.params.id);
+    const file = m?.audio ? path.join(chatAudioDir, String(req.driver.chatId), path.basename(m.audio)) : null;
+    if (!file || !existsSync(file)) throw httpError(404, "Ovoz topilmadi");
+    res.set("cache-control", "private, max-age=31536000, immutable");
+    res.type("audio/aac").sendFile(file);
   });
   pub.post("/me/load-chat/phone", (req, res) => {
-    appUser(req.driver);
-    const view = chat.pickPhone(req.driver.chatId, String(req.body?.phone ?? ""), req.driver);
+    const { chatId } = req.driver;
+    const phone = String(req.body?.phone ?? "");
+    const view = chat.pickPhone(chatId, phone, req.driver);
     if (!view) throw httpError(409, CHAT_TEXT.stale, "stale");
-    res.json(view);
+    const me = fromMe(chatId, `📞 ${formatContactPhone(phone)}`);
+    said(chatId, view);
+    res.json({ messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id >= me.id), ...quota(chatId) });
   });
   pub.post("/me/load-chat/send", (req, res) => {
-    appUser(req.driver);
-    const sent = chat.send(req.driver.chatId, req.driver, { sender: telegramUsername(req.driver.username) });
-    if (sent.ok) return res.json({ ok: true, id: sent.id, text: CHAT_TEXT.sending });
-    if (sent.reason === "limit") throw httpError(429, CHAT_TEXT.limit(SHIPPER_LOAD_LIMIT), "limit");
-    if (sent.reason === "phone") throw httpError(409, "Avval raqamni yozing", "phone");
-    throw httpError(409, CHAT_TEXT.stale, "stale");
+    const { chatId } = req.driver;
+    const sent = chat.send(chatId, req.driver, { sender: telegramUsername(req.driver.username) });
+    if (!sent.ok) {
+      if (sent.reason === "limit") throw httpError(429, CHAT_TEXT.limit(SHIPPER_LOAD_LIMIT), "limit");
+      if (sent.reason === "phone") throw httpError(409, "Avval raqamni yozing", "phone");
+      throw httpError(409, CHAT_TEXT.stale, "stale");
+    }
+    const me = fromMe(chatId, "✅ Yuborish");
+    say(chatId, CHAT_TEXT.sending, { postId: sent.id });
+    res.json({ messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id >= me.id), ...quota(chatId) });
   });
   pub.delete("/me/load-chat", (req, res) => {
-    appUser(req.driver);
-    chat.cancel(req.driver.chatId);
-    res.json({ ok: true, text: CHAT_TEXT.cancelled });
-  });
-  pub.get("/me/load-chat/posts/:id", (req, res) => {
-    appUser(req.driver);
-    const post = store.shipperPosts(req.driver.chatId, { limit: 30 }).find((one) => one.id === Number(req.params.id));
-    if (!post) throw httpError(404, "Topilmadi");
-    res.json(postResult(post));
+    const { chatId } = req.driver;
+    chat.cancel(chatId);
+    const me = fromMe(chatId, "❌ Bekor qilish");
+    say(chatId, CHAT_TEXT.cancelled);
+    res.json({ messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id >= me.id), ...quota(chatId) });
   });
 
   // --- Admin ---

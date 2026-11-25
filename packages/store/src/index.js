@@ -15,6 +15,7 @@ import { AUTO_PRO_SQL, createTgAccountQueries, hashPhone } from "./tgAccounts.js
 import { createFeedQueries, migrateFeed } from "./feed.js";
 import { createAppLoginQueries } from "./appLogins.js";
 import { createPushQueries } from "./push.js";
+import { createLoadChatQueries } from "./loadChatLog.js";
 
 export { acquireRunLock, BEAT_MS, isAlive, readRunLock, removeRunLock, RUN_DIR } from "./lock.js";
 export { decryptText, encryptText, keyHint, loadSecret, SECRET_FILE } from "./secrets.js";
@@ -32,6 +33,8 @@ export const DEFAULT_DB_FILE = path.resolve(ROOT, process.env.YUK_DB || path.joi
 // API (apps/api avatars.js) bot orqali oladi, yopiq guruhnikini collector (avatars.js) o'qiydigan akkaunt bilan yuklaydi
 // Android ilova APK va latest.json (appRelease.js; serverda /data/ops/yukapp-release.sh qo'yadi)
 export const APK_DIR = path.join(ROOT, "data", "apk");
+// Ilova «E'lon berish» chatidagi ovozli xabarlar (loadChatLog.js): <chat id>/<fayl>
+export const CHAT_AUDIO_DIR = path.join(path.dirname(DEFAULT_DB_FILE), "chat-audio");
 export const AVATAR_DIR = path.join(path.dirname(DEFAULT_DB_FILE), "avatars");
 // Ovozli xabar / dumaloq videoning asl fayli (2026-11-20, Azimjon: «audio va dumaloq video bar xato bo'lishi mumkin ekan, demak
 // biz uni asl audio va dumaloq videosini ham qo'shib yo'naltiramiz»): collector media.js yozadi (24 soat turadi), bot
@@ -603,6 +606,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     ...createAppLoginQueries(db, now),
     // Ilova bildirishnomalari: telefon tokenlari (push.js)
     ...createPushQueries(db, now),
+    ...createLoadChatQueries(db, now),
 
     // --- E'lonlar navbati ---
     // Yangi e'lonni navbatga qo'yadi. Shu matn dedupeWindowMs ichida bo'lgan bo'lsa — "duplicate", AI'ga bormaydi.
@@ -935,6 +939,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       db.prepare(`DELETE FROM loads WHERE post_id IN (${own})`).run(chatId);
       db.prepare("DELETE FROM posts WHERE shipper = ?").run(chatId);
       db.prepare("DELETE FROM user_events WHERE chat_id = ?").run(chatId);
+      db.prepare("DELETE FROM load_chat WHERE chat_id = ?").run(chatId);
       return db.prepare("DELETE FROM drivers WHERE chat_id = ?").run(chatId).changes > 0;
     },
 

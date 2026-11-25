@@ -105,7 +105,7 @@ before(async () => {
   writeFileSync(path.join(dist, "index.html"), "<!doctype html><title>Yuk Ekspert</title>");
   const notify = async (chatId, text, extra) => notified.push({ chatId, text, extra });
   apkDir = mkdtempSync(path.join(tmpdir(), "yuk-apk-"));
-  const app = createPublicApp({ store, env, sessions, calls, scope: "qoshni", webDist: dist, apkDir, notify, now: () => NOW });
+  const app = createPublicApp({ store, env, sessions, calls, scope: "qoshni", webDist: dist, apkDir, chatAudioDir: mkdtempSync(path.join(tmpdir(), "yuk-audio-")), notify, now: () => NOW });
   await new Promise((resolve) => (server = app.listen(0, "127.0.0.1", resolve)));
   base = `http://127.0.0.1:${server.address().port}`;
 
@@ -324,21 +324,34 @@ test("yo'nalish (web «Yuklar»): tugmalardagi sonlar, saqlash; noma'lum joy —
   assert.equal((await call("GET", "/pub/me/route", { token: fresh })).body.code, "role", "yuk beruvchining yo'nalishi sozlamalarida");
 });
 
-test("ilova yuk chati: rolsiz — haydovchi ham yoza oladi; matn tushunilmasa oddiy javob; ovoz o'girgichsiz — 503", async () => {
+test("ilova yuk chati: rolsiz, tarix serverda, ovoz saqlanadi va faqat egasiga beriladi", async () => {
   const { token } = await login(); // 555 — haydovchi
-  assert.equal((await call("GET", "/pub/me/load-chat", { token })).status, 200);
-  const voice = await fetch(`${base}/pub/me/load-chat/voice`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "audio/aac" }, body: Buffer.from("abc") });
-  assert.equal(voice.status, 503);
-  const shipper = sessions.issue(558);
-  store.saveDriver(558, { name: "Vali", role: "yuk_beruvchi", active: true });
-  const open = await call("GET", "/pub/me/load-chat", { token: shipper });
+  const open = await call("GET", "/pub/me/load-chat", { token });
   assert.equal(open.status, 200);
-  assert.equal(open.body.view, null);
   assert.match(open.body.intro, /Masalan/);
-  const said = await call("POST", "/pub/me/load-chat", { token: shipper, body: { text: "salom qalaysiz" } });
+  const said = await call("POST", "/pub/me/load-chat", { token, body: { text: "salom qalaysiz" } });
   assert.equal(said.status, 200);
-  assert.equal(said.body.stage, null);
-  assert.equal((await call("POST", "/pub/me/load-chat/send", { token: shipper })).body.code, "stale");
+  assert.deepEqual(said.body.messages.map((m) => m.from), ["me", "bot"]);
+  assert.equal(said.body.messages[0].text, "salom qalaysiz");
+  // ovoz: o'girgich yo'q → «AI band» javobi, fayl esa saqlanadi
+  const voice = await fetch(`${base}/pub/me/load-chat/voice`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "audio/aac", "x-duration-ms": "3200" }, body: Buffer.from("AACDATA") });
+  const vbody = await voice.json();
+  assert.equal(voice.status, 200);
+  const audioMsg = vbody.messages[0];
+  assert.equal(audioMsg.audio, true);
+  assert.equal(audioMsg.durationMs, 3200);
+  assert.match(vbody.messages[1].text, /AI band/);
+  const file = await fetch(`${base}/pub/me/load-chat/audio/${audioMsg.id}`, { headers: { authorization: `Bearer ${token}` } });
+  assert.equal(file.status, 200);
+  assert.equal(Buffer.from(await file.arrayBuffer()).toString(), "AACDATA");
+  const other = sessions.issue(558);
+  store.saveDriver(558, { name: "Vali", role: "yuk_beruvchi", active: true });
+  assert.equal((await fetch(`${base}/pub/me/load-chat/audio/${audioMsg.id}`, { headers: { authorization: `Bearer ${other}` } })).status, 404);
+  // qayta ochilganda — hammasi joyida; after bilan faqat yangilari
+  const again = await call("GET", "/pub/me/load-chat", { token });
+  assert.equal(again.body.messages.length, 4);
+  assert.equal((await call("GET", `/pub/me/load-chat?after=${audioMsg.id}`, { token })).body.messages.length, 1);
+  assert.equal((await call("POST", "/pub/me/load-chat/send", { token })).body.code, "stale");
 });
 
 test("pauza / davom", async () => {
