@@ -20,7 +20,11 @@ export const CHAT_TEXT = {
   // Tushunib bo'lmadi (AI ham javob bermadi) — foydalanuvchiga sabab emas, nima qilish kerakligi
   busy: `🙂 Xabaringizni tushuna olmadim. Yukingiz haqida qaytadan, aniqroq yozing: qayerdan, qayerga, nima yuk va necha tonna.\n\nMasalan:\n${EXAMPLE}`,
   limit: (limit) => `⚠️ 24 soatda ${limit} ta yuk yubordingiz — bu chegara. Keyingisini birozdan keyin yuboring.`,
-  askPhone: "📞 Haydovchilar qaysi raqamga qo'ng'iroq qilsin? Raqamni yozing, masalan: 90 123 45 67 (ikkita bo'lsa — vergul bilan).",
+  askPhone: "📞 E'londa telefon raqami yo'q. Haydovchilar qaysi raqamga qo'ng'iroq qilsin? Raqamni tekshiring (o'zgartirsa bo'ladi) va «✅ Yuborish» ni bosing.",
+  // Ma'lumot yetishmaydi — yozgani qaytariladi, «✏️ Tahrirlash» bilan to'ldirib qayta yuboradi (Azimjon, 2026-11-25)
+  missing: (parts) => `✏️ E'londa ${parts.join(" va ")} yozilmagan. Pastdagi «✏️ Tahrirlash» ni bosing, qo'shib qayta yuboring.`,
+  // Ovoz 3 marta ketma-ket tushunilmadi — yozib berishni taklif qilamiz
+  voiceHelp: `🎤 Ovozingizni yaxshi tushuna olmayapman. Yaxshisi, e'lonni yozib yuboring — shunday:\n\n${EXAMPLE}\n\n📍 qayerdan → qayerga · 📦 nima yuk, necha tonna · 🚚 mashina · 💰 narx · 📞 telefon`,
   badPhone: "Raqamni tushunmadim. Masalan: 90 123 45 67",
   confirm: (n) => (n > 1 ? `📋 ${n} ta yuk — haydovchilarga shunday boradi. Hammasi to'g'rimi?` : "📋 Haydovchilarga shunday boradi. Hammasi to'g'rimi?"),
   more: (n) => `⚠️ Bitta xabarda ko'pi bilan ${MAX_DRAFT_LOADS} ta yuk — qolgan ${n} tasini alohida yuboring.`,
@@ -52,6 +56,14 @@ export function postResult(post) {
 }
 
 export const phonesIn = (text) => extractPhones(String(text ?? "")).slice(0, 2);
+// Yetishmayotgan asosiy ma'lumot: yo'nalish (ikkala tomoni) va yuk (nima yoki necha tonna)
+export function missingParts(loads) {
+  const parts = [];
+  if (loads.some((l) => !(l.fromRegion || l.fromCountry) || !(l.toRegion || l.toCountry))) parts.push("📍 qayerdan → qayerga");
+  if (loads.some((l) => !l.cargo && l.weightT == null && l.weightKg == null)) parts.push("📦 nima yuk, necha tonna");
+  return parts;
+}
+
 // Yuk kartasi: qatorlar (yo'nalish, yuk, mashina, narx, qachon, izoh, raqam) — haydovchilarning ilova lentasidagi matn shu
 const cardOf = (load) => shipperLoadText(load).split(" · ");
 
@@ -62,11 +74,12 @@ export function createLoadChat({ store, parse, scope, now = Date.now, limit = SH
   const saved = (user) => (user?.loadPhones?.length ? user.loadPhones : user?.phone ? [user.phone] : []);
   const phoneChoices = (user) => saved(user).slice(0, 3).map((phone) => ({ phone, label: formatContactPhone(phone) }));
 
-  // Qoralamaning «ko'rinishi»: { stage, text, cards?, phones? }
+  // Qoralamaning «ko'rinishi»: { stage, text, cards, editText, phones? } — editText: yozgani («✏️ Tahrirlash»)
   function viewOf(draft, user) {
-    if (draft.stage === "phone") return { stage: "phone", text: CHAT_TEXT.askPhone, phones: phoneChoices(user) };
+    const cards = draft.loads.map(cardOf);
+    if (draft.stage === "phone") return { stage: "phone", text: CHAT_TEXT.askPhone, cards, phones: phoneChoices(user), editText: draft.text };
     const text = CHAT_TEXT.confirm(draft.loads.length) + (draft.more > 0 ? `\n${CHAT_TEXT.more(draft.more)}` : "");
-    return { stage: "confirm", text, cards: draft.loads.map(cardOf) };
+    return { stage: "confirm", text, cards, editText: draft.text };
   }
   function show(chatId, draft, user) {
     store.setLoadDraft(chatId, draft);
@@ -87,26 +100,32 @@ export function createLoadChat({ store, parse, scope, now = Date.now, limit = SH
       if (draft?.stage === "phone") {
         const phones = phonesIn(text);
         if (phones.length) return show(chatId, withPhones(draft, phones), user);
-        if (text.trim().length < 25) return { stage: "phone", text: CHAT_TEXT.badPhone, phones: phoneChoices(user) };
+        if (text.trim().length < 25) return { ...viewOf(draft, user), text: CHAT_TEXT.badPhone };
       }
       if (store.shipperPostCount(chatId) >= limit) return note(CHAT_TEXT.limit(limit));
+      const editText = text.slice(0, 2000);
       const result = await parse(text);
-      if (!result) return note(CHAT_TEXT.busy);
-      if (result.ok && result.postType === "mashina_bor") return note(CHAT_TEXT.truck);
-      if (!result.ok || result.postType !== "yuk_bor" || !result.loads?.length) return note(CHAT_TEXT.notLoad);
+      if (!result) return note(CHAT_TEXT.busy, { editText });
+      if (result.ok && result.postType === "mashina_bor") return note(CHAT_TEXT.truck, { editText });
+      if (!result.ok || result.postType !== "yuk_bor" || !result.loads?.length) return note(CHAT_TEXT.notLoad, { editText, failed: true });
+      const missing = missingParts(result.loads);
+      if (missing.length) return note(CHAT_TEXT.missing(missing), { editText, failed: true });
       const inScope = result.loads.filter((load) => routeInScope(load, scope));
-      if (!inScope.length) return note(scopeText(result.loads, scope));
+      if (!inScope.length) return note(scopeText(result.loads, scope), { editText });
       const loads = inScope.slice(0, MAX_DRAFT_LOADS);
       const next = { text: text.slice(0, 2000), loads, more: inScope.length - loads.length, at: now(), by: result.by ?? "ai" };
       const stage = loads.every((load) => load.phones?.length) ? "confirm" : "phone";
       return show(chatId, { ...next, stage }, user);
     },
 
-    // Oldin yozgan raqamidan birini tanladi
-    pickPhone(chatId, phone, user) {
+    // Raqam: tayyor raqamlardan biri yoki o'zi yozgani (tahrirlagani). → ko'rinish | null (qoralama yo'q) |
+    // { stage: "phone", text: badPhone, … } (raqam tushunilmadi)
+    setPhone(chatId, phoneText, user) {
       const draft = current(chatId);
-      if (!draft || draft.stage !== "phone" || !saved(user).includes(phone)) return null;
-      return show(chatId, withPhones(draft, [phone]), user);
+      if (!draft) return null;
+      const phones = saved(user).includes(phoneText) ? [phoneText] : phonesIn(phoneText);
+      if (!phones.length) return { ...viewOf(draft, user), text: CHAT_TEXT.badPhone };
+      return show(chatId, withPhones(draft, phones), user);
     },
 
     // → { ok: true, id } | { ok: false, reason: "stale" | "phone" | "limit" }

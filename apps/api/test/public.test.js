@@ -352,6 +352,13 @@ test("ilova yuk chati: rolsiz, tarix serverda, ovoz saqlanadi va faqat egasiga b
   assert.equal(again.body.messages.length, 4);
   assert.equal((await call("GET", `/pub/me/load-chat?after=${audioMsg.id}`, { token })).body.messages.length, 1);
   assert.equal((await call("POST", "/pub/me/load-chat/send", { token })).body.code, "stale");
+  // ovoz ketma-ket 3 marta tushunilmadi — yozib berish namunasi bilan taklif qilinadi
+  let last = null;
+  for (let i = 0; i < 2; i++) {
+    const r = await fetch(`${base}/pub/me/load-chat/voice`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "audio/aac", "x-duration-ms": "4000" }, body: Buffer.from("X") });
+    last = (await r.json()).messages.at(-1).text;
+  }
+  assert.match(last, /yozib yuboring — shunday/);
 });
 
 test("pauza / davom", async () => {

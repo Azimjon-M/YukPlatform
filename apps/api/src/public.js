@@ -707,7 +707,8 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   // ilovani qayta o'rnatsa yoki boshqa telefondan kirsa ham, ovozli xabarlari bilan joyida (Telegram'dagidek)
   const chat = createLoadChat({ store, scope, now, parse: async (text) => (parseLoad ? parseLoad(text) : null) });
   const say = (chatId, text, extra = null) => store.addChatMessage(chatId, { from: "bot", text, extra });
-  const said = (chatId, view) => say(chatId, view.text, { cards: view.cards, stage: view.stage, phones: view.phones });
+  const said = (chatId, view) =>
+    say(chatId, view.text, { cards: view.cards, stage: view.stage, phones: view.phones, editText: view.editText, failed: view.failed });
   const fromMe = (chatId, text, more = {}) => store.addChatMessage(chatId, { from: "me", text, ...more });
   // Ilovaga beriladigan ko'rinish: ovoz — bor/yo'q (fayl nomi emas); tugmalar faqat oxirgi, hali amal qiladigan savolda
   function chatView(chatId, messages) {
@@ -759,8 +760,17 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const me = fromMe(chatId, "", { audio: file, durationMs });
     const heard = transcribeVoice ? await transcribeVoice(data, mime) : null;
     if (heard) store.setChatExtra(chatId, me.id, { transcript: heard });
-    if (!heard || heard.length < 8) say(chatId, "🙂 Ovozingizni tushuna olmadim. Qaytadan, aniqroq aytib ko'ring yoki yozib yuboring: qayerdan, qayerga, nima yuk va necha tonna.");
-    else said(chatId, await chat.read(chatId, heard, req.driver));
+    const view = heard && heard.length >= 8 ? await chat.read(chatId, heard, req.driver) : null;
+    // Ovoz tushunilmadi (yoki undan yuk chiqmadi): ketma-ket 3-marta — yozib berishni namuna bilan taklif qilamiz
+    if (!view || view.failed) {
+      store.setChatExtra(chatId, me.id, { voiceFail: true });
+      const recent = store.chatMessages(chatId, 30).filter((m) => m.from === "me").reverse();
+      const fails = recent.findIndex((m) => !m.voiceFail);
+      const streak = fails < 0 ? recent.length : fails;
+      if (streak >= 3) say(chatId, CHAT_TEXT.voiceHelp);
+      else if (!view) say(chatId, "🙂 Ovozingizni tushuna olmadim. Qaytadan, aniqroq aytib ko'ring yoki yozib yuboring: qayerdan, qayerga, nima yuk va necha tonna.");
+      else said(chatId, view);
+    } else said(chatId, view);
     res.json({ messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id >= me.id), ...quota(chatId) });
   });
   // Ovozli xabarning o'zi (tinglash uchun) — faqat o'z chatidagi
@@ -771,13 +781,19 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     res.set("cache-control", "private, max-age=31536000, immutable");
     res.type("audio/aac").sendFile(file);
   });
+  // Raqam (tayyoridan yoki o'zi yozgan/tahrirlagan); send: true — shu zahoti yuboriladi (raqam oynasidagi «✅ Yuborish»)
   pub.post("/me/load-chat/phone", (req, res) => {
     const { chatId } = req.driver;
-    const phone = String(req.body?.phone ?? "");
-    const view = chat.pickPhone(chatId, phone, req.driver);
+    const phone = String(req.body?.phone ?? "").slice(0, 60);
+    const view = chat.setPhone(chatId, phone, req.driver);
     if (!view) throw httpError(409, CHAT_TEXT.stale, "stale");
-    const me = fromMe(chatId, `📞 ${formatContactPhone(phone)}`);
-    said(chatId, view);
+    const me = fromMe(chatId, `📞 ${phone}`);
+    if (view.stage === "confirm" && req.body?.send === true) {
+      const sent = chat.send(chatId, req.driver, { sender: telegramUsername(req.driver.username) });
+      if (sent.ok) say(chatId, CHAT_TEXT.sending, { postId: sent.id, cards: view.cards });
+      else if (sent.reason === "limit") say(chatId, CHAT_TEXT.limit(SHIPPER_LOAD_LIMIT));
+      else said(chatId, view);
+    } else said(chatId, view);
     res.json({ messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id >= me.id), ...quota(chatId) });
   });
   pub.post("/me/load-chat/send", (req, res) => {

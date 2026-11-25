@@ -50,10 +50,33 @@ test("yuk chati: saqlangan raqamni tanlash, bekor qilish", async () => {
   store.setLoadPhones(77, ["+998931112233"]);
   const view = await chat.read(77, "Andijondan Toshkentga 20 tonna un", user());
   assert.deepEqual(view.phones.map((p) => p.phone), ["+998931112233"]);
-  assert.equal(chat.pickPhone(77, "+998000000000", user()), null); // boshqa raqam — yo'q
-  assert.equal(chat.pickPhone(77, "+998931112233", user()).stage, "confirm");
+  assert.equal(chat.setPhone(77, "abc", user()).stage, "phone"); // tushunilmadi — raqam oynasi qoladi
+  assert.equal(chat.setPhone(77, "+998931112233", user()).stage, "confirm");
   assert.equal(chat.cancel(77), true);
   assert.equal(chat.current(77, user()), null);
+  store.close();
+});
+
+test("yuk chati: yo'nalish yoki yuk yozilmagan — nimasi yetishmasligi aytiladi, matni tahrirlash uchun qaytadi", async () => {
+  const { store, chat, user } = setup({ ok: true, postType: "yuk_bor", loads: [{ fromRegion: "andijon", phones: [] }] });
+  const view = await chat.read(77, "Andijondan yuk bor", user());
+  assert.equal(view.stage, null);
+  assert.match(view.text, /qayerdan → qayerga/);
+  assert.match(view.text, /nima yuk/);
+  assert.equal(view.editText, "Andijondan yuk bor");
+  assert.equal(chat.current(77, user()), null);
+  store.close();
+});
+
+test("yuk chati: raqam oynasida karta ham, tahrirlash matni ham bor; yozilgan raqam qabul qilinadi", async () => {
+  const { store, chat, user } = setup({ ok: true, postType: "yuk_bor", loads: [LOAD] });
+  const view = await chat.read(77, "Andijondan Toshkentga 20 tonna un", user());
+  assert.equal(view.stage, "phone");
+  assert.ok(view.cards[0][0].includes("Andijon"));
+  assert.equal(view.editText, "Andijondan Toshkentga 20 tonna un");
+  const done = chat.setPhone(77, "93 111 22 33", user());
+  assert.equal(done.stage, "confirm");
+  assert.equal(chat.send(77, user()).ok, true);
   store.close();
 });
 
