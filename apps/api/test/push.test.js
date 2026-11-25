@@ -4,7 +4,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { openStore } from "@yuk/store";
 import { createFeedList } from "../src/feedList.js";
 import { createFcm } from "../src/fcm.js";
-import { createPusher, pushMessage } from "../src/push.js";
+import { RELEASE_KEY, createPusher, createReleaseNotifier, pushMessage } from "../src/push.js";
 
 const NOW = 1_800_000_000_000;
 const TOKEN = "fcm-token-aaaaaaaaaaaaaaaaaaaaaaaa:bbb";
@@ -105,4 +105,23 @@ test("body ichida e'lonning o'zi, 4 KB dan oshmaydi (uzun kirill matn qisqartiri
   assert.ok(total < 4096, `jami ${total} bayt`);
   const short = JSON.parse(pushMessage({ ...item, post: { ...item.post, text: "qisqa" } }).body);
   assert.equal(short.item.post.text, "qisqa");
+});
+
+test("yangi ilova versiyasi: birinchi marta faqat eslab qoladi, keyingi versiyada hammaga bir marta «yangilang»", async () => {
+  const store = openStore({ file: ":memory:", now: () => 1 });
+  store.savePushToken(1, "a".repeat(30));
+  store.savePushToken(2, "b".repeat(30));
+  let apk = { version: "1.0.0", versionCode: 10 };
+  const sent = [];
+  const notifier = createReleaseNotifier({ store, readRelease: () => apk, send: async (token, data) => (sent.push({ token, data }), "ok") });
+  await notifier.tick();
+  assert.equal(sent.length, 0);
+  assert.equal(store.getSetting(RELEASE_KEY), "10");
+  apk = { version: "1.1.0", versionCode: 11 };
+  await notifier.tick();
+  await notifier.tick(); // takrorlanmaydi
+  assert.equal(sent.length, 2);
+  assert.equal(JSON.parse(sent[0].data.body).type, "update");
+  assert.match(sent[0].data.message, /1\.1\.0/);
+  store.close();
 });

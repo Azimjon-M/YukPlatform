@@ -13,14 +13,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { envSeedEntries, resolveSettings } from "@yuk/parser";
 import { devAutostart, isDevMode, routeScopeFrom } from "@yuk/shared";
-import { APK_DIR, DEFAULT_DB_FILE, createCallLinks, loadSecret, openStore } from "@yuk/store";
+import { APK_DIR, DEFAULT_DB_FILE, readRelease, createCallLinks, loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
 import { createErrorLog } from "./errorLog.js";
 import { createProcessManager } from "./processes.js";
 import { createPublicApp } from "./public.js";
 import { createFeedList } from "./feedList.js";
 import { FCM_KEY_FILE, createFcm, loadFcmKey } from "./fcm.js";
-import { createPusher } from "./push.js";
+import { createPusher, createReleaseNotifier } from "./push.js";
 import { createBotMessenger } from "./botMessage.js";
 import { findCloudflared, findNginx, findTailscale } from "./edge/tools.js";
 import { createSessions } from "./telegramAuth.js";
@@ -127,6 +127,7 @@ function startPush() {
     }
     pusher = createPusher({ store, feedList: createFeedList({ store }), send, log });
     pusher.start();
+    createReleaseNotifier({ store, readRelease: () => readRelease(APK_DIR), send, log }).start(); // yangi APK → «yangilang»
     clearInterval(pushWatch);
     log("Ilova bildirishnomalari: yoqildi (FCM)");
   } catch (error) {

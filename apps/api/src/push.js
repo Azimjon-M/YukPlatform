@@ -106,3 +106,61 @@ export function createPusher({ store, feedList, send, log = () => {}, everyMs = 
     },
   };
 }
+
+// Yangi ilova versiyasi joylandi (data/apk/latest.json, @yuk/store appRelease.js) — hamma telefonga bir marta
+// «📲 yangilang» (Azimjon, 2026-11-25: «bildirishnomaham bo'lsin yangila degan»). Qaysi versiya haqida aytilgani
+// settings.app_release_pushed da: server qayta yoqilsa ham takrorlanmaydi; birinchi ishga tushishda faqat eslab qoladi.
+// Bosilganda ilova ochiladi va (versiya eski bo'lsa) «Yangilash» oynasini ko'rsatadi; 0.11.x lar — botdagi /ilovalar.
+export const RELEASE_KEY = "app_release_pushed";
+export const RELEASE_EVERY_MS = 60_000;
+
+export function releaseMessage(apk) {
+  return {
+    title: "📲 Yuk Ekspert yangilandi",
+    message: `Yangi versiya ${apk.version} — ilovani oching va «Yangilash» ni bosing (yoki botda /ilovalar)`,
+    channelId: "yuklar",
+    categoryId: "",
+    body: JSON.stringify({ type: "update", version: apk.version }),
+  };
+}
+
+export function createReleaseNotifier({ store, readRelease, send, log = () => {}, everyMs = RELEASE_EVERY_MS }) {
+  let busy = false;
+  let timer = null;
+
+  async function tick() {
+    if (busy) return;
+    busy = true;
+    try {
+      const apk = readRelease();
+      if (!apk?.versionCode) return;
+      const told = Number(store.getSetting(RELEASE_KEY));
+      store.setSetting(RELEASE_KEY, String(apk.versionCode)); // oldin — xato bo'lsa ham takror-takror yubormaslik uchun
+      if (!told || apk.versionCode <= told) return;
+      let sent = 0;
+      for (const row of store.pushTokens()) {
+        const result = await send(row.token, releaseMessage(apk)).catch(() => "error");
+        if (result === "gone") store.dropPushToken(row.token);
+        if (result === "ok") sent++;
+      }
+      log(`Ilova ${apk.version}: ${sent} ta telefonga «yangilang» bildirishnomasi`);
+    } catch (error) {
+      log(`Yangi versiya bildirishnomasida xato: ${error.message}`);
+    } finally {
+      busy = false;
+    }
+  }
+
+  return {
+    tick,
+    start() {
+      timer ??= setInterval(tick, everyMs);
+      timer.unref?.();
+      tick();
+    },
+    stop() {
+      clearInterval(timer);
+      timer = null;
+    },
+  };
+}

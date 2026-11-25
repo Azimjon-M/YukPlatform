@@ -154,6 +154,16 @@ test("Android ilova: fayl yo'q — null/404; latest.json bor — versiya va yukl
   assert.equal(res.body, "APK");
 });
 
+test("majburiy yangilash: X-App-Version eski — 426 update; yangi yoki sarlavhasiz — odatdagidek; /pub/app ochiq", async () => {
+  // oldingi test latest.json ni versionCode 7 bilan qo'ydi
+  let res = await call("GET", "/pub/me", { headers: { "x-app-version": "6" } });
+  assert.equal(res.status, 426);
+  assert.equal(res.body.code, "update");
+  assert.equal((await call("GET", "/pub/app", { headers: { "x-app-version": "6" } })).status, 200);
+  assert.equal((await call("GET", "/pub/me", { headers: { "x-app-version": "7" } })).status, 401); // tekshiruvdan o'tdi
+  assert.equal((await call("GET", "/pub/me")).status, 401);
+});
+
 test("config: bot username va doira; CORS va OPTIONS", async () => {
   const { status, body, headers } = await call("GET", "/pub/config");
   assert.equal(status, 200);

@@ -288,7 +288,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     // tokenni bilmagan sayt hech narsa ololmaydi. Mini App Cloudflare Pages'da, API esa tunnelda bo'lishi mumkin.
     res.set({
       "access-control-allow-origin": "*",
-      "access-control-allow-headers": "authorization, content-type, ngrok-skip-browser-warning",
+      "access-control-allow-headers": "authorization, content-type, ngrok-skip-browser-warning, x-app-version",
       "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "access-control-max-age": "600",
       "cache-control": "no-store",
@@ -298,6 +298,22 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     next();
   });
   pub.use(express.json({ limit: "20kb" }));
+
+  // Majburiy yangilash (Azimjon, 2026-11-25: «eski versiyada ishlamasin faqat oxirgi versiya»): Android ilova har so'rovda
+  // «X-App-Version: <versionCode>» yuboradi. Serverda yangiroq APK bo'lsa — 426 code "update", ilova «Yangilash» oynasini
+  // ko'rsatadi. Sarlavhasiz so'rov (Mini App, sayt, 0.11.x gacha ilovalar) — tekshirilmaydi. /app, /health, /config — ochiq
+  let release = { at: 0, apk: null };
+  const latestApk = () => {
+    if (now() - release.at > 10_000) release = { at: now(), apk: apkDir ? readRelease(apkDir) : null };
+    return release.apk;
+  };
+  pub.use((req, res, next) => {
+    const code = Number(req.get("x-app-version"));
+    if (!code || /^\/(app|health|config)(\/|$)/.test(req.path)) return next();
+    const apk = latestApk();
+    if (apk && code < apk.versionCode) return next(httpError(426, `Ilovaning yangi versiyasi chiqdi (${apk.version}) — yangilang`, "update"));
+    next();
+  });
 
   pub.get("/health", (req, res) => res.json({ ok: true }));
 
@@ -895,7 +911,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
       errors?.add({ source: "web", level: "error", kind: "server", text: `${req.method} ${req.originalUrl.split("?")[0]}: ${error.message}`, details: error.stack });
     }
     // code — web nima qilishini biladi: auth → qayta kirish, no_profile → sozlamalarga, no_role → rol tanlash
-    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit", "feed"].includes(error.code) ? { code: error.code } : {};
+    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit", "feed", "update"].includes(error.code) ? { code: error.code } : {};
     res.status(status).json({ error: status >= 500 ? "Server xatosi" : error.message, ...code });
   });
 
