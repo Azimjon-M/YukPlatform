@@ -340,7 +340,7 @@ test("ilova yuk chati: rolsiz, tarix serverda, ovoz saqlanadi va faqat egasiga b
   const audioMsg = vbody.messages[0];
   assert.equal(audioMsg.audio, true);
   assert.equal(audioMsg.durationMs, 3200);
-  assert.match(vbody.messages[1].text, /AI band/);
+  assert.match(vbody.messages[1].text, /tushuna olmadim/);
   const file = await fetch(`${base}/pub/me/load-chat/audio/${audioMsg.id}`, { headers: { authorization: `Bearer ${token}` } });
   assert.equal(file.status, 200);
   assert.equal(Buffer.from(await file.arrayBuffer()).toString(), "AACDATA");

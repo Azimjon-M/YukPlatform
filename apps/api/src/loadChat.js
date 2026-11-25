@@ -14,9 +14,11 @@ export const EXAMPLE = "Andijondan Toshkentga 20 tonna un bor, tent fura kerak, 
 
 export const CHAT_TEXT = {
   intro: `Yukingizni oddiy yozib yuboring — mos haydovchilar sizga o'zlari qo'ng'iroq qiladi.\n\nMasalan:\n${EXAMPLE}`,
-  notLoad: `🤔 Bu xabardan yukni tushunmadim. Qayerdan, qayerga, nima yuk va necha tonna ekanini yozing, masalan:\n${EXAMPLE}`,
-  truck: "🤔 Bu bo'sh mashina e'loniga o'xshaydi. Siz yuk beruvchisiz — yukingizni yozing (qayerdan, qayerga, necha tonna).",
-  busy: "⏳ Hozir xabaringizni tushuna olmadim (AI band). Bir daqiqadan keyin qayta yuboring.",
+  // Texnik gap yo'q (Azimjon, 2026-11-25: «"salom" … "AI band" … texnik gaplar kerak emas … boshidan yozing degan ma'noda»)
+  notLoad: `🙂 Bu yuk e'loniga o'xshamadi. Yukingiz haqida qaytadan yozing: qayerdan, qayerga, nima yuk va necha tonna.\n\nMasalan:\n${EXAMPLE}`,
+  truck: "🙂 Bu bo'sh mashina e'loniga o'xshaydi. Bu yerda yuk e'loni beriladi — yukingiz haqida yozing: qayerdan, qayerga, nima yuk va necha tonna.",
+  // Tushunib bo'lmadi (AI ham javob bermadi) — foydalanuvchiga sabab emas, nima qilish kerakligi
+  busy: `🙂 Xabaringizni tushuna olmadim. Yukingiz haqida qaytadan, aniqroq yozing: qayerdan, qayerga, nima yuk va necha tonna.\n\nMasalan:\n${EXAMPLE}`,
   limit: (limit) => `⚠️ 24 soatda ${limit} ta yuk yubordingiz — bu chegara. Keyingisini birozdan keyin yuboring.`,
   askPhone: "📞 Haydovchilar qaysi raqamga qo'ng'iroq qilsin? Raqamni yozing, masalan: 90 123 45 67 (ikkita bo'lsa — vergul bilan).",
   badPhone: "Raqamni tushunmadim. Masalan: 90 123 45 67",

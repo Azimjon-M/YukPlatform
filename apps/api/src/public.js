@@ -759,8 +759,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const me = fromMe(chatId, "", { audio: file, durationMs });
     const heard = transcribeVoice ? await transcribeVoice(data, mime) : null;
     if (heard) store.setChatExtra(chatId, me.id, { transcript: heard });
-    if (!heard) say(chatId, "⏳ Hozir ovozni tushuna olmadim (AI band). Birozdan keyin qayta aytib ko'ring yoki yozib yuboring.");
-    else if (heard.length < 8) say(chatId, "🤔 Ovozdan gap tushunilmadi. Qaytadan, aniqroq aytib ko'ring.");
+    if (!heard || heard.length < 8) say(chatId, "🙂 Ovozingizni tushuna olmadim. Qaytadan, aniqroq aytib ko'ring yoki yozib yuboring: qayerdan, qayerga, nima yuk va necha tonna.");
     else said(chatId, await chat.read(chatId, heard, req.driver));
     res.json({ messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id >= me.id), ...quota(chatId) });
   });

@@ -112,6 +112,8 @@ async function parseLoad(text) {
   // o'zimizni model tekshirsin»): yuk beruvchi yuborishdan oldin kartani ko'radi va tasdiqlaydi / qayta yozadi
   const placed = (quick.loads ?? []).filter((l) => (l.fromRegion || l.fromCountry) && (l.toRegion || l.toCountry));
   if (quick.postType !== "mashina_bor" && placed.length) return { ok: true, postType: "yuk_bor", loads: placed, by: "rules" };
+  // Yuk e'loni emasligi ko'rinib turibdi («salom», «qalaysiz»): joy ham, raqam ham, yuk so'zi ham yo'q — AI'ga yubormaymiz
+  if (!(quick.loads ?? []).length && !/\d/.test(text) && text.trim().split(/\s+/).length < 6) return { ok: true, postType: "boshqa", loads: [], by: "rules" };
   // AI — faqat ishonchli provayderlar (OpenRouter/Groq bepul modellari tez-tez yo'qoladi, 2026-11-25 «model topilmadi»)
   chatPool ??= createParserPool({
     connections: () => store.aiConnections({ secret, env: process.env }).filter((c) => c.provider === "gemini" || c.provider === "onepro"),
