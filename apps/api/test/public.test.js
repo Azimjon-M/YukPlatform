@@ -1001,3 +1001,49 @@ test("kod bilan kirish: istalgan davlat raqami yoki @username → botdan kod →
   assert.equal(de.body.code, "not_found", JSON.stringify(de));
   assert.equal((await ask("12")).status, 400);
 });
+
+test("ilova botdan mustaqil: rol yo'q, filtr umumiy, botning roli/pauzasi/hisobi o'zgarmaydi", async () => {
+  const APP = { "x-app-version": "33" };
+  const token = sessions.issue(771);
+  store.saveDriver(771, { name: "Rolsiz" }); // botda rol tanlash bosqichida
+  // ilova uchun — doim haydovchi, filtr hali yo'q; bot sozlanmagan
+  let me = (await call("GET", "/pub/me", { token, headers: APP })).body;
+  assert.equal(me.role, "haydovchi");
+  assert.equal(me.profile, null);
+  assert.deepEqual(me.bot, { role: null, active: false });
+  // eski ilova jimgina rol qo'yardi — endi botga tegmaydi
+  await call("PUT", "/pub/me/role", { token, headers: APP, body: { role: "haydovchi" } });
+  assert.equal(store.getDriver(771).role, null);
+  // filtr saqlanadi — bot roli va yuborishi o'zgarmaydi, filtr yashirin haydovchi profiliga
+  const feed = { mode: "tezkor", sources: [], trucks: ["fura"] };
+  me = (await call("PUT", "/pub/me/profile", { token, headers: APP, body: { profile: { feed }, role: "haydovchi" } })).body;
+  assert.deepEqual(me.profile.feed.trucks, ["fura"]);
+  let row = store.getDriver(771);
+  assert.equal(row.role, null);
+  assert.equal(row.profile, null);
+  assert.equal(row.active, false, "bot yoqilmadi");
+  assert.deepEqual(row.profiles.haydovchi.feed.trucks, ["fura"]);
+  assert.equal((await call("GET", "/pub/feed", { token, headers: APP })).status, 200, "lenta ishlaydi");
+  // botni ilovadan yoqib bo'lmaydi — botda ro'yxatdan o'tmagan
+  assert.equal((await call("PATCH", "/pub/me", { token, headers: APP, body: { active: true } })).status, 409);
+  // ilova pauzasi — rolsiz ham
+  assert.equal((await call("PATCH", "/pub/me", { token, headers: APP, body: { appActive: false } })).body.appActive, false);
+  // botda haydovchini tanlasa — ilovadagi filtr tiklanadi (filtr umumiy)
+  store.switchRole(771, "haydovchi");
+  assert.deepEqual(store.getDriver(771).profile.feed.trucks, ["fura"]);
+  // botda yuk beruvchi bo'lsa — ilova baribir o'sha haydovchi filtri bilan
+  store.switchRole(771, "yuk_beruvchi");
+  me = (await call("GET", "/pub/me", { token, headers: APP })).body;
+  assert.equal(me.role, "haydovchi");
+  assert.deepEqual(me.profile.feed.trucks, ["fura"]);
+  assert.equal(me.bot.role, "yuk_beruvchi");
+  await call("PUT", "/pub/me/profile", { token, headers: APP, body: { profile: { feed: { ...feed, trucks: ["isuzu"] } } } });
+  row = store.getDriver(771);
+  assert.equal(row.role, "yuk_beruvchi", "botdagi rol o'zgarmadi");
+  assert.deepEqual(row.profiles.haydovchi.feed.trucks, ["isuzu"]);
+  // ilovadan chiqish — bot hisobi o'zgarmaydi
+  await call("POST", "/pub/me/logout", { token, headers: APP });
+  row = store.getDriver(771);
+  assert.equal(row.role, "yuk_beruvchi");
+  assert.equal(row.signedOutAt, null);
+});

@@ -3,7 +3,7 @@
 // shu tokenga hali yuborilmagan e'lonlar FCM bilan ketadi: sarlavha «📍 Qayerdan → Qayerga», matn — e'lon boshi,
 // «📞 Qo'ng'iroq qilish» — e'londagi birinchi raqam. Bir aylanishda bitta telefonga ko'pi bilan 3 ta (qolgani — lentada).
 // Pauzada / filtrsiz / hisobdan chiqqan — yuborilmaydi. Yuk beruvchiga (bo'sh mashinalar) — hali yo'q.
-import { placeText, roleOf } from "@yuk/shared";
+import { appProfileOf, placeText } from "@yuk/shared";
 
 export const PUSH_EVERY_MS = 5_000;
 export const PUSH_MINUTES = 3;
@@ -63,7 +63,9 @@ export function createPusher({ store, feedList, send, log = () => {}, everyMs = 
       }
       for (const [chatId, rows] of byChat) {
         const driver = store.getDriver(chatId);
-        if (!driver || driver.deletedAt || roleOf(driver) !== "haydovchi" || !driver.profile || driver.appActive === false) continue; // ilova pauzasi
+        // ilova botning rolidan mustaqil: haydovchi filtri (appProfileOf) bo'lsa bas; ilova pauzasi — appActive
+        const appProfile = driver && appProfileOf(driver);
+        if (!driver || driver.deletedAt || !appProfile || driver.appActive === false) continue;
         const items = feedList.list(driver, { minutes: PUSH_MINUTES, limit: 50 }).items; // eng yangisi birinchi
         const top = items.reduce((max, item) => Math.max(max, Number(item.id)), 0);
         for (const row of rows) {

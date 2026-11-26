@@ -28,6 +28,12 @@ export const validRole = (role) => (ROLE_IDS.includes(role) ? role : null);
 // Rol ustuni bo'lmagan eski yozuv: profili bo'lsa — haydovchi (rollardan oldin hamma haydovchi edi)
 export const roleOf = (user) => validRole(user?.role) ?? (user?.profile ? DEFAULT_ROLE : null);
 
+// Ilovaning filtri (YukApp, Azimjon 2026-11-26: «filtr bot bilan bir xil, rol va bot masalalari ilovaga aralashmasin»).
+// Ilovada rol yo'q — u doim haydovchining sozlamalari bilan ishlaydi: botda haydovchi bo'lsa — o'sha profil (filtr umumiy),
+// botda yuk beruvchi / rol tanlamagan / hisobdan chiqqan bo'lsa — yashirilgan haydovchi profili (profiles.haydovchi).
+// Bot rolni almashtirganda (switchRole) shu profil o'sha joyga ko'chadi — ilova ham, bot ham bir filtrni ko'radi
+export const appProfileOf = (user) => (roleOf(user) === "haydovchi" ? (user?.profile ?? null) : (user?.profiles?.haydovchi ?? null));
+
 // Qaysi turdagi e'lon shu rolga boradi: haydovchi → yuk (loads.kind = "yuk"), yuk beruvchi → mashina
 export const ROLE_KIND = { haydovchi: "yuk", yuk_beruvchi: "mashina" };
 export const KIND_ROLE = { yuk: "haydovchi", mashina: "yuk_beruvchi" };

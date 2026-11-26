@@ -82,6 +82,7 @@ import {
   planFilter,
   rawLoadWanted,
   roleOf,
+  appProfileOf,
   routeCounts,
   routeInScope,
   sameArea,
@@ -136,6 +137,8 @@ const NEED_PROFILE = {
   yuk_beruvchi: "Avval sozlamalarda yo'nalishingizni kiriting",
 };
 const NEED_ROLE = "Avval kim ekaningizni tanlang: haydovchi yoki yuk beruvchi";
+// Ilovadan botni yoqmoqchi, lekin botda hali ro'yxatdan o'tmagan
+const BOT_NOT_SET = "Botda hali ro'yxatdan o'tmagansiz — botni oching va /start ni bosing";
 // «⚡ Tezkor» / «📌 Mening guruhlarim» — yuklar saralanmaydi (mashina va yo'nalish ishlatilmaydi)
 const NO_SORTED = "Bu rejimda yuklar saralanmaydi — e'lonlar botga darhol keladi. «Hammasi» ni oching yoki rejimni «🎯 Saralangan» ga o'zgartiring";
 
@@ -295,6 +298,30 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     ...(withPhone ? { phone: driver.phone ?? null, phoneAt: driver.phoneAt ?? null, loadPhones: driver.loadPhones ?? [] } : {}),
   });
 
+  // --- Ilova (YukApp) botdan mustaqil (Azimjon, 2026-11-26: «filtr bot bilan bir xil bo'laversin, ammo rol masalasi va
+  // bot masalalari ilovaga aralashmasin. Ilovada rol yo'q»). Ilova har so'rovda X-App-Version yuboradi (Mini App — yo'q).
+  // Ilova uchun foydalanuvchi doim haydovchi, profili — haydovchi filtri (roles.js appProfileOf); ilovadagi amallar botning
+  // rolini, pauzasini (active) va hisobini o'zgartirmaydi. bot — ilova Sozlamalaridagi «🤖 Bot» qatori uchun
+  const fromApp = (req) => Number(req.get("x-app-version")) > 0;
+  const appView = (driver) => ({
+    ...driver,
+    role: "haydovchi",
+    profile: appProfileOf(driver),
+    bot: { role: roleOf(driver), active: driver.active === true },
+  });
+  const appMe = (driver) => {
+    const view = appView(driver);
+    return { ...meOf(view), bot: view.bot };
+  };
+  const meFor = (req, driver) => (req.fromApp ? appMe(driver) : meOf(driver));
+  // Ilovadan saqlangan filtr: botda haydovchi bo'lsa — o'sha profil (bot ham shu bilan yuboradi), bo'lmasa — yashirin
+  // haydovchi profili (botda haydovchini tanlasa, switchRole uni tiklaydi). Rol va active o'zgarmaydi
+  const saveAppProfile = (chatId, profile) => {
+    const user = store.getDriver(chatId);
+    if (roleOf(user) === "haydovchi") return store.saveDriver(chatId, { profile });
+    return store.saveDriver(chatId, { profiles: { ...user.profiles, haydovchi: profile } });
+  };
+
   const pub = express.Router();
   pub.use((req, res, next) => {
     // CORS: kirish Bearer token bilan (cookie yo'q), shuning uchun boshqa saytdan so'rovga ruxsat berish xavfsiz —
@@ -373,7 +400,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     }
     store.comeBack(id, via);
     const driver = store.saveDriver(id, { name, username });
-    return { token: sessions.issue(id), me: meOf(driver) };
+    return { token: sessions.issue(id), me: via === "app" ? appMe(driver) : meOf(driver) };
   };
 
   // Ilova uchun kirish (mobil/kompyuter): Telegram imzosi yo'q, shuning uchun bot tasdiqlaydi. Kod — 24 bayt tasodif,
@@ -528,26 +555,30 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (!driver || driver.deletedAt != null) return next(httpError(401, "Kirish kerak", "auth"));
     // Kirgandan keyin bloklangan — eski token ham ishlamaydi
     if (!adminIds.includes(driver.chatId) && store.banOf(driver)) return next(httpError(403, BLOCKED_TEXT, "blocked"));
-    req.driver = driver;
+    // Ilova: req.driver — ilova ko'rinishi (haydovchi + filtri), req.botDriver — bazadagi asl yozuv
+    req.fromApp = fromApp(req);
+    req.botDriver = driver;
+    req.driver = req.fromApp ? appView(driver) : driver;
     store.touchDriver(uid, "web"); // oxirgi faollik — boshqaruv markazida «🟢 Hozir web'da»
     next();
   });
 
-  pub.get("/me", (req, res) => res.json(meOf(req.driver)));
+  pub.get("/me", (req, res) => res.json(meFor(req, req.botDriver)));
 
   // Rol: botdagi /rol bilan bir xil. Har rolning sozlamalari alohida saqlanadi (store.switchRole): bu rolda avval
   // to'ldirgan bo'lsa — tiklanadi (javobda profile bor), bo'lmasa profile = null (haydovchi profili yuk beruvchiga to'g'ri kelmaydi)
   pub.put("/me/role", (req, res) => {
     const role = validRole(req.body?.role);
     if (!role) throw httpError(400, "role: haydovchi yoki yuk_beruvchi bo'lishi kerak");
-    if (roleOf(req.driver) === role) return res.json(meOf(req.driver));
+    // Ilovada rol yo'q — eski ilova (≤ 0.17.3) jimgina «haydovchi» yuborardi, botning roli endi o'zgarmaydi
+    if (req.fromApp || roleOf(req.driver) === role) return res.json(meFor(req, req.botDriver));
     res.json(meOf(store.switchRole(req.driver.chatId, role)));
   });
 
   // Botdagi «Saqlash» bilan bir xil: profil rolga qarab tekshiriladi, saqlanadi va yuborish yoqiladi.
   // role kelmasa — bazadagi rol; boshqa rol kelsa — avval eski rolning sozlamalari saqlab qo'yiladi
   pub.put("/me/profile", (req, res) => {
-    const role = validRole(req.body?.role) ?? roleOf(req.driver);
+    const role = req.fromApp ? "haydovchi" : (validRole(req.body?.role) ?? roleOf(req.driver));
     if (!role) throw httpError(409, NEED_ROLE, "no_role");
     // Rejimni yubormagan (eski) forma — rejim eskisicha qoladi (withPrevFeed). Rol almashsa — o'sha rolning eski profili
     const prev = roleOf(req.driver) === role ? req.driver.profile : null;
@@ -559,6 +590,11 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
       const sources = store.allowedFeedSources(req.driver.chatId, result.profile.feed.sources, { pro: isPro(req.driver) });
       if (!sources.length) return res.status(400).json({ error: "Tanlangan guruhlar ro'yxatda topilmadi — qaytadan tanlang", field: "groups" });
       result.profile = { ...result.profile, feed: { ...result.profile.feed, sources } };
+    }
+    // Ilova: faqat filtr saqlanadi — botning roli va yuborishi (active) o'zgarmaydi
+    if (req.fromApp) {
+      const profile = withRoute(result.profile, appProfileOf(store.getDriver(req.driver.chatId)));
+      return res.json(meFor(req, saveAppProfile(req.driver.chatId, profile)));
     }
     if (roleOf(req.driver) !== role) store.switchRole(req.driver.chatId, role);
     // Haydovchi formasida yo'nalish yo'q (u botdagi «📋 Mos yuklar» da tanlanadi) — eskisi qoladi
@@ -591,13 +627,15 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
       else fields.active = body.active;
     }
     if (!Object.keys(fields).length) throw httpError(400, "active yoki appActive: true yoki false bo'lishi kerak");
-    const on = fields.active === true || fields.appActive === true;
-    const role = roleOf(req.driver);
-    if (on && !role) throw httpError(409, NEED_ROLE, "no_role");
+    // Botni yoqish — botdagi rol va sozlama bo'yicha (asl yozuv). Ilova pauzasi esa rolga bog'liq emas
+    const bot = req.botDriver;
+    const role = roleOf(bot);
+    if (fields.active === true && !role) throw httpError(409, req.fromApp ? BOT_NOT_SET : NEED_ROLE, "no_role");
     // Yuk beruvchiga sozlamalar shart emas (Azimjon, 2026-11-12: «Ro'yxatdan o'tish kerak emas») — bo'sh profil
     // bilan ham yuborish yoqiladi; haydovchiga mos yuklar profil bo'lmasa hisoblanmaydi
-    if (on && !req.driver.profile && role === "haydovchi") throw httpError(409, NEED_PROFILE[role], "no_profile");
-    res.json(meOf(store.saveDriver(req.driver.chatId, fields)));
+    if (fields.active === true && !bot.profile && role === "haydovchi") throw httpError(409, NEED_PROFILE[role], "no_profile");
+    if (!req.fromApp && fields.appActive === true && !role) throw httpError(409, NEED_ROLE, "no_role");
+    res.json(meFor(req, store.saveDriver(req.driver.chatId, fields)));
   });
 
   // Hisobdan chiqish. Faqat tokenni o'chirish yetmaydi: Telegram'da bot odamni baribir taniydi va Mini App o'zi kiradi
@@ -605,6 +643,11 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   // yuborish to'xtaydi, bot uni yangi foydalanuvchidek ko'radi. Qayta kirib rolni tanlasa — sozlamalari tiklanadi.
   pub.post("/me/logout", (req, res) => {
     const { chatId } = req.driver;
+    // Ilovadan chiqish — faqat shu ilova: bot va uning sozlamalari o'zgarmaydi, bot xabar yozmaydi
+    if (req.fromApp) {
+      store.dropPushTokensOf?.(chatId);
+      return res.json(meFor(req, req.botDriver));
+    }
     const user = store.signOut(chatId);
     store.dropPushTokensOf?.(chatId); // chiqdi — telefoniga bildirishnoma ketmaydi
     void notify?.(chatId, SIGNED_OUT_TEXT, { reply_markup: { remove_keyboard: true } }); // xatoni o'zi yutadi
@@ -625,10 +668,10 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   // Chatdagi pastki menyuni bot yangilaydi (server bot kabi to'liq menyu yasay olmaydi) — topshiriq "phone_deleted"
   pub.delete("/me/phone", (req, res) => {
     const { chatId } = req.driver;
-    if (!req.driver.phone) return res.json(meOf(req.driver));
+    if (!req.driver.phone) return res.json(meFor(req, req.botDriver));
     const user = store.saveDriver(chatId, { phone: null });
     store.addBotNotice?.(chatId, "phone_deleted");
-    res.json(meOf(user));
+    res.json(meFor(req, user));
   });
 
   // Hisobni o'chirish (store.deleteDriver): foydalanuvchi uchun hisob yopiladi — rol, sozlamalar, raqam tozalanadi,
@@ -674,9 +717,10 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const profile = driverProfile(req.driver);
     const { from, to, notify } = req.body ?? {};
     if (!validRouteArea(profile, scope, from) || !validRouteArea(profile, scope, to)) throw httpError(400, "Bunday joy tanlab bo'lmaydi");
-    const saved = store.saveDriver(req.driver.chatId, { profile: applyRoute(profile, from, to, now()) });
-    if (notify === true) store.addBotNotice?.(req.driver.chatId, "route");
-    res.json(meOf(saved));
+    const next = applyRoute(profile, from, to, now());
+    const saved = req.fromApp ? saveAppProfile(req.driver.chatId, next) : store.saveDriver(req.driver.chatId, { profile: next });
+    if (notify === true && !req.fromApp) store.addBotNotice?.(req.driver.chatId, "route");
+    res.json(meFor(req, saved));
   });
 
   // kind "yuk" — yuklar (haydovchiga), "mashina" — bo'sh mashinalar (yuk beruvchiga).

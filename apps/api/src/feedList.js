@@ -6,7 +6,7 @@
 //   «🚚 Transport» va «📍 Qayerdan» filtrlari. A'zolik tekshiruvi (kanal/guruh) web'dagidek — yo'q.
 // fastLook ~2–6 ms; har 3 soniyada har foydalanuvchi so'raydi → natija e'lon id bo'yicha xotirada saqlanadi (matn o'zgarmaydi).
 import { extractPhones, fastLook, parseByRules } from "@yuk/parser";
-import { feedMode, filtersWanted, isClosedSource, planAllows, rawWanted } from "@yuk/shared";
+import { appProfileOf, feedMode, filtersWanted, isClosedSource, planAllows, rawWanted } from "@yuk/shared";
 
 const CACHE_MAX = 6000;
 
@@ -46,7 +46,7 @@ export function createFeedList({ store, now = Date.now }) {
   function list(driver, { minutes = 10, limit = 200 } = {}) {
     const active = driver.appActive !== false;
     if (!active) return { minutes, active, total: 0, items: [] };
-    const { profile } = driver;
+    const profile = appProfileOf(driver); // ilova filtri — botning rolidan mustaqil (roles.js)
     const guruhlarim = feedMode(profile) === "guruhlarim";
     const owners = new Map();
     const ownerOf = (source) => {
