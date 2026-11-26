@@ -10,7 +10,7 @@
 // npm run tg:login -- --account <nom>. Asosiy akkaunt — faqat terminalda.
 import { setTimeout as wait } from "node:timers/promises";
 import { TRANSCRIBE_MODELS } from "@yuk/parser";
-import { MAIN_TG_ACCOUNT, MEDIA_DIR } from "@yuk/store";
+import { MAIN_TG_ACCOUNT, MEDIA_DIR, hashPhone } from "@yuk/store";
 import { durationText, runLive, withTimeout } from "./live.js";
 import { createAvatarRefresher } from "./avatars.js";
 import { createMediaQueue } from "./media.js";
@@ -73,7 +73,11 @@ export function accountSources(store, account, { readers = readerAccounts() } = 
 // connections() — Gemini ulanishlari (ovozli xabar uchun, media.js; cli.js store.aiConnections bilan beradi)
 export async function runAccount({ name, client, telegram, store, me = null, sources = null, log = console.log, signal, now = Date.now, dialogsEveryMs = DIALOGS_EVERY_MS, listTimeoutMs = 90_000, connections = null, ...live }) {
   me ??= await telegram.whoAmI(client);
+  // Raqamning o'zi saqlanmaydi — faqat xeshi: QR bilan ulangan akkaunt ham egasining botdagi raqami bo'yicha taniladi
+  const { phone, ...who } = me;
+  me = who;
   store.saveTgAccount(name, { ...me, status: "ok", error: null });
+  if (phone) store.setTgAccountPhoneHash?.(name, hashPhone(phone));
   const main = name === MAIN_TG_ACCOUNT;
 
   let dialogsAt = -Infinity;

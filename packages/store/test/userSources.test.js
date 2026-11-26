@@ -165,5 +165,5 @@ test("akkaunt kimniki (2026-11-20): qo'shgan YOKI akkauntning o'zi — Telegram 
   assert.deepEqual(names(12), []);
   assert.deepEqual(names(5), ["boshqa-1"], "qo'shgan — yozuvi bo'lmasa ham");
   assert.equal(store.getDriver(11).autoPro, true, "raqami bor + akkaunt uniki → avto-Pro");
-  assert.equal(store.getDriver(982).autoPro, false, "raqam ulashmagan — avto-Pro yo'q");
+  assert.equal(store.getDriver(982).autoPro, true, "raqam ulashmagan bo'lsa ham — akkaunti bor (2026-11-26)");
 });

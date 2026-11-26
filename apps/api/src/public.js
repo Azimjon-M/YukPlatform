@@ -288,7 +288,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     name: driver.name,
     username: driver.username,
     role: roleOf(driver),
-    plan: isPro(driver) ? "pro" : (driver.plan ?? "free"), // avtomatik Pro ham (raqam + bog'langan akkaunt)
+    plan: isPro(driver) ? "pro" : (driver.plan ?? "free"), // avtomatik Pro ham (bog'langan akkaunt)
     isAdmin: isAdmin(driver, adminIds),
     profile: driver.profile,
     active: driver.active, // bot Telegram'ga yuboradimi

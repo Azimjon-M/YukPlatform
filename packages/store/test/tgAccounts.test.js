@@ -94,22 +94,17 @@ test("manba qo'shimcha akkaunt bilan: account, nomi; a'zo bo'lish navbatiga tush
   assert.notEqual(store.changeMarks().sources, marks, "akkaunt holati ham sahifani yangilaydi");
 });
 
-test("avtomatik Pro: raqam ulashgan + akkaunt bog'lagan; biri yo'qolsa — tushadi", () => {
+test("avtomatik Pro: akkaunt bog'lagan bo'lsa bas (raqam shart emas, 2026-11-26); akkaunt chiqib ketsa — tushadi", () => {
   const store = openStore({ file: ":memory:" });
   store.saveDriver(70, { profile: { x: 1 }, active: true, role: "haydovchi" });
   assert.equal(store.getDriver(70).autoPro, false);
   store.setTgAccountOwner("dost", 70, null);
-  assert.equal(store.getDriver(70).autoPro, false, "raqam hali yo'q");
-  store.saveDriver(70, { phone: "+998900000070" });
-  assert.equal(store.getDriver(70).autoPro, true);
+  assert.equal(store.getDriver(70).autoPro, true, "raqamsiz ham");
   assert.equal(store.activeUsers("haydovchi").find((u) => u.chatId === 70).autoPro, true);
   assert.equal(store.listDrivers().find((u) => u.chatId === 70).autoPro, true);
   store.saveTgAccount("dost", { status: "error" });
   assert.equal(store.getDriver(70).autoPro, true, "vaqtinchalik ulanish xatosi — Pro qoladi");
   store.saveTgAccount("dost", { status: "logged_out" });
   assert.equal(store.getDriver(70).autoPro, false, "akkaunt chiqib ketdi");
-  store.saveTgAccount("dost", { status: "ok" });
-  store.saveDriver(70, { phone: null });
-  assert.equal(store.getDriver(70).autoPro, false, "raqamni o'chirdi");
   store.close();
 });

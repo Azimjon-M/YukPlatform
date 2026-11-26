@@ -35,7 +35,7 @@ export function pageOf(items, page, size = GROUPS_PAGE_SIZE) {
 }
 
 export const CLOSED_PRO_HINT =
-  "Yopiq guruhlardagi e'lonlar faqat Pro foydalanuvchilarga keladi. Pro avtomatik beriladi: raqamingizni ulashing va botda o'z Telegram akkauntingizni bog'lang (/account_qosh).";
+  "Yopiq guruhlardagi e'lonlar faqat Pro foydalanuvchilarga keladi. Pro avtomatik beriladi: botda o'z Telegram akkauntingizni bog'lang (/account_qosh).";
 
 // sources — [{ name, title }] → nom bo'yicha sarlavha («Tekshiring» ro'yxati uchun)
 export const sourceNamer = (list) => {

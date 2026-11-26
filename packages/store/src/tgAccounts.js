@@ -19,7 +19,7 @@ export function hashPhone(phone) {
   return digits ? createHash("sha256").update(`yuk-tg-phone:${digits}`).digest("hex") : null;
 }
 // Avtomatik Pro (Azimjon, 2026-11-16: «kontakt ulashib va accountlarni bog'lash qilgan bo'lsa unga automatic pro ber»):
-// raqamini ulashgan VA Mini App'dan kamida bitta Telegram akkauntini bog'lagan (sessiyasi bekor qilinmagan / dublikat emas).
+// Mini App'dan kamida bitta Telegram akkauntini bog'lagan (sessiyasi bekor qilinmagan / dublikat emas); raqam — 2026-11-26 dan shart emas.
 // Bazaga yozilmaydi — har safar hisoblanadi: raqamni o'chirsa yoki akkaunt chiqib ketsa, o'zi tushadi.
 // plan ustuni — boshqaruv markazidan qo'lda berilgani
 // Akkaunt kimniki (2026-11-20, Azimjon: «men QR/kod orqali kimnidir qo'shdim, ammo u bot bilan ishlamagan. Qachondir u
@@ -30,7 +30,9 @@ export function hashPhone(phone) {
 export const OWNS_ACCOUNT_SQL = `(t.added_by = drivers.chat_id OR t.user_id = CAST(drivers.chat_id AS TEXT)
   OR (drivers.username IS NOT NULL AND t.username IS NOT NULL AND lower(t.username) = lower(drivers.username))
   OR (drivers.phone IS NOT NULL AND t.phone_hash IS NOT NULL AND t.phone_hash = tg_phone_hash(drivers.phone)))`;
-export const AUTO_PRO_SQL = `(drivers.phone IS NOT NULL AND EXISTS (SELECT 1 FROM tg_accounts t WHERE ${OWNS_ACCOUNT_SQL}
+// 2026-11-26, Azimjon: «faqat account ulash kifoya — account ulashda raqam va @username ni ham ko'ra olamiz» — raqam
+// ulashish sharti olib tashlandi: Telegram akkauntini bog'lagan (ishlayotgan) bo'lsa bas
+export const AUTO_PRO_SQL = `(EXISTS (SELECT 1 FROM tg_accounts t WHERE ${OWNS_ACCOUNT_SQL}
   AND COALESCE(t.status, 'ok') NOT IN ('logged_out', 'duplicate')))`;
 
 const REFRESH_KEY = "tg_dialogs_request";

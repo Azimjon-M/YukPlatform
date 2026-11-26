@@ -15,9 +15,9 @@ export const REGION_CALLBACK = /^fr:(?:t:([a-z_]+)|ok|back|all)$/;
 // «🚚 Qaysi transport?» (2026-11-19): ft:open — ro'yxat, ft:t:<tur> — belgilash, ft:ok — saqlash, ft:all — hammasi, ft:back
 export const TRUCK_CALLBACK = /^ft:(?:t:([a-z_]+)|ok|back|all|open)$/;
 
-// Pro bo'lmagan haydovchi yopiq guruhni bossa (Pro — boshqaruv markazidan yoki avtomatik: raqam + bog'langan akkaunt)
+// Pro bo'lmagan haydovchi yopiq guruhni bossa (Pro — boshqaruv markazidan yoki avtomatik: bog'langan akkaunt)
 export const CLOSED_PRO_TEXT =
-  "🔒 Yopiq guruhlardagi e'lonlar faqat Pro foydalanuvchilarga keladi. Pro avtomatik beriladi: raqamingizni ulashing va o'z Telegram akkauntingizni bog'lang (/account_qosh).";
+  "🔒 Yopiq guruhlardagi e'lonlar faqat Pro foydalanuvchilarga keladi. Pro avtomatik beriladi: o'z Telegram akkauntingizni bog'lang (/account_qosh).";
 export const GROUPS_PAGE = 8;
 
 const modeTitle = (id) => `${FEED_MODES[id].icon} ${FEED_MODES[id].name}`;

@@ -470,7 +470,7 @@ function driverRow(row) {
     draft: parse(row.draft),
     active: row.active === 1,
     plan: row.plan ?? "free",
-    autoPro: row.auto_pro === 1, // raqam + bog'langan akkaunt (AUTO_PRO_SQL) — roles.js planAllows Pro deb biladi
+    autoPro: row.auto_pro === 1, // bog'langan akkaunt (AUTO_PRO_SQL) — roles.js planAllows Pro deb biladi
     isAdmin: row.is_admin === 1,
     phone: row.phone ?? null,
     phoneAt: row.phone_at ?? null,

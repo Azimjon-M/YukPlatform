@@ -119,7 +119,8 @@ export async function connectSaved(account = MAIN_ACCOUNT) {
 // Akkaunt kimligi (boshqaruv markazida ko'rsatish va bir akkaunt ikki nom bilan ulanmasligi uchun)
 export async function whoAmI(client) {
   const me = await client.getMe();
-  return { userId: String(me.id), username: me.username ?? null, firstName: me.firstName ?? null };
+  // phone — akkauntning o'z raqami (QR bilan kirganda ham Telegram beradi). Bazaga faqat xeshi yoziladi (accounts.js)
+  return { userId: String(me.id), username: me.username ?? null, firstName: me.firstName ?? null, phone: me.phone ?? null };
 }
 
 // ask(savol, { hidden }) — terminaldan javob o'qiydigan funksiya (cli.js beradi).
