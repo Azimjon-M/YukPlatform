@@ -398,7 +398,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const state = store.appLoginState(code);
     if (state === "pending") return res.status(202).json({ status: "pending" });
     const chatId = state === "confirmed" ? store.consumeAppLogin(code) : null;
-    if (chatId == null) throw httpError(410, "Kirish kodi eskirgan — qaytadan «Telegram orqali kirish» ni bosing", "expired");
+    if (chatId == null) throw httpError(410, "Kirish kodi eskirgan — qaytadan «Bot orqali kirish» ni bosing", "expired");
     const known = store.getDriver(chatId) ?? {};
     res.json(signIn(chatId, { name: known.name ?? null, username: known.username ?? null }, "app"));
   });
