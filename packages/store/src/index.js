@@ -14,6 +14,7 @@ import { createAiQueries } from "./ai.js";
 import { AUTO_PRO_SQL, createTgAccountQueries, hashPhone } from "./tgAccounts.js";
 import { createFeedQueries, migrateFeed } from "./feed.js";
 import { createAppLoginQueries } from "./appLogins.js";
+import { createAppDeviceQueries } from "./appDevices.js";
 import { createPushQueries } from "./push.js";
 import { createLoadChatQueries } from "./loadChatLog.js";
 
@@ -211,6 +212,17 @@ CREATE TABLE IF NOT EXISTS app_logins (
   confirmed_at INTEGER,
   used_at INTEGER                    -- token berilgan vaqt
 );
+-- Ilova qurilmalari (appDevices.js): bir hisobga ko'pi bilan 2 ta faol qurilma; token o'zi emas, sha256 izi
+CREATE TABLE IF NOT EXISTS app_devices (
+  id TEXT PRIMARY KEY,
+  chat_id INTEGER NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  name TEXT,
+  created_at INTEGER NOT NULL,
+  seen_at INTEGER NOT NULL,
+  revoked_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS app_devices_chat ON app_devices (chat_id, revoked_at);
 CREATE TABLE IF NOT EXISTS reader_joins (
   name TEXT NOT NULL,                -- @guruh
   account TEXT NOT NULL,             -- tg_accounts.name
@@ -612,6 +624,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     ...createFeedQueries(db, now),
     // Ilovaga bot orqali kirish kodlari (appLogins.js)
     ...createAppLoginQueries(db, now),
+    // Ilova qurilmalari — ko'pi bilan 2 ta (appDevices.js)
+    ...createAppDeviceQueries(db, now),
     // Ilova bildirishnomalari: telefon tokenlari (push.js)
     ...createPushQueries(db, now),
     ...createLoadChatQueries(db, now),

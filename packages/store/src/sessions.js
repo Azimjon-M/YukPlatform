@@ -26,14 +26,15 @@ export function createSessions(secret, { now = () => Date.now(), ttlS = SESSION_
   if (!secret) throw new Error("Sessiya uchun data/secret.key kerak");
   const key = hmac(secret, "yuk-web-session-v1");
   const sign = (body) => b64url(hmac(key, body));
-  const make = (uid, exp) => {
-    const body = b64url(JSON.stringify({ uid, exp }));
+  // sid — ilova qurilmasi uchun tasodifiy belgi: bir soniyada ikki qurilmaga berilgan token ham har xil bo'lsin
+  const make = (uid, exp, sid) => {
+    const body = b64url(JSON.stringify(sid ? { uid, exp, sid } : { uid, exp }));
     return `${body}.${sign(body)}`;
   };
   return {
     // → token (matn); ttl — soniya. Har chaqirilganda boshqacha (muddati hozirdan hisoblanadi)
-    issue(uid, { ttl = ttlS } = {}) {
-      return make(uid, Math.floor(now() / 1000) + ttl);
+    issue(uid, { ttl = ttlS, sid = null } = {}) {
+      return make(uid, Math.floor(now() / 1000) + ttl, sid);
     },
     // Bot menyusidagi Mini App tugmasi uchun: bir hafta ichida bir xil token (muddati hafta chegarasiga tekislangan)
     link(uid) {

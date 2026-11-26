@@ -1047,3 +1047,47 @@ test("ilova botdan mustaqil: rol yo'q, filtr umumiy, botning roli/pauzasi/hisobi
   assert.equal(row.role, "yuk_beruvchi");
   assert.equal(row.signedOutAt, null);
 });
+
+test("ilova: bir hisobga ko'pi bilan 2 ta qurilma, uchinchisi bittasini chiqaradi (kodsiz)", async () => {
+  const chatId = 781;
+  store.saveDriver(chatId, { name: "Uch qurilma" });
+  const ip = { "cf-connecting-ip": "10.9.9.78" };
+  const appLogin = async (device) => {
+    const headers = { ...ip, "x-app-version": "33", "x-device-name": encodeURIComponent(device) };
+    const { body } = await call("POST", "/pub/auth/app", { headers });
+    store.confirmAppLogin(body.code, chatId);
+    return call("GET", `/pub/auth/app/${body.code}`, { headers });
+  };
+  const a = await appLogin("Galaxy A52");
+  const b = await appLogin("Redmi 9");
+  assert.equal(a.status, 200);
+  assert.equal(b.status, 200);
+  const APP = (token) => ({ token, headers: { "x-app-version": "33" } });
+  let list = (await call("GET", "/pub/me/devices", APP(a.body.token))).body;
+  assert.equal(list.devices.length, 2);
+  assert.deepEqual(list.devices.map((d) => d.current).sort(), [false, true]);
+  // uchinchisi — 409 devices
+  const c = await appLogin("iPhone");
+  assert.equal(c.status, 409);
+  assert.equal(c.body.code, "devices");
+  assert.deepEqual(c.body.devices.map((d) => d.name).sort(), ["Galaxy A52", "Redmi 9"]);
+  const victim = c.body.devices.find((d) => d.name === "Galaxy A52");
+  assert.equal((await call("POST", "/pub/auth/devices/replace", { headers: ip, body: { ticket: c.body.ticket, deviceId: "yoq" } })).status, 400);
+  const done = await call("POST", "/pub/auth/devices/replace", { headers: { ...ip, "x-app-version": "33", "x-device-name": "iPhone" }, body: { ticket: c.body.ticket, deviceId: victim.id } });
+  assert.equal(done.status, 200);
+  assert.ok(done.body.token);
+  // chiqarilgan qurilma — 401, qolganlari ishlaydi; ticket ikkinchi marta ishlamaydi
+  const kicked = await call("GET", "/pub/me", APP(a.body.token));
+  assert.equal(kicked.status, 401);
+  assert.equal(kicked.body.code, "auth");
+  assert.equal((await call("GET", "/pub/me", APP(b.body.token))).status, 200);
+  assert.equal((await call("GET", "/pub/me", APP(done.body.token))).status, 200);
+  assert.equal((await call("POST", "/pub/auth/devices/replace", { headers: ip, body: { ticket: c.body.ticket, deviceId: victim.id } })).status, 410);
+  // Sozlamalardan chiqarish va ilovadan chiqish — joy bo'shaydi
+  list = (await call("GET", "/pub/me/devices", APP(done.body.token))).body;
+  const other = list.devices.find((d) => !d.current);
+  assert.equal((await call("DELETE", `/pub/me/devices/${other.id}`, APP(done.body.token))).body.devices.length, 1);
+  assert.equal((await call("GET", "/pub/me", APP(b.body.token))).status, 401);
+  // Mini App (X-App-Version yo'q) — cheklanmaydi
+  assert.equal((await call("GET", "/pub/me", { token: sessions.issue(chatId) })).status, 200);
+});

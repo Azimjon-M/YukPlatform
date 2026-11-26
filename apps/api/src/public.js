@@ -57,7 +57,7 @@
 //   POST /pub/admin/tg-accounts/login/:id/password  { password } — 2FA bo'lsa
 //   DELETE /pub/admin/tg-accounts/login/:id         bekor qilish / yopish
 //   GET/POST/DELETE /pub/me/tg-accounts…   xuddi shular, lekin istalgan foydalanuvchi — faqat o'z akkauntlari (Sozlamalar)
-import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -101,7 +101,7 @@ import {
 } from "@yuk/shared";
 import { APK_PATH, APP_LOGIN_TTL_MS, CHAT_AUDIO_DIR, MAIN_TG_ACCOUNT, PUSH_TOKEN, readRelease } from "@yuk/store";
 import { createFeedList } from "./feedList.js";
-import { verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
+import { SESSION_TTL_S, verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 
 const HOUR = 60 * 60 * 1000;
 export const MAX_HOURS = 72;
@@ -328,7 +328,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     // tokenni bilmagan sayt hech narsa ololmaydi. Mini App Cloudflare Pages'da, API esa tunnelda bo'lishi mumkin.
     res.set({
       "access-control-allow-origin": "*",
-      "access-control-allow-headers": "authorization, content-type, ngrok-skip-browser-warning, x-app-version",
+      "access-control-allow-headers": "authorization, content-type, ngrok-skip-browser-warning, x-app-version, x-device-name",
       "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "access-control-max-age": "600",
       "cache-control": "no-store",
@@ -394,13 +394,58 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   });
 
   // Kirish ruxsati: bloklangan bo'lsa — 403, hisobini o'chirgan bo'lsa — qaytdi (boshidan boshlaydi)
-  const signIn = (id, { name, username }, via) => {
+  // --- Ilova qurilmalari (Azimjon, 2026-11-26: «max 2 ta qurilma; yana kirmoqchi bo'lsa qaysidir qurilmani chiqaradigan
+  // qil … kod kerakmi — bemani bo'lsa kerak emas»). Faqat ilova (via "app"); Mini App va sayt cheklanmaydi.
+  // Uchinchi qurilma kirmoqchi: kirish (kod / bot tasdig'i) baribir isbotlangan — shuning uchun yana kod so'ramaymiz,
+  // 409 devices { ticket, devices } beramiz: odam qaysi qurilmani chiqarishni tanlaydi (POST /auth/devices/replace).
+  // ticket — 5 daqiqa, bir marta. Chiqarilgan qurilmaning tokeni darhol ishlamay qoladi (401 auth)
+  const MAX_APP_DEVICES = 2;
+  const DEVICE_TICKET_TTL_MS = 5 * 60_000;
+  const deviceTickets = new Map(); // ticket → { chatId, expiresAt }
+  const tokenHash = (token) => createHash("sha256").update(token).digest("base64url");
+  const deviceName = (req) => {
+    let name = String(req?.get?.("x-device-name") ?? "");
+    try {
+      name = decodeURIComponent(name);
+    } catch {
+      // buzilgan — o'zicha
+    }
+    return name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 60) || null;
+  };
+  const activeDevices = (chatId) => store.activeAppDevices(chatId, now() - SESSION_TTL_S * 1000);
+  const deviceView = (device, currentId = null) => ({
+    id: device.id,
+    name: device.name ?? "Noma'lum qurilma",
+    createdAt: device.createdAt,
+    seenAt: device.seenAt,
+    current: device.id === currentId,
+  });
+  const issueAppToken = (chatId, req) => {
+    const id = randomBytes(9).toString("base64url");
+    const token = sessions.issue(chatId, { sid: id });
+    store.addAppDevice({ id, chatId, tokenHash: tokenHash(token), name: deviceName(req) });
+    return token;
+  };
+  const appTokenFor = (chatId, req) => {
+    const devices = activeDevices(chatId);
+    if (devices.length < MAX_APP_DEVICES) return issueAppToken(chatId, req);
+    for (const [key, entry] of deviceTickets) if (entry.expiresAt <= now()) deviceTickets.delete(key);
+    const ticket = randomBytes(18).toString("base64url");
+    deviceTickets.set(ticket, { chatId, expiresAt: now() + DEVICE_TICKET_TTL_MS });
+    throw Object.assign(
+      httpError(409, `Hisobingiz allaqachon ${MAX_APP_DEVICES} ta qurilmada ochiq. Bittasini chiqaring — shu qurilmada kirasiz.`, "devices"),
+      { data: { ticket, max: MAX_APP_DEVICES, devices: devices.map((d) => deviceView(d)), expiresIn: DEVICE_TICKET_TTL_MS / 1000 } },
+    );
+  };
+
+  const signIn = (id, { name, username }, via, req = null) => {
     if (!adminIds.includes(id) && store.banOf({ chatId: id, username, phone: store.getDriver(id)?.phone })) {
       throw httpError(403, BLOCKED_TEXT, "blocked");
     }
     store.comeBack(id, via);
     const driver = store.saveDriver(id, { name, username });
-    return { token: sessions.issue(id), me: via === "app" ? appMe(driver) : meOf(driver) };
+    if (via === "app") return { token: appTokenFor(id, req), me: appMe(driver) };
+    return { token: sessions.issue(id), me: meOf(driver) };
   };
 
   // Ilova uchun kirish (mobil/kompyuter): Telegram imzosi yo'q, shuning uchun bot tasdiqlaydi. Kod — 24 bayt tasodif,
@@ -427,7 +472,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const chatId = state === "confirmed" ? store.consumeAppLogin(code) : null;
     if (chatId == null) throw httpError(410, "Kirish kodi eskirgan — qaytadan «Bot orqali» ni bosing", "expired");
     const known = store.getDriver(chatId) ?? {};
-    res.json(signIn(chatId, { name: known.name ?? null, username: known.username ?? null }, "app"));
+    res.json(signIn(chatId, { name: known.name ?? null, username: known.username ?? null }, "app", req));
   });
 
   // --- Ilovaga «kod bilan kirish» (YukApp codeLogin.js) ---
@@ -514,7 +559,24 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     }
     loginCodes.delete(requestId);
     const known = store.getDriver(entry.chatId) ?? {};
-    res.json(signIn(entry.chatId, { name: known.name ?? null, username: known.username ?? null }, "app"));
+    res.json(signIn(entry.chatId, { name: known.name ?? null, username: known.username ?? null }, "app", req));
+  });
+
+  // Uchinchi qurilma: { ticket, deviceId } — o'sha qurilma chiqariladi, shu qurilmaga token beriladi
+  pub.post("/auth/devices/replace", (req, res) => {
+    if (!limitAuth(clientIp(req))) throw httpError(429, "Juda ko'p urinish — bir daqiqadan keyin qayta urinib ko'ring", "limit");
+    const ticket = String(req.body?.ticket ?? "");
+    const entry = deviceTickets.get(ticket);
+    if (!entry || entry.expiresAt <= now()) {
+      deviceTickets.delete(ticket);
+      throw httpError(410, "Vaqt o'tib ketdi — qaytadan kiring", "expired");
+    }
+    const deviceId = String(req.body?.deviceId ?? "");
+    if (!activeDevices(entry.chatId).some((d) => d.id === deviceId)) throw httpError(400, "Bu qurilma ro'yxatda yo'q — qaytadan tanlang");
+    deviceTickets.delete(ticket);
+    store.revokeAppDevice(entry.chatId, deviceId);
+    const known = store.getDriver(entry.chatId) ?? {};
+    res.json(signIn(entry.chatId, { name: known.name ?? null, username: known.username ?? null }, "app", req));
   });
 
   // «📞 Telefon qilish» (bot.js loadButtons). Kirish kerak emas: havola faqat shu odamning chatida, imzosiz token yaroqsiz.
@@ -557,6 +619,15 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (!adminIds.includes(driver.chatId) && store.banOf(driver)) return next(httpError(403, BLOCKED_TEXT, "blocked"));
     // Ilova: req.driver — ilova ko'rinishi (haydovchi + filtri), req.botDriver — bazadagi asl yozuv
     req.fromApp = fromApp(req);
+    if (req.fromApp) {
+      // Qurilma chiqarilgan bo'lsa — token ishlamaydi. Qurilmalar jadvalidan oldingi (≤ 0.17.3) token — bir marta yoziladi
+      const hash = tokenHash((req.get("authorization") ?? "").replace(/^Bearer\s+/i, ""));
+      let device = store.appDeviceByToken(hash);
+      if (device?.revokedAt != null) return next(httpError(401, "Hisobingizga boshqa qurilmadan kirildi — bu qurilma chiqarildi", "auth"));
+      if (!device) device = store.addAppDevice({ id: randomBytes(9).toString("base64url"), chatId: driver.chatId, tokenHash: hash, name: deviceName(req) });
+      else if (now() - device.seenAt > 5 * 60_000) store.touchAppDevice(device.id);
+      req.device = device;
+    }
     req.botDriver = driver;
     req.driver = req.fromApp ? appView(driver) : driver;
     store.touchDriver(uid, "web"); // oxirgi faollik — boshqaruv markazida «🟢 Hozir web'da»
@@ -564,6 +635,16 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   });
 
   pub.get("/me", (req, res) => res.json(meFor(req, req.botDriver)));
+
+  // Ilova qurilmalari (Sozlamalar → Hisob): ro'yxat va chiqarish. current — shu qurilma
+  pub.get("/me/devices", (req, res) => {
+    res.json({ max: MAX_APP_DEVICES, devices: activeDevices(req.driver.chatId).map((d) => deviceView(d, req.device?.id)) });
+  });
+  pub.delete("/me/devices/:id", (req, res) => {
+    const ok = store.revokeAppDevice(req.driver.chatId, req.params.id);
+    if (!ok) throw httpError(404, "Bu qurilma ro'yxatda yo'q");
+    res.json({ max: MAX_APP_DEVICES, devices: activeDevices(req.driver.chatId).map((d) => deviceView(d, req.device?.id)) });
+  });
 
   // Rol: botdagi /rol bilan bir xil. Har rolning sozlamalari alohida saqlanadi (store.switchRole): bu rolda avval
   // to'ldirgan bo'lsa — tiklanadi (javobda profile bor), bo'lmasa profile = null (haydovchi profili yuk beruvchiga to'g'ri kelmaydi)
@@ -645,6 +726,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const { chatId } = req.driver;
     // Ilovadan chiqish — faqat shu ilova: bot va uning sozlamalari o'zgarmaydi, bot xabar yozmaydi
     if (req.fromApp) {
+      if (req.device) store.revokeAppDevice(chatId, req.device.id);
       store.dropPushTokensOf?.(chatId);
       return res.json(meFor(req, req.botDriver));
     }
@@ -680,6 +762,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   pub.delete("/me", (req, res) => {
     const { chatId } = req.driver;
     store.deleteDriver(chatId, { via: "web" });
+    store.revokeAppDevicesOf(chatId);
     store.dropPushTokensOf?.(chatId);
     // Javobni kutmaymiz: chatdagi pastki menyu eskirdi — bot nomidan «o'chirildi» deb yozib, menyuni olib tashlaymiz
     void notify?.(chatId, DELETED_TEXT, { reply_markup: { remove_keyboard: true } }); // xatoni o'zi yutadi
@@ -1183,8 +1266,9 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
       errors?.add({ source: "web", level: "error", kind: "server", text: `${req.method} ${req.originalUrl.split("?")[0]}: ${error.message}`, details: error.stack });
     }
     // code — web nima qilishini biladi: auth → qayta kirish, no_profile → sozlamalarga, no_role → rol tanlash
-    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit", "feed", "update", "stale", "phone", "not_found", "bot_blocked", "expired"].includes(error.code) ? { code: error.code } : {};
-    res.status(status).json({ error: status >= 500 ? "Server xatosi" : error.message, ...code });
+    const code = ["auth", "no_profile", "no_role", "role", "forbidden", "blocked", "limit", "feed", "update", "stale", "phone", "not_found", "bot_blocked", "expired", "devices"].includes(error.code) ? { code: error.code } : {};
+    // data — mijozga kerakli qo'shimcha (devices → ticket va qurilmalar ro'yxati)
+    res.status(status).json({ error: status >= 500 ? "Server xatosi" : error.message, ...(status < 500 && error.data ? error.data : {}), ...code });
   });
 
   return app;
