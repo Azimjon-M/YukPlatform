@@ -102,6 +102,7 @@ import {
 import { APK_PATH, APP_LOGIN_TTL_MS, CHAT_AUDIO_DIR, MAIN_TG_ACCOUNT, PUSH_TOKEN, readRelease } from "@yuk/store";
 import { createFeedList } from "./feedList.js";
 import { SESSION_TTL_S, verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
+import { readChats } from "./botMessage.js";
 
 const HOUR = 60 * 60 * 1000;
 export const MAX_HOURS = 72;
@@ -320,6 +321,44 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const user = store.getDriver(chatId);
     if (roleOf(user) === "haydovchi") return store.saveDriver(chatId, { profile });
     return store.saveDriver(chatId, { profiles: { ...user.profiles, haydovchi: profile } });
+  };
+
+  // --- Ilovada majburiy a'zolik (Azimjon, 2026-11-26: «guruh/kanaldan chiqib ketsa ilova ham ignore qilsin … juda yengil,
+  // e'lonlar kelish tezligiga ta'sir o'tkazmasin. Faqat Yuk e'lonlari va E'lon berish»). So'rov Telegram'ni KUTMAYDI:
+  // bazadagi holat (sub_ok — bot ham yozadi: chat_member, har xabar) o'qiladi; u 10 daqiqadan eski bo'lsa — Telegram'dan
+  // fonda yangilanadi (keyingi so'rovda kuchga kiradi). Ro'yxat bo'sh, adminlar, holat noma'lum — o'tkaziladi
+  const MEMBER_FRESH_MS = 10 * 60_000;
+  const memberRefreshing = new Set();
+  const requiredRefs = () => store.requiredChatRefs?.(readChats(env.REQUIRED_CHATS)) ?? readChats(env.REQUIRED_CHATS);
+  const missingView = (refs) => {
+    const known = store.requiredChats?.() ?? [];
+    return (refs ?? []).map((ref) => {
+      const chat = known.find((c) => c.ref === ref) ?? {};
+      const name = ref.startsWith("@") ? ref.slice(1) : null;
+      return { ref, title: chat.title ?? ref, type: chat.type ?? null, url: chat.url ?? (name ? `https://t.me/${name}` : null) };
+    });
+  };
+  const refreshMember = async (chatId) => {
+    if (!memberCheck || memberRefreshing.has(chatId)) return null;
+    memberRefreshing.add(chatId);
+    try {
+      const sub = await memberCheck(chatId);
+      if (sub) store.setSubscription?.(chatId, { ok: sub.ok, missing: sub.missing.map((c) => c.ref) });
+      return sub;
+    } catch {
+      return null;
+    } finally {
+      memberRefreshing.delete(chatId);
+    }
+  };
+  // → { ok: true } | { ok: false, missing: [{ ref, title, type, url }] }
+  const membershipOf = (driver) => {
+    if (!driver || isAdmin(driver, adminIds) || !requiredRefs().length) return { ok: true };
+    if (!driver.subCheckedAt || now() - driver.subCheckedAt > MEMBER_FRESH_MS) void refreshMember(driver.chatId);
+    if (driver.subOk !== false) return { ok: true };
+    const wanted = new Set(requiredRefs());
+    const missing = (driver.subMissing ?? []).filter((ref) => wanted.has(ref));
+    return missing.length || !driver.subMissing?.length ? { ok: false, missing: missingView(missing.length ? missing : [...wanted]) } : { ok: true };
   };
 
   const pub = express.Router();
@@ -887,7 +926,10 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (!req.driver.profile) throw httpError(409, NEED_PROFILE.haydovchi, "no_profile");
     const minutes = clamp(Number(req.query.minutes) || 10, 1, 60);
     const limit = clamp(Number(req.query.limit) || 200, 1, MAX_LIMIT);
-    res.json(feedList.list(req.driver, { minutes, limit }));
+    // A'zo emas — e'lonlar yo'q, sababi member da (ilova «a'zo bo'ling» ekranini ko'rsatadi; eski ilova — bo'sh ro'yxat)
+    const member = membershipOf(req.botDriver ?? req.driver);
+    if (!member.ok) return res.json({ minutes, active: req.driver.appActive !== false, total: 0, items: [], member });
+    res.json({ ...feedList.list(req.driver, { minutes, limit }), member });
   });
   pub.get("/trucks", listing("mashina"));
 
@@ -960,12 +1002,31 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   }
   const quota = (chatId) => ({ used: store.shipperPostCount(chatId), limit: SHIPPER_LOAD_LIMIT });
 
+  // E'lon berish — faqat a'zolarga: yozish, ovoz, raqam, yuborish (o'qish va bekor qilish ochiq)
+  pub.use("/me/load-chat", (req, res, next) => {
+    if (req.method === "GET" || req.method === "DELETE") return next();
+    const member = membershipOf(req.botDriver ?? req.driver);
+    if (member.ok) return next();
+    res.status(403).json({ error: "E'lon berish uchun kanal va guruhimizga a'zo bo'ling", code: "not_member", missing: member.missing });
+  });
+  // «✅ A'zo bo'ldim» (ilova): Telegram'dan HOZIR tekshiriladi. → { ok, missing }
+  const memberAsked = new Map(); // chatId → oxirgi so'rov (Telegram'ga ko'p so'rov ketmasin)
+  pub.post("/me/membership", async (req, res) => {
+    const chatId = req.driver.chatId;
+    if (now() - (memberAsked.get(chatId) ?? 0) >= 5_000) {
+      memberAsked.set(chatId, now());
+      await refreshMember(chatId);
+    }
+    const member = membershipOf(store.getDriver(chatId));
+    res.json(member.ok ? { ok: true, missing: [] } : member);
+  });
+
   // ?after=<id> — faqat shundan keyingilar (ilova natijani shu bilan kutadi)
   pub.get("/me/load-chat", (req, res) => {
     const { chatId } = req.driver;
     settleResults(chatId);
     const after = Number(req.query.after) || 0;
-    res.json({ intro: CHAT_TEXT.intro, messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id > after), ...quota(chatId) });
+    res.json({ intro: CHAT_TEXT.intro, messages: chatView(chatId, store.chatMessages(chatId, 100)).filter((m) => m.id > after), ...quota(chatId), member: membershipOf(req.botDriver ?? req.driver) });
   });
   pub.post("/me/load-chat", async (req, res) => {
     const { chatId } = req.driver;

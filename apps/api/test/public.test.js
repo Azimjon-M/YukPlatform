@@ -1091,3 +1091,29 @@ test("ilova: bir hisobga ko'pi bilan 2 ta qurilma, uchinchisi bittasini chiqarad
   // Mini App (X-App-Version yo'q) — cheklanmaydi
   assert.equal((await call("GET", "/pub/me", { token: sessions.issue(chatId) })).status, 200);
 });
+
+test("ilova: majburiy kanal/guruhdan chiqqan — lenta bo'sh (sababi member da), E'lon berish 403; ro'yxat bo'sh — hammaga", async () => {
+  const chatId = 791;
+  const token = sessions.issue(chatId);
+  const APP = { token, headers: { "x-app-version": "35" } };
+  store.saveDriver(chatId, { name: "Chiqib ketgan", role: "haydovchi", profile: { feed: { mode: "tezkor", sources: [] } } });
+  store.setRequiredChats([{ ref: "@Yuk_Ekspert_chat", id: -1, title: "Yuk Ekspert chat", type: "group", url: "https://t.me/Yuk_Ekspert_chat" }]);
+  store.setSubscription(chatId, { ok: false, missing: ["@Yuk_Ekspert_chat"] });
+  const feed = (await call("GET", "/pub/feed", APP)).body;
+  assert.equal(feed.items.length, 0);
+  assert.equal(feed.member.ok, false);
+  assert.deepEqual(feed.member.missing.map((c) => [c.title, c.url]), [["Yuk Ekspert chat", "https://t.me/Yuk_Ekspert_chat"]]);
+  const chat = (await call("GET", "/pub/me/load-chat", APP)).body;
+  assert.equal(chat.member.ok, false);
+  const write = await call("POST", "/pub/me/load-chat", { ...APP, body: { text: "Toshkentdan Samarqandga 20 t" } });
+  assert.equal(write.status, 403);
+  assert.equal(write.body.code, "not_member");
+  // a'zo bo'ldi
+  store.setSubscription(chatId, { ok: true });
+  assert.equal((await call("GET", "/pub/feed", APP)).body.member.ok, true);
+  assert.equal((await call("POST", "/pub/me/membership", APP)).body.ok, true);
+  // ro'yxat bo'sh — a'zolik yo'q
+  store.setSubscription(chatId, { ok: false, missing: ["@Yuk_Ekspert_chat"] });
+  store.setRequiredChats([]);
+  assert.equal((await call("GET", "/pub/feed", APP)).body.member.ok, true);
+});

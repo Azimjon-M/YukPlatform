@@ -48,7 +48,8 @@ function itemBody(item, phone) {
   return Buffer.byteLength(body) > BODY_MAX_BYTES ? JSON.stringify({ postId: item.id, phone }) : body;
 }
 
-export function createPusher({ store, feedList, send, log = () => {}, everyMs = PUSH_EVERY_MS }) {
+// memberOk(driver) — majburiy a'zolik (public.js bilan bir qoida; bazadagi holat, Telegram kutilmaydi)
+export function createPusher({ store, feedList, send, log = () => {}, everyMs = PUSH_EVERY_MS, memberOk = () => true }) {
   let busy = false;
   let timer = null;
 
@@ -65,7 +66,7 @@ export function createPusher({ store, feedList, send, log = () => {}, everyMs = 
         const driver = store.getDriver(chatId);
         // ilova botning rolidan mustaqil: haydovchi filtri (appProfileOf) bo'lsa bas; ilova pauzasi — appActive
         const appProfile = driver && appProfileOf(driver);
-        if (!driver || driver.deletedAt || !appProfile || driver.appActive === false) continue;
+        if (!driver || driver.deletedAt || !appProfile || driver.appActive === false || !memberOk(driver)) continue;
         const items = feedList.list(driver, { minutes: PUSH_MINUTES, limit: 50 }).items; // eng yangisi birinchi
         const top = items.reduce((max, item) => Math.max(max, Number(item.id)), 0);
         for (const row of rows) {

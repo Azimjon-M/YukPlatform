@@ -18,6 +18,7 @@ import { createApp, normalizeSourceName } from "./app.js";
 import { createErrorLog } from "./errorLog.js";
 import { createProcessManager } from "./processes.js";
 import { createPublicApp } from "./public.js";
+import { isAdmin, parseAdminIds } from "@yuk/shared";
 import { chatParser } from "./loadChat.js";
 import { createFeedList } from "./feedList.js";
 import { FCM_KEY_FILE, createFcm, loadFcmKey } from "./fcm.js";
@@ -186,7 +187,11 @@ function startPush() {
       fcmNote = "missing";
       return;
     }
-    pusher = createPusher({ store, feedList: createFeedList({ store }), send, log });
+    // Majburiy a'zolik: kanal/guruhdan chiqqanga bildirishnoma ham yo'q (bazadagi holat — public.js membershipOf bilan bir xil)
+    const pushAdmins = parseAdminIds(process.env.ADMIN_IDS);
+    const memberOk = (driver) =>
+      driver.subOk !== false || isAdmin(driver, pushAdmins) || !store.requiredChatRefs(readChats(process.env.REQUIRED_CHATS)).length;
+    pusher = createPusher({ store, feedList: createFeedList({ store }), send, log, memberOk });
     pusher.start();
     createReleaseNotifier({ store, readRelease: () => readRelease(APK_DIR), send, log }).start(); // yangi APK → «yangilang»
     clearInterval(pushWatch);
