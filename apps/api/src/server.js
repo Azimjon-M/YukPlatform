@@ -22,7 +22,7 @@ import { chatParser } from "./loadChat.js";
 import { createFeedList } from "./feedList.js";
 import { FCM_KEY_FILE, createFcm, loadFcmKey } from "./fcm.js";
 import { createPusher, createReleaseNotifier } from "./push.js";
-import { createBotMessenger } from "./botMessage.js";
+import { createBotMessenger, createMemberCheck, readChats } from "./botMessage.js";
 import { findCloudflared, findNginx, findTailscale } from "./edge/tools.js";
 import { createSessions } from "./telegramAuth.js";
 import { createTgLogin } from "./tgLogin.js";
@@ -168,6 +168,8 @@ const publicApp = createPublicApp({
   apkDir: APK_DIR, // Android ilova (@yuk/store appRelease.js)
   parseLoad, // ilova «📝 E'lon berish» chati
   transcribeVoice, // … va uning ovozli xabari
+  // Ilovaga kod yuborishdan oldin a'zolik — Telegram'dan hozir (bazadagi eskirgan bo'lishi mumkin)
+  memberCheck: createMemberCheck(process.env.BOT_TOKEN?.trim(), readChats(process.env.REQUIRED_CHATS)),
   notify: createBotMessenger(process.env.BOT_TOKEN?.trim()), // web'dan hisob o'chirilsa — chatdagi menyuni olib tashlash
   errors,
 });

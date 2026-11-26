@@ -395,15 +395,21 @@ export function createBot({
   // tugmalari (ma'lumotini o'chirish huquqi a'zolikka bog'liq emas), /id va adminlar — tekshirilmaydi.
   // A'zo natijasi 10 daqiqa eslab qolinadi (Telegram'ga har xabarda so'rov ketmaydi), «a'zo emas» — har safar qayta so'raladi.
   const FREE_COMMAND = /^\/(ochirish|id)(@\w+)?(\s|$)/;
+  // A'zo bo'lmay ilovaga kirmoqchi bo'lgan: userId → { code, at }. A'zo bo'lgach («✅ A'zo bo'ldim») — bog'lash so'raladi
+  const pendingAppLogin = new Map();
+  const PENDING_APP_MS = 10 * 60_000; // ilovadagi kod ham 10 daqiqa (store appLogins.js)
   bot.use(async (ctx, next) => {
     if (!members || ctx.chat?.type !== "private" || !ctx.from || !(ctx.message || ctx.callbackQuery)) return next();
     const data = ctx.callbackQuery?.data ?? "";
-    // Ilovaga kirish (/start app_…, al:…) ham — a'zolikdan keyin «/start» payload'i yo'qolardi, ilova esa kutib qolardi
-    if (data === SUB_CHECK || /^(del|al):/.test(data) || FREE_COMMAND.test(ctx.message?.text ?? "") || /^\/start(@\w+)? app_/.test(ctx.message?.text ?? "")) return next();
+    // Ilovaga kirish (/start app_…, «✅ Ha, bog'layman») ham to'siqdan o'tmaydi (Azimjon, 2026-11-26: «majburiy a'zo
+    // bo'lmagunigacha bot umuman yordam ko'rsatmasin»). Kod eslab qolinadi — «✅ A'zo bo'ldim» dan keyin so'raladi
+    if (data === SUB_CHECK || /^del:/.test(data) || FREE_COMMAND.test(ctx.message?.text ?? "")) return next();
     if (isAdmin(store.getDriver(ctx.from.id) ?? { chatId: ctx.from.id }, config.admins ?? [])) return next();
     rememberUser(ctx); // yangi odam ham boshqaruv markazida ko'rinsin (va a'zoligi yozilsin)
     const result = await members.check(ctx.from.id, { fresh: true });
     if (result.ok) return next();
+    const app = /^\/start(?:@\w+)? app_([A-Za-z0-9_-]{20,48})$/.exec(ctx.message?.text ?? "");
+    if (app) pendingAppLogin.set(ctx.from.id, { code: app[1], at: Date.now() });
     if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text: "Avval kanal va guruhimizga a'zo bo'ling" }).catch(() => {});
     await sendJoinPrompt(ctx, result.missing);
   });
@@ -1733,6 +1739,9 @@ export function createBot({
     }
     await ctx.answerCallbackQuery({ text: "✅ Rahmat!" });
     await ctx.editMessageText("✅ Rahmat! Kanal va guruhimizga a'zosiz.").catch(() => {});
+    const pending = pendingAppLogin.get(ctx.from.id);
+    pendingAppLogin.delete(ctx.from.id);
+    if (pending && Date.now() - pending.at < PENDING_APP_MS) return askAppLogin(ctx, pending.code);
     await showStart(ctx);
   });
 

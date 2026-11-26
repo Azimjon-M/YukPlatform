@@ -2077,16 +2077,25 @@ test("e'lon olish boshlanganda (✅ Tayyor / ▶️) — oxirgi 2 daqiqa uchun c
   assert.ok(calls.length >= 2, "▶️ dan keyin ham");
 });
 
-test("ilovaga kirish: /start app_<kod> → tasdiq so'raladi, «✅ Ha, bog'layman» kodni shu odamga bog'laydi", async () => {
-  const { store, calls, command, press } = setup({ config: { requiredChats: ["@Yuk_Ekspert"] }, answer: (m) => (m === "getChatMember" ? { status: "left" } : undefined) });
+test("ilovaga kirish: a'zo bo'lmaguncha yo'q; a'zo bo'lgach /start app_<kod> → tasdiq so'raladi, «✅ Ha, bog'layman» kodni shu odamga bog'laydi", async () => {
+  let member = false;
+  const { store, calls, command, press } = setup({ config: { requiredChats: ["@Yuk_Ekspert"] }, answer: (m) => (m === "getChatMember" ? { status: member ? "member" : "left" } : undefined) });
   const code = "k".repeat(32);
   store.createAppLogin(code);
   await command(`/start app_${code}`);
+  // a'zo emas — bog'lash so'ralmaydi, «a'zo bo'ling» chiqadi (Azimjon, 2026-11-26)
+  const join = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.match(join.payload.text, /a'zo bo'ling/);
+  assert.ok(!inlineButtons(join).some((b) => b.callback_data?.startsWith("al:")));
+  await press(`al:ok:${code}`);
+  assert.equal(store.appLoginState(code), "pending", "a'zo bo'lmaguncha tasdiqlab bo'lmaydi");
+  // a'zo bo'ldi → «✅ A'zo bo'ldim» → endi so'raladi
+  member = true;
+  await press("sub:check");
   const ask = calls.filter((c) => c.method === "sendMessage").at(-1);
   assert.match(ask.payload.text, /ilovasiga bog'laysizmi[\s\S]*bog'lamang/);
   assert.deepEqual(inlineButtons(ask).map((b) => b.text), ["✅ Ha, bog'layman", "❌ Yo'q, bog'lamayman"]);
   assert.deepEqual(inlineButtons(ask).map((b) => b.callback_data), [`al:ok:${code}`, "al:no"]);
-  assert.equal(store.appLoginState(code), "pending", "a'zo bo'lmasa ham so'raladi, lekin bosmaguncha kutadi");
 
   await press(`al:ok:${code}`);
   assert.equal(store.appLoginState(code), "confirmed");

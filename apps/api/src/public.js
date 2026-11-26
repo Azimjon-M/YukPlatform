@@ -272,7 +272,7 @@ export function callPage(call) {
 // calls — «📞 Telefon qilish» havolalari (@yuk/store createCallLinks, bot bilan bir kalit); null — /pub/call 404
 // errors — boshqaruv markazining xatolar jurnali (errorLog.js); server xatolari u yerda ham ko'rinadi
 // tgLogin — collector uchun Telegram akkaunt qo'shish (tgLogin.js); null — «server qayta ishga tushirilgach»
-export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, apkDir = null, chatAudioDir = CHAT_AUDIO_DIR, parseLoad = null, transcribeVoice = null, notify = null, errors = null, tgLogin = null, now = () => Date.now() }) {
+export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, apkDir = null, chatAudioDir = CHAT_AUDIO_DIR, parseLoad = null, transcribeVoice = null, notify = null, memberCheck = null, errors = null, tgLogin = null, now = () => Date.now() }) {
   const app = express();
   app.disable("x-powered-by");
   const botToken = env.BOT_TOKEN?.trim() || null;
@@ -514,8 +514,12 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (!driver) throw httpError(404, "Bu raqam yoki username bizda yo'q — avval botda ro'yxatdan o'ting", "not_found");
     const chatId = driver.chatId;
     if (!adminIds.includes(chatId) && store.banOf({ chatId, username: driver.username, phone: driver.phone })) throw httpError(403, BLOCKED_TEXT, "blocked");
-    if (driver.subOk === false) {
-      return res.status(403).json({ error: "Avval kanal va guruhga a'zo bo'ling", code: "not_member", missing: driver.subMissing ?? [] });
+    // A'zolik — Telegram'dan hozir (Azimjon, 2026-11-26: «a'zo bo'lmagunigacha bot umuman yordam ko'rsatmasin»): bazadagi
+    // sub_ok eskirgan bo'lishi mumkin. Telegram javob bermasa — bazadagisi
+    const sub = memberCheck ? await memberCheck(chatId) : null;
+    if (sub) store.setSubscription?.(chatId, { ok: sub.ok, missing: sub.missing.map((c) => c.ref) });
+    if (sub ? !sub.ok : driver.subOk === false) {
+      return res.status(403).json({ error: "Avval kanal va guruhimizga a'zo bo'ling", code: "not_member", missing: sub?.missing ?? driver.subMissing ?? [] });
     }
     sweepCodes();
     const last = lastCodeAt.get(chatId);
