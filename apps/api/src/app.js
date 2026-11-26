@@ -1,6 +1,8 @@
 // Boshqaruv markazi API'si (Express). Faqat shu kompyuterdan ochiladi (127.0.0.1).
 // Ma'lumot @yuk/store dan (bot va collector bilan bitta baza), jarayonlar processes.js dan.
 // Javoblarda kalit va tokenlar hech qachon bo'lmaydi — faqat "yozilganmi" (true/false).
+import { REQUIRED_MAX, resolveRequiredChat } from "./requiredChats.js";
+import { readChats } from "./botMessage.js";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -103,6 +105,7 @@ export function createApp({
   errors = createErrorLog(),
   slowMs = SLOW_MS,
   avatars = createAvatars({ token: env.BOT_TOKEN?.trim() }),
+  telegramFetch = (...args) => fetch(...args), // majburiy a'zolik: getChat / getChatMember (sinovda soxtasi)
 }) {
   const app = express();
   // Kirish: secret (data/secret.key) bo'lsa — parol bilan himoyalangan (.env ADMIN_PASS yoki panel orqali qo'yiladi).
@@ -389,6 +392,31 @@ export function createApp({
     }
     const added = store.addSource(name, options);
     res.status(added ? 201 : 200).json({ name, added, account: options.account ?? null });
+  });
+
+  // --- Majburiy a'zolik (requiredChats.js): bot faqat shu kanal/guruh a'zolariga ishlaydi; ilovaga kirish ham ---
+  // source: "dashboard" — shu yerda o'zgartirilgan; "env" — hali .env REQUIRED_CHATS dagisi (birinchi o'zgarishda ko'chadi)
+  const envChats = () => readChats(env.REQUIRED_CHATS).map((ref) => ({ ref, id: null, title: ref, type: null, url: ref.startsWith("@") ? `https://t.me/${ref.slice(1)}` : null, addedAt: null }));
+  const requiredView = () => {
+    const saved = store.requiredChats();
+    return { items: saved ?? envChats(), source: saved ? "dashboard" : "env", max: REQUIRED_MAX };
+  };
+  api.get("/required-chats", (req, res) => res.json(requiredView()));
+  api.post("/required-chats", async (req, res) => {
+    const list = store.requiredChats() ?? envChats();
+    if (list.length >= REQUIRED_MAX) throw httpError(400, `Ko'pi bilan ${REQUIRED_MAX} ta kanal/guruh`);
+    const chat = await resolveRequiredChat(env.BOT_TOKEN?.trim(), req.body?.link, { fetchImpl: telegramFetch });
+    const same = (c) => c.ref.toLowerCase() === chat.ref.toLowerCase() || (c.id != null && c.id === chat.id);
+    if (list.some(same)) throw httpError(400, `«${chat.title}» ro'yxatda allaqachon bor`);
+    store.setRequiredChats([...list, { ...chat, addedAt: Date.now() }]);
+    res.status(201).json(requiredView());
+  });
+  api.delete("/required-chats/:ref", (req, res) => {
+    const list = store.requiredChats() ?? envChats();
+    const next = list.filter((c) => c.ref.toLowerCase() !== String(req.params.ref).toLowerCase());
+    if (next.length === list.length) throw httpError(404, "Bunday kanal/guruh ro'yxatda yo'q");
+    store.setRequiredChats(next);
+    res.json(requiredView());
   });
 
   // --- Collector'ning Telegram akkauntlari (tgAccounts.js, 2026-11-13) ---

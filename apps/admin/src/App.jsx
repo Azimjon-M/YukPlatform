@@ -20,6 +20,7 @@ import { OverviewPage } from "./pages/OverviewPage.jsx";
 import { ProcessesPage } from "./pages/ProcessesPage.jsx";
 import { QueuePage } from "./pages/QueuePage.jsx";
 import { SourcesPage } from "./pages/SourcesPage.jsx";
+import { RequiredChatsPage } from "./pages/RequiredChatsPage.jsx";
 import { ROUTES, routeFor } from "./router.js";
 import { ToastProvider, useTitle, useToast } from "./ui.jsx";
 
@@ -29,6 +30,7 @@ const PAGES = {
   queue: QueuePage,
   drivers: DriversPage,
   sources: SourcesPage,
+  required: RequiredChatsPage,
   processes: ProcessesPage,
   ai: AiPage,
   errors: ErrorsPage,

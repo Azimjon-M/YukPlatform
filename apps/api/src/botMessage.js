@@ -31,8 +31,10 @@ export function readChats(value) {
   if (!raw || /^(0|yo'q|yoq|no|false|off)$/i.test(raw)) return [];
   return [...new Set(raw.split(/[,\s]+/).filter((chat) => /^(@[A-Za-z]\w{3,}|-100\d+)$/.test(chat)))];
 }
+// refs — ro'yxat yoki har safar o'qiladigan funksiya (boshqaruv markazidan o'zgaradi: store.requiredChatRefs)
 export function createMemberCheck(token, refs, { fetchImpl = fetch, timeoutMs = 8_000 } = {}) {
-  if (!token || !refs.length) return null;
+  if (!token) return null;
+  const current = typeof refs === "function" ? refs : () => refs;
   const ask = async (chatId, userId) => {
     const response = await fetchImpl(`https://api.telegram.org/bot${token}/getChatMember`, {
       method: "POST",
@@ -43,9 +45,11 @@ export function createMemberCheck(token, refs, { fetchImpl = fetch, timeoutMs = 
     return response.json();
   };
   return async (userId) => {
+    const list = current() ?? [];
+    if (!list.length) return null; // tekshiruv o'chiq
     const missing = [];
     try {
-      for (const ref of refs) {
+      for (const ref of list) {
         const body = await ask(ref, userId);
         const member = body?.result;
         const inside = MEMBER.has(member?.status) || (member?.status === "restricted" && member.is_member === true);

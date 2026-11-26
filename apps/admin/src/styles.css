@@ -3582,3 +3582,14 @@ form.list-toolbar {
   height: 30px;
   font-size: 11px;
 }
+
+/* 🔒 Majburiy a'zolik ro'yxati */
+.required-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+}
+.required-row .row-main {
+  flex: 1;
+}

@@ -375,20 +375,22 @@ export function createBot({
 
   // Kanal va guruhga a'zolik (members.js; Azimjon, 2026-11-09). REQUIRED_CHATS bo'sh bo'lsa — yo'q, bot hammaga ishlaydi.
   // Telegram'dan haqiqiy javob kelganda bazaga yoziladi — boshqaruv markazida «🔒 A'zo emas» ko'rinadi
-  const members = config.requiredChats?.length
-    ? createMembership({
-        api: bot.api,
-        refs: config.requiredChats,
-        log,
-        onChecked: (userId, result) => {
-          try {
-            store.setSubscription?.(userId, result);
-          } catch (error) {
-            log(`A'zolik yozilmadi: ${error.message}`);
-          }
-        },
-      })
-    : null;
+  // Ro'yxat — boshqaruv markazidagi «🔒 A'zolik» (store.requiredChatRefs), u yerda o'zgartirilmagan bo'lsa — .env;
+  // syncMembers() (main.js, har 20 s) o'zgarishni oladi. Ro'yxat bo'sh — members.active() false, bot hammaga ishlaydi
+  const requiredRefs = () => store.requiredChatRefs?.(config.requiredChats ?? []) ?? config.requiredChats ?? [];
+  const members = createMembership({
+    api: bot.api,
+    refs: requiredRefs(),
+    log,
+    onChecked: (userId, result) => {
+      try {
+        store.setSubscription?.(userId, result);
+      } catch (error) {
+        log(`A'zolik yozilmadi: ${error.message}`);
+      }
+    },
+  });
+  const syncMembers = () => members.reload(requiredRefs(), bot.botInfo?.id);
 
   // To'siq: shaxsiy chatdagi xabar yoki tugma — avval a'zolik. A'zo bo'lmasa — «a'zo bo'ling» xabari va tugmalar,
   // xabarning o'zi bajarilmaydi (next() chaqirilmaydi). Guruh va kanal postlari, «✅ A'zo bo'ldim», /ochirish va uning
@@ -399,7 +401,7 @@ export function createBot({
   const pendingAppLogin = new Map();
   const PENDING_APP_MS = 10 * 60_000; // ilovadagi kod ham 10 daqiqa (store appLogins.js)
   bot.use(async (ctx, next) => {
-    if (!members || ctx.chat?.type !== "private" || !ctx.from || !(ctx.message || ctx.callbackQuery)) return next();
+    if (!members.active() || ctx.chat?.type !== "private" || !ctx.from || !(ctx.message || ctx.callbackQuery)) return next();
     const data = ctx.callbackQuery?.data ?? "";
     // Ilovaga kirish (/start app_…, «✅ Ha, bog'layman») ham to'siqdan o'tmaydi (Azimjon, 2026-11-26: «majburiy a'zo
     // bo'lmagunigacha bot umuman yordam ko'rsatmasin»). Kod eslab qolinadi — «✅ A'zo bo'ldim» dan keyin so'raladi
@@ -1071,7 +1073,7 @@ export function createBot({
       rememberRouteMessage(chatId, null);
     }
     if (!shown) await bot.api.sendMessage(chatId, text, { parse_mode: "HTML" });
-    if (members && !isAdmin(driver, config.admins ?? []) && !(await members.check(chatId)).ok) return;
+    if (members.active() && !isAdmin(driver, config.admins ?? []) && !(await members.check(chatId)).ok) return;
     await listMatchesIn(chatId, driver);
     if (shouldAskPhone(driver)) await askPhoneIn(chatId, driver);
   }
@@ -1725,7 +1727,7 @@ export function createBot({
   // (bittasiga a'zo bo'lgan bo'lsa, u ✅ bo'ladi); a'zo — «Rahmat» va /start ekrani
   bot.callbackQuery(SUB_CHECK, async (ctx) => {
     if (ctx.chat?.type !== "private") return ctx.answerCallbackQuery();
-    if (!members) {
+    if (!members.active()) {
       await ctx.answerCallbackQuery();
       return showStart(ctx);
     }
@@ -1748,7 +1750,7 @@ export function createBot({
   // Kanal yoki guruhga kimdir qo'shildi / chiqdi (bot u yerda admin, main.js allowed_updates: chat_member).
   // Eslab qolingan natija o'chiriladi. Bot foydalanuvchisi chiqib ketsa va yuk olib turgan bo'lsa — darrov eslatma
   bot.on("chat_member", async (ctx) => {
-    if (!members?.watches(ctx.chat)) return;
+    if (!members.active() || !members.watches(ctx.chat)) return;
     const { old_chat_member: before, new_chat_member: after } = ctx.chatMember;
     members.forget(after.user.id);
     const driver = store.getDriver(after.user.id);
@@ -1952,7 +1954,7 @@ export function createBot({
   // Pipeline har yukdan oldin so'raydi: kanal va guruhga a'zomi? A'zo emas — yuk yuborilmaydi, o'rniga eslatma
   // (kuniga bir marta). Adminlar va REQUIRED_CHATS bo'lmasa — hammaga. Natija 10 daqiqa eslab qolinadi.
   async function canReceive(user) {
-    if (!members || isAdmin(user, config.admins ?? [])) return true;
+    if (!members.active() || isAdmin(user, config.admins ?? [])) return true;
     const result = await members.check(user.chatId);
     if (result.ok) return true;
     await remindJoin(user.chatId, result.missing, "load");
@@ -2104,7 +2106,7 @@ export function createBot({
     if (config.channel?.startsWith("-100")) config.channelId = Number(config.channel);
     else if (config.channel) config.channelId = (await bot.api.getChat(config.channel).catch(() => null))?.id ?? null;
     // A'zolik: kanal/guruh nomlari va havolalari, bot u yerda adminmi
-    if (members) await members.init(bot.botInfo.id);
+    await members.init(bot.botInfo.id);
   }
 
   // notices — server (apps/api) qo'ygan topshiriqlar (xaritada yo'nalish tanlandi): main.js notices.start()
@@ -2113,5 +2115,5 @@ export function createBot({
   // Guruh bo'limlariga asl matn (pipeline.js quick chaqiradi; GROUP_LOADS bo'lmasa — null)
   const groupRaw = group ? (post, look) => group.pushRaw(post, look) : null;
   const setCatchUp = (fn) => (catchUpFn = fn);
-  return { bot, init, publish, deliver, deliverRaw, groupRaw, setCatchUp, isBusy, canReceive, directDone, members, commands, notices, sources, group, holdReminder };
+  return { bot, init, publish, deliver, deliverRaw, groupRaw, setCatchUp, isBusy, canReceive, directDone, members, syncMembers, commands, notices, sources, group, holdReminder };
 }

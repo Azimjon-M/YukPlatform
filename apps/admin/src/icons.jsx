@@ -21,6 +21,12 @@ const paths = {
       <circle cx="5" cy="19" r="1.5" />
     </>
   ),
+  required: (
+    <>
+      <rect x="5" y="10.5" width="14" height="10" rx="2" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    </>
+  ),
   processes: <path d="M4 5h16v14H4zM8 10l3 2.5L8 15M13 15h4" />,
   ai: (
     <>

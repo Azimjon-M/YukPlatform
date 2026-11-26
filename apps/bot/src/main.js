@@ -99,9 +99,10 @@ async function check(config) {
       : `ℹ️  Yuklar kanalga joylanmaydi, faqat haydovchilarga (yoqish: .env ga CHANNEL_LOADS=1).`);
   }
   checkApps(config, store);
-  console.log(config.requiredChats.length
-    ? `✅ A'zolik: bot faqat ${config.requiredChats.join(" va ")} a'zolariga ishlaydi (bot ikkalasida admin bo'lishi kerak — yuqorida ogohlantirish bo'lmasa, admin).`
-    : "ℹ️  A'zolik tekshirilmaydi: bot hammaga ishlaydi (yoqish: .env ga REQUIRED_CHATS=@kanal,@guruh).");
+  const required = store.requiredChatRefs(config.requiredChats);
+  console.log(required.length
+    ? `✅ A'zolik: bot faqat ${required.join(" va ")} a'zolariga ishlaydi (bot hammasida admin bo'lishi kerak — yuqorida ogohlantirish bo'lmasa, admin).`
+    : "ℹ️  A'zolik tekshirilmaydi: bot hammaga ishlaydi (yoqish: boshqaruv markazi → «🔒 A'zolik»).");
   console.log(`✅ Yo'nalishlar: ${ROUTE_SCOPES[config.routeScope].title}.`);
   const ai = createAiPool(store).list();
   if (ai.length) console.log(`✅ AI: ${ai.length} ta ulanish (${ai.map((s) => s.label).join(", ")})`);
@@ -218,7 +219,7 @@ async function main() {
   };
   // Ishchi pastda yaratiladi, bot esa undan oldin: «navbatga tushdi — darhol ko'r» keyin ulanadi
   let worker = null;
-  const { bot, init, publish, deliver, deliverRaw, groupRaw, setCatchUp, isBusy, canReceive, directDone, commands, notices, sources, group, holdReminder } = createBot({
+  const { bot, init, publish, deliver, deliverRaw, groupRaw, setCatchUp, isBusy, canReceive, directDone, syncMembers, commands, notices, sources, group, holdReminder } = createBot({
     token: config.token,
     store,
     config,
@@ -281,9 +282,10 @@ async function main() {
   log("Faollik: botga 24 soat kirmaganga ogohlantirish, 48 soatda avtomatik pauza (har 10 daqiqada tekshiriladi)");
   log("Foydalanuvchi guruhlari: raqam ulashganlar «➕ Guruh qo'shish» bilan qo'shadi — collector oxirgi xabarlarini ko'radi, keyin 24 soat sinov (kamida 5 ta yuk e'loni)");
   log(`Yuk beruvchilar: «📦 Yuk berish» — forma yoki botga oddiy xabar (tasdiqlangach darhol mos haydovchilarga), 24 soatda ${SHIPPER_LOAD_LIMIT} tagacha`);
-  log(config.requiredChats.length
-    ? `A'zolik: bot faqat ${config.requiredChats.join(" va ")} a'zolariga ishlaydi (.env: REQUIRED_CHATS)`
-    : "A'zolik: tekshirilmaydi, bot hammaga ishlaydi (yoqish: .env ga REQUIRED_CHATS=@kanal,@guruh)");
+  const requiredNow = store.requiredChatRefs(config.requiredChats);
+  log(requiredNow.length
+    ? `A'zolik: bot faqat ${requiredNow.join(" va ")} a'zolariga ishlaydi (boshqaruv markazi → «🔒 A'zolik»)`
+    : "A'zolik: tekshirilmaydi, bot hammaga ishlaydi (yoqish: boshqaruv markazi → «🔒 A'zolik»)");
   worker.start();
   idle.start();
   // «Menu» tugmasi faqat rol tanlaganlarda (commands.js): fonda — bot javob berishini kutib turmasin
@@ -294,7 +296,9 @@ async function main() {
   // Foydalanuvchi qo'shgan guruhlar: natijani qo'shgan odamga yozish va 24 soatlik sinov (userSources.js)
   sources.start();
   // chat_member — kanal/guruhga kimdir qo'shilsa yoki chiqsa (bot u yerda admin bo'lsa keladi; a'zolik uchun)
-  const updates = ["message", "channel_post", "callback_query", ...(config.requiredChats.length ? ["chat_member"] : [])];
+  // A'zolik ro'yxati boshqaruv markazidan o'zgaradi («🔒 A'zolik») — har 20 s da bazadan
+  setInterval(() => syncMembers().catch((error) => log(`A'zolik ro'yxati yangilanmadi: ${error.message}`)), 20_000).unref?.();
+  const updates = ["message", "channel_post", "callback_query", "chat_member"];
   await bot.start({ allowed_updates: updates });
 }
 

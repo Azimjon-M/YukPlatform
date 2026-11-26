@@ -169,7 +169,7 @@ const publicApp = createPublicApp({
   parseLoad, // ilova «📝 E'lon berish» chati
   transcribeVoice, // … va uning ovozli xabari
   // Ilovaga kod yuborishdan oldin a'zolik — Telegram'dan hozir (bazadagi eskirgan bo'lishi mumkin)
-  memberCheck: createMemberCheck(process.env.BOT_TOKEN?.trim(), readChats(process.env.REQUIRED_CHATS)),
+  memberCheck: createMemberCheck(process.env.BOT_TOKEN?.trim(), () => store.requiredChatRefs(readChats(process.env.REQUIRED_CHATS))),
   notify: createBotMessenger(process.env.BOT_TOKEN?.trim()), // web'dan hisob o'chirilsa — chatdagi menyuni olib tashlash
   errors,
 });

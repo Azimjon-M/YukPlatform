@@ -19,5 +19,6 @@ test("a'zolik: hammasiga a'zo — ok; chiqib ketgan — missing; Telegram xatosi
   assert.deepEqual(result.missing.map((c) => c.url), ["https://t.me/Yuk_Ekspert", "https://t.me/Yuk_Ekspert_chat"]);
   const broken = createMemberCheck("T", refs, { fetchImpl: fakeTelegram({ "@Yuk_Ekspert": { ok: false, error_code: 403, description: "Forbidden" } }) });
   assert.equal(await broken(1), null);
-  assert.equal(createMemberCheck("T", readChats("off")), null);
+  assert.equal(await createMemberCheck("T", readChats("off"))(1), null);
+  assert.equal(createMemberCheck(null, refs), null);
 });

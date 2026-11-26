@@ -1187,6 +1187,26 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       );
     },
 
+    // --- Majburiy a'zolik (Azimjon, 2026-11-26: «majburiy kanal/guruhlarni Dashboardga qo'shsak … dynamic qilsang») ---
+    // [{ ref: "@Yuk_Ekspert" | "-100…", id, title, type, url, addedAt }] yoki null — hali Dashboard'dan o'zgartirilmagan
+    // (unda .env REQUIRED_CHATS ishlaydi). Bot, ilova serveri va boshqaruv markazi shundan o'qiydi
+    requiredChats() {
+      try {
+        const list = JSON.parse(this.getSetting("required_chats") ?? "null");
+        return Array.isArray(list) ? list.filter((c) => typeof c?.ref === "string") : null;
+      } catch {
+        return null;
+      }
+    },
+    setRequiredChats(list) {
+      this.setSetting("required_chats", JSON.stringify(list));
+    },
+    // Hozir amaldagi ro'yxat (ref'lar): Dashboard'dagi, bo'lmasa .env dagi
+    requiredChatRefs(envRefs = []) {
+      const list = this.requiredChats();
+      return list ? list.map((c) => c.ref) : envRefs;
+    },
+
     // --- Hisobot (/holat) ---
     // drivers — haydovchilar, shippers — yuk beruvchilar; loads24h — yuklar, trucks24h — bo'sh mashinalar
     stats({ sinceMs = 24 * 60 * 60 * 1000 } = {}) {

@@ -106,7 +106,9 @@ export function remindText(chats, missing, { reason = "load", one = "yuk", many 
 
 // api — grammY bot.api (getChat, getChatMember); refs — readRequiredChats natijasi;
 // onChecked(userId, { ok, missing: ["@..."] }) — Telegram'dan haqiqiy javob kelganda (bazaga yozish uchun)
-export function createMembership({ api, refs, log = () => {}, onChecked = () => {}, now = Date.now }) {
+// refs o'zgarishi mumkin (boshqaruv markazidagi «🔒 A'zolik», 2026-11-26) — reload(yangi, botId)
+export function createMembership({ api, refs: startRefs, log = () => {}, onChecked = () => {}, now = Date.now }) {
+  let refs = [...startRefs];
   let chats = refs.map((ref) => chatInfo(ref));
   const cache = new Map(); // userId → { ok, missing, unknown, at }
   const warned = new Map(); // chat ref → oxirgi ogohlantirish vaqti (log toshib ketmasin)
@@ -166,8 +168,22 @@ export function createMembership({ api, refs, log = () => {}, onChecked = () => 
   const watches = (chat) =>
     chats.some((c) => (c.id != null && c.id === chat.id) || (chat.username && c.ref.toLowerCase() === `@${chat.username}`.toLowerCase()));
 
+  // Ro'yxat o'zgardi: nomlar/havolalar qaytadan, eslab qolinganlar unutiladi. → true (o'zgardi)
+  async function reload(nextRefs, botId) {
+    const next = [...new Set(nextRefs ?? [])];
+    if (next.length === refs.length && next.every((ref, i) => ref === refs[i])) return false;
+    refs = next;
+    chats = refs.map((ref) => chatInfo(ref));
+    cache.clear();
+    await init(botId);
+    log(refs.length ? `A'zolik ro'yxati yangilandi: ${refs.join(", ")}` : "A'zolik o'chirildi: bot hammaga ishlaydi");
+    return true;
+  }
+
   return {
     init,
+    reload,
+    active: () => chats.length > 0,
     check,
     watches,
     forget: (userId) => cache.delete(userId),

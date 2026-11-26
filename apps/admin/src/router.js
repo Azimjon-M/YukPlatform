@@ -8,6 +8,7 @@ export const ROUTES = [
   { path: "/elonlar", id: "queue", title: "E'lonlar" }, // 2026-11-20 gacha «Navbat» (/navbat)
   { path: "/haydovchilar", id: "drivers", title: "Haydovchilar" },
   { path: "/manbalar", id: "sources", title: "Manbalar" },
+  { path: "/azolik", id: "required", title: "A'zolik" },
   { path: "/jarayonlar", id: "processes", title: "Jarayonlar" },
   { path: "/ai", id: "ai", title: "AI" },
   { path: "/xatolar", id: "errors", title: "Xatolar" },
