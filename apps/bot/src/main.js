@@ -272,7 +272,7 @@ async function main() {
     ? `Kanal: yuklar ${config.channel} ga ham joylanadi (.env: CHANNEL_LOADS=1)`
     : "Kanal: yuklar joylanmaydi — faqat mos haydovchilarga shaxsiy xabar (yoqish: .env ga CHANNEL_LOADS=1)");
   log(config.groupLoads
-    ? `Guruh: yuklar ${config.groupLoads} bo'limlariga mashina turi bo'yicha joylanadi (.env: GROUP_LOADS)`
+    ? `Guruh: yuklar ${config.groupLoads} ga joylanadi — bo'limli bo'lsa mashina turi bo'limlariga, bo'limsiz bo'lsa oddiy xabar (.env: GROUP_LOADS)`
     : "Guruh: yuklar joylanmaydi (yoqish: .env ga GROUP_LOADS=@guruh)");
   log(`Yo'nalishlar: ${ROUTE_SCOPES[routeScope].title} (.env: ROUTE_SCOPE=${routeScope})`);
   log(maxPostAgeMs > 0
