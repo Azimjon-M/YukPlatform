@@ -168,3 +168,24 @@ test("yopiq guruh e'loni va o'z guruhimiz xabari guruhga hech qaysi yo'l bilan t
   poster.pushRaw({ ...closed, source: "@yuk_guruh", link: "https://t.me/yuk_guruh/1" }, {});
   assert.equal(poster.stats().queued, 1, "ochiq guruh e'loni o'tadi");
 });
+
+test("bo'limsiz guruh (2026-11-26: guruh qayta qurildi) — bo'lim ochilmaydi, e'lon oddiy xabar; eski bo'lim id'lari boshqa guruhniki", async () => {
+  const api = { ...fakeApi(), calls: [] };
+  const base = fakeApi();
+  api.calls = base.calls;
+  api.createForumTopic = base.createForumTopic;
+  api.sendMessage = base.sendMessage;
+  api.getChat = async () => ({ id: -1005, is_forum: false });
+  const store = openStore({ file: ":memory:" });
+  store.setSetting("group_topics", JSON.stringify({ chat: "@guruh", topics: { fura: 4976 } })); // eski guruhniki
+  const poster = createGroupPoster({ api, store, chat: "@guruh", log: () => {} });
+  await poster.start();
+  poster.push({ ...LOAD, truckClass: "fura" }, POST);
+  await poster.tick();
+  poster.stop();
+  assert.equal(base.calls.filter((c) => c.method === "createForumTopic").length, 0);
+  const sent = base.calls.filter((c) => c.method === "sendMessage");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].options.message_thread_id, undefined);
+  assert.deepEqual(poster.stats().topics, {}, "eski guruhning bo'lim id'lari olinmadi");
+});

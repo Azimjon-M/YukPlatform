@@ -70,17 +70,44 @@ export function createGroupPoster({
   let dropped = 0;
   let sent = 0;
 
-  // { chat, topics: { fura: 12, ... } } — boshqa guruhga o'tilsa, eski id'lar ishlatilmaydi
+  // Guruh bo'limli (forum) mi — Telegram'dan (getChat). 2026-11-26: guruh o'chib, bo'limsiz «1 talik» qilib qayta
+  // qurildi (o'sha @username, boshqa id). Bo'limsiz guruhga — oddiy xabar; bo'limlar yoqilsa, 10 daqiqada sezadi
+  let forum = true;
+  let chatId = null; // haqiqiy -100… id: @username boshqa guruhga o'tsa, eski bo'lim id'lari ishlatilmasin
+  let checkedAt = -Infinity;
+  const FORUM_CHECK_MS = 10 * 60_000;
+  async function refreshChat() {
+    if (now() - checkedAt < FORUM_CHECK_MS) return;
+    checkedAt = now();
+    let info = null;
+    try {
+      info = await api.getChat?.(chat);
+    } catch {
+      info = null; // tarmoq — keyingi safar
+    }
+    if (!info) return;
+    const wasForum = forum;
+    forum = info.is_forum === true;
+    if (chatId !== info.id) {
+      chatId = info.id;
+      topics = readSaved();
+    }
+    if (wasForum !== forum) log(`Guruh ${chat}: ${forum ? "bo'limli (Topics) — e'lonlar mashina turi bo'limlariga" : "bo'limsiz — e'lonlar oddiy xabar bo'lib"}`);
+  }
+
+  // { chat, chatId, topics: { fura: 12, ... } } — boshqa guruhga o'tilsa (id boshqa), eski id'lar ishlatilmaydi
   const readSaved = () => {
     try {
       const saved = JSON.parse(store.getSetting?.(SETTING) ?? "null");
-      return saved?.chat === String(chat) ? saved.topics ?? {} : {};
+      if (saved?.chat !== String(chat)) return {};
+      if (chatId != null && saved.chatId !== chatId) return {};
+      return saved.topics ?? {};
     } catch {
       return {};
     }
   };
   let topics = readSaved();
-  const save = () => store.setSetting?.(SETTING, JSON.stringify({ chat: String(chat), topics }));
+  const save = () => store.setSetting?.(SETTING, JSON.stringify({ chat: String(chat), chatId, topics }));
 
   async function threadId(id) {
     if (topics[id]) return topics[id];
@@ -110,6 +137,8 @@ export function createGroupPoster({
     const id = item.raw ? topicForTrucks(item.trucks) : topicFor(item.load);
     const { text, keyboard } = message(item);
     const options = { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: keyboard };
+    await refreshChat();
+    if (!forum) return await api.sendMessage(chat, text, options);
     try {
       return await api.sendMessage(chat, text, { ...options, message_thread_id: await threadId(id) });
     } catch (error) {
@@ -169,7 +198,8 @@ export function createGroupPoster({
       enqueue({ raw: true, post, trucks, phones });
     },
     async start() {
-      await ensureTopics().catch((error) => log(`Guruh ${chat}: bo'limlar ochilmadi — ${error.description ?? error.message}`));
+      await refreshChat();
+      if (forum) await ensureTopics().catch((error) => log(`Guruh ${chat}: bo'limlar ochilmadi — ${error.description ?? error.message}`));
       timer ??= setInterval(tick, intervalMs);
       timer.unref?.();
     },
