@@ -94,3 +94,16 @@ test("yopiq guruh: matnda raqam yo'q — yozgan odamning profil raqami ko'rsatil
   assert.match(formatRaw(post, { phones: [] }).text, /📞 \+998901112233 \(yozgan odamning Telegram raqami\)/);
   assert.match(formatLoad({ fromCity: "Toshkent", toCity: "Samarqand", phones: [] }, post).text, /yozgan odamning Telegram raqami/);
 });
+
+test("tugma matni: emoji o'rtasidan kesilmaydi (2026-11-26 — guruh tanlash ochilmay qolgan edi)", async () => {
+  const { cut } = await import("../src/feed.js");
+  const name = "Yuk tashish xizmati 24/7 🚛🇺🇿 Toshkent";
+  const short = cut(name, 26);
+  assert.ok(short.isWellFormed());
+  assert.ok(short.endsWith("…"));
+  assert.equal(cut("Qisqa nom", 26), "Qisqa nom");
+  assert.ok(cut("buzuq \uD83D nom", 26).isWellFormed(), "oldindan buzuq belgi ham tozalanadi");
+  // har qanday joydan kesilganda ham butun
+  const emoji = "🚛".repeat(40);
+  for (let n = 2; n < 30; n++) assert.ok(cut(emoji, n).isWellFormed());
+});

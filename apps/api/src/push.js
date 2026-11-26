@@ -19,7 +19,8 @@ export function pushMessage(item) {
   const phone = load.phones?.[0] ?? "";
   return {
     title: route,
-    message: text.length > 180 ? `${text.slice(0, 179)}…` : text,
+    // belgilar bo'yicha (emoji o'rtasidan kesilmasin)
+    message: Array.from(text).length > 180 ? `${Array.from(text).slice(0, 179).join("")}…` : text,
     channelId: "yuklar",
     categoryId: phone ? "yuk" : "",
     body: itemBody(item, phone),

@@ -39,7 +39,7 @@ export function modeStep({ profile = null, intro = null } = {}) {
     `📍 Qayerdan: <b>${regionsText(feed.regions)}</b>`,
     `📌 Guruhlar: <b>${mine ? `tanlangan ${feed.sources.length} ta` : "Hamma guruhlar"}</b>`,
   ];
-  const short = (text) => (text.length > 28 ? `${text.slice(0, 27)}…` : text);
+  const short = (text) => cut(text, 28);
   const keyboard = [
     [{ text: `🚚 Mashina: ${short(trucksText(feed.trucks))}`, data: "ft:open" }],
     [{ text: `📍 Qayerdan: ${short(regionsText(feed.regions).replace(/ viloyati/g, ""))}`, data: "fm:hududim" }],
@@ -53,10 +53,20 @@ export function modeStep({ profile = null, intro = null } = {}) {
   return { text: lines.join("\n"), keyboard };
 }
 
+// Matnni belgi (harf / emoji) chegarasida qisqartirish. Oddiy .slice() emojini o'rtasidan kesardi — yarim emoji
+// Telegram'ga «inline keyboard button text must be encoded in UTF-8» xatosi bilan qaytardi va guruh tanlash ro'yxati
+// umuman ochilmasdi (2026-11-26). toWellFormed — nomda oldindan buzuq belgi bo'lsa ham tozalaydi
+const graphemes = new Intl.Segmenter("uz", { granularity: "grapheme" });
+export function cut(text, max) {
+  const clean = String(text ?? "").toWellFormed();
+  const parts = Array.from(graphemes.segment(clean), (g) => g.segment);
+  return parts.length > max ? `${parts.slice(0, max - 1).join("").trimEnd()}…` : clean;
+}
+
 // Tugmadagi guruh nomi: sarlavha (bo'lsa) yoki @nomi, qisqartirilgan; ostida kuniga nechta e'lon
 function groupLabel(source, chosen) {
   const name = source.title || source.name;
-  const short = name.length > 26 ? `${name.slice(0, 25)}…` : name;
+  const short = cut(name, 26);
   if (source.locked) return `🔒 ${short} · Pro`;
   return `${chosen ? "✅" : "▫️"} ${source.closed ? "🔒 " : ""}${short} · ${source.perDay}/kun`;
 }
