@@ -1182,11 +1182,11 @@ export function createBot({
   const APP_LOGIN_START = /^app_([A-Za-z0-9_-]{20,48})$/;
   async function askAppLogin(ctx, code) {
     rememberUser(ctx);
-    const keyboard = new InlineKeyboard().text("✅ Ha, kiraman", `al:ok:${code}`).row().text("❌ Yo'q", "al:no");
+    const keyboard = new InlineKeyboard().text("✅ Ha, bog'layman", `al:ok:${code}`).row().text("❌ Yo'q, bog'lamayman", "al:no");
     await ctx.reply(
-      "📱 <b>Ilovaga kirish</b>\n\nYuk Ekspert ilovasi sizning hisobingiz bilan kirmoqchi.\n" +
-        "Agar ilovada «Bot orqali kirish» (yoki «Bot orqali ro'yxatdan o'tish») ni hozir <b>o'zingiz</b> bosgan bo'lsangiz — tasdiqlang.\n" +
-        "Havolani boshqa birov yuborgan bo'lsa — <b>bosmang</b>.",
+      "📱 <b>Akkauntingizni Yuk Ekspert ilovasiga bog'laysizmi?</b>\n\n" +
+        "«Ha» ni bossangiz — ilova shu Telegram akkauntingiz bilan avtomatik kiradi.\n" +
+        "Ilovada «Bot orqali» ni <b>o'zingiz</b> bosmagan bo'lsangiz (havolani boshqa birov yuborgan bo'lsa) — <b>bog'lamang</b>.",
       { parse_mode: "HTML", reply_markup: keyboard },
     );
   }
@@ -1198,10 +1198,10 @@ export function createBot({
     await ctx.answerCallbackQuery();
     if (ctx.chat?.type !== "private") return;
     const code = ctx.match[1];
-    if (!code) return ctx.editMessageText("Kirish bekor qilindi.").catch(() => {});
+    if (!code) return ctx.editMessageText("❌ Bog'lanmadi. Kerak bo'lsa — ilovada qaytadan «Bot orqali» ni bosing.").catch(() => {});
     const ok = store.confirmAppLogin(code, ctx.chat.id);
     await ctx
-      .editMessageText(ok ? "✅ Tasdiqlandi — ilovaga qayting." : "⌛️ Bu kirish kodi eskirgan yoki ishlatilgan. Ilovada qaytadan «Bot orqali kirish» ni bosing.")
+      .editMessageText(ok ? "✅ Bog'landi — ilovaga qayting, u o'zi kiradi." : "⌛️ Bu havola eskirgan yoki ishlatilgan. Ilovada qaytadan «Bot orqali» ni bosing.")
       .catch(() => {});
   });
 

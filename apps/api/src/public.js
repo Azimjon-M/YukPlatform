@@ -6,7 +6,7 @@
 //   GET  /pub/config           bot username (saytdagi «Telegram bilan kirish» uchun), yo'nalish doirasi
 //   POST /pub/auth             { initData } (Mini App) yoki { widget } (sayt) → { token, me }
 //   POST /pub/auth/app         mobil/kompyuter ilova: → { code, url, tgUrl, expiresIn, pollMs } — ilova url ni ochadi,
-//                              odam botda «✅ Ha, kiraman» ni bosadi (store appLogins.js)
+//                              odam botda «✅ Ha, bog'layman» ni bosadi (store appLogins.js)
 //   GET  /pub/auth/app/:code   ilova so'rab turadi: 202 { status: "pending" } | 200 { token, me } (bir marta) | 410 (eskirgan)
 //   GET  /pub/app              Android ilova: { android: { version, versionCode, size, url } | null } (kirishsiz, appRelease.js)
 //   GET  /pub/app/android      eng so'nggi APK faylning o'zi (yuklab olish)
@@ -398,7 +398,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const state = store.appLoginState(code);
     if (state === "pending") return res.status(202).json({ status: "pending" });
     const chatId = state === "confirmed" ? store.consumeAppLogin(code) : null;
-    if (chatId == null) throw httpError(410, "Kirish kodi eskirgan — qaytadan «Bot orqali kirish» ni bosing", "expired");
+    if (chatId == null) throw httpError(410, "Kirish kodi eskirgan — qaytadan «Bot orqali» ni bosing", "expired");
     const known = store.getDriver(chatId) ?? {};
     res.json(signIn(chatId, { name: known.name ?? null, username: known.username ?? null }, "app"));
   });
