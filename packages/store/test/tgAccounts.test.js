@@ -123,3 +123,27 @@ test("Auto scan (2026-11-27): o'qib bo'lmagan (error) guruh — Auto scan qayta 
   const again = store.listTgAccounts().find((a) => a.name === "ufk-1").scanRequestedAt;
   assert.deepEqual(store.dialogsToScan("ufk-1", { since: again }).map((d) => d.peerId), ["-1004489147352"]);
 });
+
+test("obunalar ko'chirish (2026-11-27): akkaunt ulagani uchun avtomatik Pro bo'lganlar bir marta haqiqiy Pro'ga o'tadi; keyin ulaganlar — yo'q", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const file = join(mkdtempSync(join(tmpdir(), "yuk-plans-")), "yuk.db");
+  let store = openStore({ file });
+  store.saveDriver(10, { name: "Akkauntli", role: "haydovchi" });
+  store.saveDriver(20, { name: "Oddiy", role: "haydovchi" });
+  store.saveDriver(30, { name: "Max", role: "haydovchi", plan: "max" });
+  store.saveTgAccount("u10-1", { userId: 999, status: "ok" });
+  store.setTgAccountOwner("u10-1", 10);
+  store.db.exec("DELETE FROM settings WHERE key = 'plans_v2'"); // eski baza: ko'chirish hali bo'lmagan
+  store.db.close();
+  store = openStore({ file });
+  assert.deepEqual([10, 20, 30].map((id) => store.getDriver(id).plan), ["pro", "free", "max"]);
+  // Ko'chirishdan keyin akkaunt ulagan odam Free'da qoladi (akkaunt ulash endi Pro bermaydi)
+  store.saveTgAccount("u20-1", { userId: 998, status: "ok" });
+  store.setTgAccountOwner("u20-1", 20);
+  store.db.close();
+  store = openStore({ file });
+  assert.equal(store.getDriver(20).plan, "free");
+  store.db.close();
+});

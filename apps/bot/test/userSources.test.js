@@ -192,3 +192,11 @@ test("«🔎 Auto scan» qo'shgan guruhni foydalanuvchi yuborsa — «qo'shildi�
   // Foydalanuvchining o'zi yuborgan oddiy guruh — oldingidek «siz allaqachon yuborgansiz»
   assert.match(await intake.submit(560, parseSourceLink("@auto_1")), /siz allaqachon yuborgansiz/);
 });
+
+test("natija xabari (obunalar, 2026-11-27): yopiq guruh doimiy qo'shildi — Free'ga «Pro obunada keladi» qo'shiladi, Pro'ga va ochiq guruhga — yo'q", async () => {
+  const { resultText, CLOSED_NEEDS_PRO } = await import("../src/userSources.js");
+  const closed = { name: "-1001234567", title: "Yopiq yuklar", checkState: "ok", checkNote: "Yuk guruhi" };
+  assert.ok(resultText(closed, { plan: "free" }).endsWith(CLOSED_NEEDS_PRO));
+  assert.ok(!resultText(closed, { plan: "pro" }).includes("Pro obunada"));
+  assert.ok(!resultText({ ...closed, name: "@ochiq_yuk" }, { plan: "free" }).includes("Pro obunada"));
+});

@@ -1059,8 +1059,8 @@ test("tezkor navbat (2026-11-19 tiket): navbatda turganda pauza bosilsa — qolg
   assert.ok(Math.max(...sent.filter(([c]) => c === 1).map(([, , t]) => t)) - started < 50, "1-haydovchi 7-ni kutmadi");
 });
 
-test("guruh bo'limlariga asl matn (AI'siz): ochiq guruh e'loni — ha; yopiq guruh, quruq gap, eski, bot yoqilishidan oldingisi — yo'q", async () => {
-  const { deps, post } = rawSetup();
+test("guruh bo'limlariga asl matn (AI'siz): ochiq guruh e'loni — ha; yopiq guruh, ovozli e'lon, quruq gap, eski, bot yoqilishidan oldingisi — yo'q", async () => {
+  const { store: groupStore, deps, post } = rawSetup();
   deps.pool = noAi;
   const group = [];
   deps.groupRaw = (p, look) => group.push([p.messageId, look.phones]);
@@ -1073,6 +1073,8 @@ test("guruh bo'limlariga asl matn (AI'siz): ochiq guruh e'loni — ha; yopiq gur
   post("-1001234567890", 3, LOAD_TEXT.replace("0001", "0003")); // yopiq guruh — Pro uchun
   post("@g", 4, CHAT_TEXT);
   post("@g", 5, LOAD_TEXT.replace("0001", "0005"), Date.now() - 40 * 60_000);
+  // Ovozli e'lon — Pro/Max uchun (2026-11-27): ochiq guruhimizga chiqmaydi
+  groupStore.addPost({ source: "@g", messageId: 6, text: LOAD_TEXT.replace("0001", "0006"), postedAt: Date.now() - 1000, media: "voice" });
   await worker.runOnce();
   assert.deepEqual(group, [[2, ["+998900000002"]]]);
 });

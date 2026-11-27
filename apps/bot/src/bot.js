@@ -1252,7 +1252,8 @@ export function createBot({
       [
         "📡 <b>Telegram akkauntingizni ulang</b>",
         "",
-        "Yopiq yuk guruhlariga a'zo alohida Telegram akkauntingizni ulasangiz, o'sha guruhlardagi e'lonlar ham o'qiladi.",
+        "Akkauntingiz a'zo bo'lgan yuk guruhlari (yopiqlari ham) o'qiladi va Filtrda «👤 Akkauntimdagi» bo'limida ko'rinadi.",
+        "Ulash bepul. Yopiq guruhlaringizdagi e'lonlar ⭐ Pro obunada keladi.",
         "",
         "Pastdagi tugma ilovani ochadi: raqam → Telegram yuborgan kod → (bo'lsa) 2FA parol.",
         "⚠️ Kod va parolni faqat ilovaga yozing — hech qanday chatga yubormang (chatga yozilgan kodni Telegram bekor qiladi).",

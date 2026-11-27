@@ -16,6 +16,7 @@ import {
   truckWanted,
   loadKeys,
   isClosedSource,
+  isVoiceMedia,
   planAllows,
   byPlan,
   rawWanted,
@@ -438,7 +439,8 @@ export function createWorker(
   // belgisi saqlanmaydi, qayta yonganda oxirgi daqiqalar ikkinchi marta chiqmasin
   const startedAt = now();
   function toGroup(post, getLook) {
-    if (!deps.groupRaw || post.shipper != null || isClosedSource(post.source)) return;
+    // Ovozli e'lon ham yo'q (2026-11-27, obunalar): u Pro/Max uchun — ochiq guruhimizga chiqsa, Free ham tekin olardi
+    if (!deps.groupRaw || post.shipper != null || isClosedSource(post.source) || isVoiceMedia(post.media)) return;
     if (!((post.queuedAt ?? post.postedAt) >= startedAt) || !(post.postedAt >= now() - rawMaxAgeMs)) return;
     const look = getLook();
     if (look.chatter) return;

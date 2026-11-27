@@ -7,7 +7,7 @@
 //      o'chiriladi. 5 tasi oldinroq chiqsa — o'sha zahoti o'tadi; ko'p xabar bo'lib, yuk e'loni juda kam bo'lsa — oldinroq
 //      to'xtatiladi (AI kvotasi behuda ketmasin). Natija qo'shgan odamga shu yerdan yoziladi (createSourceWatcher).
 import { GrammyError } from "grammy";
-import { telegramUsername } from "@yuk/shared";
+import { planOf, telegramUsername } from "@yuk/shared";
 import { escapeHtml } from "./format.js";
 import { MENU } from "./menu.js";
 
@@ -329,8 +329,10 @@ export function reviewTrial(stats, { until, now, rules = SOURCE_RULES }) {
   return { done: true, ok: false, note };
 }
 
-// Qo'shgan odamga yoziladigan natija
-export function resultText(source) {
+// Qo'shgan odamga yoziladigan natija. plan — qo'shgan odamning obunasi (2026-11-27): yopiq guruh e'lonlari Free'ga kelmaydi —
+// «doimiy qo'shildi» deb yozib, hech narsa yubormaslik chalg'itadi
+export const CLOSED_NEEDS_PRO = "🔒 Bu yopiq guruh: undagi e'lonlar sizga ⭐ Pro obunada keladi (obunani admin beradi).";
+export function resultText(source, { plan = null } = {}) {
   const title = sourceTitle(source);
   const note = source.checkNote ? escapeHtml(source.checkNote) : "";
   const fromTrial = Boolean(source.checkStats?.trial);
@@ -342,7 +344,7 @@ export function resultText(source) {
         `Ertaga ${timeText(source.checkUntil)} gacha (24 soat) kamida ${SOURCE_RULES.minLoads} ta yuk e'loni chiqsa — doimiy qo'shiladi.`,
       ].join("\n");
     case "ok":
-      return `✅ ${title} doimiy qo'shildi${note ? `: ${lowerFirst(note)}` : ""}. Rahmat!`;
+      return `✅ ${title} doimiy qo'shildi${note ? `: ${lowerFirst(note)}` : ""}. Rahmat!${plan === "free" && /^-\d+$/.test(source.name) ? `\n${CLOSED_NEEDS_PRO}` : ""}`;
     case "failed":
       return fromTrial
         ? `⏸ ${title} o'chirildi: ${lowerFirst(note)}.`
@@ -392,7 +394,7 @@ export function createSourceWatcher({ store, send, onInvite = null, log = consol
 
   async function notify() {
     for (const source of store.sourceNotices()) {
-      const text = resultText(source);
+      const text = resultText(source, { plan: planOf(store.getDriver?.(source.addedBy)) });
       if (text) {
         try {
           await send(source.addedBy, text, source);
