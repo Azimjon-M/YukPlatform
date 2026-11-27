@@ -93,14 +93,12 @@ test("sinov hisobi: yuk e'lonlari, boshqa guruhdagining nusxasi, eskirganlar san
   assert.deepEqual(store.trialStats("@yangi", now() + 1), { posts: 0, loads: 0, processed: 0, waiting: 0, repeats: 0, noContact: 0 });
 });
 
-test("yopiq guruh o'chirilmaydi: yuk kam bo'lsa ham kuzatuvda qoladi; o'qib bo'lmasa — rad", () => {
+test("yopiq guruh: tekshiruvdan o'tmasa — rad (2026-11-27, avval «e'lon kam bo'lsa ham» qolardi); o'tsa — sinovsiz doimiy", () => {
   const store = openStore({ file: ":memory:" });
   store.addUserSource({ name: "-1001111111", chatId: 7, account: "dost" });
-  assert.equal(store.finishProbe("-1001111111", { ok: false, note: "Oxirgi 50 ta xabarda yuk e'loni yo'q", stats: { messages: 50, loadLike: 0 } }), true);
+  assert.equal(store.finishProbe("-1001111111", { ok: false, note: "Oxirgi 100 ta xabarda yuk haqida hech narsa yo'q", stats: { messages: 100, loadLike: 0 } }), true);
   let row = store.listSources().find((s) => s.name === "-1001111111");
-  assert.equal(row.enabled, true);
-  assert.equal(row.checkState, "ok");
-  assert.match(row.checkNote, /^Yopiq guruh — e'lon kam bo'lsa ham doim kuzatiladi \(oxirgi 50/);
+  assert.deepEqual([row.enabled, row.checkState, row.checkNote], [false, "failed", "Oxirgi 100 ta xabarda yuk haqida hech narsa yo'q"]);
 
   // Yuk guruhi deb topilsa — sinovsiz, darhol doimiy
   store.addUserSource({ name: "-1002222222", chatId: 7, account: "dost" });
@@ -108,12 +106,6 @@ test("yopiq guruh o'chirilmaydi: yuk kam bo'lsa ham kuzatuvda qoladi; o'qib bo'l
   row = store.listSources().find((s) => s.name === "-1002222222");
   assert.deepEqual([row.enabled, row.checkState, row.checkNote], [true, "ok", "Yuk guruhi: 3 ta yuk e'loni"]);
   assert.equal(store.trialSources().length, 0, "sinovga tushmaydi");
-
-  // Eski sinovdagi yopiq guruh ham yiqilmaydi
-  store.addUserSource({ name: "-1004444444", chatId: 7, account: "dost" });
-  store.finishProbe("-1004444444", { ok: true, note: "bor", stats: {} });
-  row = store.listSources().find((s) => s.name === "-1004444444");
-  assert.equal(row.checkState, "ok");
 
   // Akkaunt o'qiy olmadi (a'zo emas) — rad etiladi
   store.addUserSource({ name: "-1003333333", chatId: 7, account: "dost" });
@@ -166,4 +158,14 @@ test("akkaunt kimniki (2026-11-20): qo'shgan YOKI akkauntning o'zi — Telegram 
   assert.deepEqual(names(5), ["boshqa-1"], "qo'shgan — yozuvi bo'lmasa ham");
   assert.equal(store.getDriver(11).autoPro, true, "raqami bor + akkaunt uniki → avto-Pro");
   assert.equal(store.getDriver(982).autoPro, true, "raqam ulashmagan bo'lsa ham — akkaunti bor (2026-11-26)");
+});
+
+test("boshqaruv markazidan qo'shilgan manba ham tekshiruvga tushadi (2026-11-27): o'chiq, probe, natija hech kimga yozilmaydi", () => {
+  const store = openStore({ file: ":memory:" });
+  assert.equal(store.addUserSource({ name: "@admin_guruh", chatId: null, note: "boshqaruv markazi qo'shdi" }), true);
+  const row = store.listSources().find((s) => s.name === "@admin_guruh");
+  assert.deepEqual([row.enabled, row.checkState, row.addedBy, row.note], [false, "probe", null, "boshqaruv markazi qo'shdi"]);
+  assert.deepEqual(store.sourcesToProbe().map((s) => s.name), ["@admin_guruh"]);
+  store.finishProbe("@admin_guruh", { ok: false, note: "yuk yo'q" });
+  assert.deepEqual(store.sourceNotices(), [], "qo'shgan odam yo'q — xabar yo'q");
 });

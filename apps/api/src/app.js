@@ -396,7 +396,17 @@ export function createApp({
         });
       }
     }
-    const added = store.addSource(name, options);
+    // 2026-11-27 (Azimjon: «bizda shartlarimizga tushishi kerak emasmi?»): qo'lda qo'shilgani ham foydalanuvchinikidek
+    // tekshiriladi — collector oxirgi xabarlarini ko'radi (probe.js), ochig'i keyin 24 soatlik sinov; o'tmasa o'chiriladi
+    const added = store.addUserSource({
+      name,
+      chatId: null,
+      title: options.title ?? null,
+      members: options.members ?? null,
+      chatType: options.chatType ?? null,
+      account: options.account ?? null,
+      note: note ?? "boshqaruv markazi qo'shdi",
+    });
     res.status(added ? 201 : 200).json({ name, added, account: options.account ?? null });
   });
 

@@ -197,7 +197,10 @@ export function PrivateGroupPicker({ state, onAdded }) {
     setBusy(dialog.peerId);
     try {
       const result = await post("/api/sources", source);
-      notify(result.added ? `«${dialog.title}» qo'shildi — collector bir necha soniyada o'qiy boshlaydi` : `«${dialog.title}» ro'yxatda allaqachon bor`, result.added ? "good" : "neutral");
+      notify(
+        result.added ? `«${dialog.title}» tekshiruvga qo'yildi — yuk guruhi bo'lib chiqsa, o'zi yoqiladi` : `«${dialog.title}» ro'yxatda allaqachon bor`,
+        result.added ? "good" : "neutral",
+      );
       onAdded();
     } catch (e) {
       notify(e.message, "critical");
@@ -210,7 +213,8 @@ export function PrivateGroupPicker({ state, onAdded }) {
     <Card title="🔒 Yopiq guruh qo'shish" collapsible hint={`${formatNumber(list.length)} ta guruh qo'shish mumkin`}>
       <p className="muted small">
         Akkauntlar a'zo bo'lgan, hali manba bo'lmagan guruh va kanallar. 🔒 Yopiq — faqat a'zo akkaunt o'qiydi; 🌐 ochig'ini asosiy akkaunt a'zo
-        bo'lmasdan ham o'qiydi.
+        bo'lmasdan ham o'qiydi. Qo'shilgan guruh darhol yoqilmaydi: foydalanuvchi qo'shgani kabi tekshiriladi (yopiq — oxirgi 100 ta xabari,
+        ochiq — 50 tasi va 24 soatlik sinov); yuk guruhi bo'lmasa, o'chiriladi.
       </p>
       <Field label="Qidirish" className="field-grow">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Guruh nomi, @manzil yoki id" autoComplete="off" spellCheck="false" />

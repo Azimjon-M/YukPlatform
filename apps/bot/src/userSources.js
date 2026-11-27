@@ -371,9 +371,7 @@ export function createSourceWatcher({ store, send, onInvite = null, log = consol
       const verdict = reviewTrial(stats, { until: source.checkUntil, now: now(), rules });
       if (!verdict.done) continue;
       store.finishTrial(source.name, { ok: verdict.ok, note: verdict.note, stats });
-      // Yopiq guruh (raqamli id) yiqilmaydi — store.finishTrial uni doimiy qoldiradi
-      const kept = !verdict.ok && /^-\d+$/.test(source.name);
-      log(`${source.name}: foydalanuvchi qo'shgan guruh sinovdan ${verdict.ok ? "o'tdi" : kept ? "o'tmadi, lekin yopiq guruh — kuzatuvda qoladi" : "o'tmadi, o'chirildi"} — ${verdict.note}`);
+      log(`${source.name}: qo'shilgan guruh sinovdan ${verdict.ok ? "o'tdi" : "o'tmadi, o'chirildi"} — ${verdict.note}`);
     }
   }
 

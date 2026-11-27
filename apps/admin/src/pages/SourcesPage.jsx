@@ -135,7 +135,7 @@ function AddSource({ onAdded }) {
     setError(null);
     try {
       const result = await post("/api/sources", { name: name.trim(), note: note.trim() || null });
-      notify(result.added ? `${result.name} qo'shildi` : `${result.name} ro'yxatda allaqachon bor`, result.added ? "good" : "neutral");
+      notify(result.added ? `${result.name} tekshiruvga qo'yildi — o'tsa, 24 soatlik sinovdan keyin doimiy bo'ladi` : `${result.name} ro'yxatda allaqachon bor`, result.added ? "good" : "neutral");
       setName("");
       setNote("");
       onAdded();
@@ -174,7 +174,8 @@ function AddSource({ onAdded }) {
         </p>
       )}
       <p className="muted small">
-        {NOTE} Bu yerda — ochiq guruhlar. Yopiq guruh taklif havolasi (t.me/+...) ishlamaydi: yopiq guruhni unga a'zo akkaunt o'qiydi — pastdagi «Yopiq
+        Qo'shilgan guruh foydalanuvchi qo'shgani kabi tekshiriladi: oxirgi 50 ta xabarida yuk e'loni kam bo'lsa yoki taksi guruhi bo'lsa — rad,
+        o'tsa — 24 soatlik sinov (kamida 5 ta yuk e'loni). Bu yerda — ochiq guruhlar. Yopiq guruh taklif havolasi (t.me/+...) ishlamaydi: yopiq guruhni unga a'zo akkaunt o'qiydi — pastdagi «Yopiq
         guruh qo'shish» dan tanlang.
       </p>
     </Card>
@@ -529,7 +530,8 @@ export function SourcesPage() {
             qo'shilish Telegram'ga spam-akkauntdek ko'rinadi), bildirishnomasi o'chiriladi; a'zolikni admin tasdiqlaydigan guruhga so'rov yuboriladi.
           </p>
           <p>
-            👤 Foydalanuvchilar ham qo'shadi (raqamini ulashganlar, botdagi «➕ Guruh qo'shish»): 🔎 collector oxirgi 50 ta xabarini ko'radi —
+            👤 Hamma yangi guruh — foydalanuvchi (botdagi «➕ Guruh qo'shish»), «🔎 Auto scan» yoki shu sahifadan qo'shilgani — bir xil
+            tekshiriladi. Yopiq guruh: oxirgi 100 ta xabari ko'riladi, o'tsa — darhol doimiy, o'tmasa — o'chiriladi. Ochiq: 🔎 collector oxirgi 50 ta xabarini ko'radi —
             yuk e'loni kam bo'lsa, darhol rad etiladi; 🧪 keyin 24 soat sinov — kamida 5 ta yuk e'loni chiqsa, doimiy qoladi, chiqmasa — o'chiriladi.
             Natijani bot qo'shgan odamga o'zi yozadi.
           </p>

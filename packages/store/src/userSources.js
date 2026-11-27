@@ -15,7 +15,6 @@ const IS_LOAD = "(status = 'done' AND (error IS NULL OR error LIKE 'Boshqa yo%')
 
 // Yopiq guruh — manba nomi raqamli id (-100…); ochig'i @nomi (@yuk/shared roles.js isClosedSource bilan bir xil)
 const isClosedName = (name) => /^-\d+$/.test(String(name));
-const lowerFirst = (text) => (text ? text[0].toLowerCase() + text.slice(1) : text);
 
 export function userSourceRow(row) {
   if (!row) return null;
@@ -71,7 +70,8 @@ export function createUserSourceQueries(db, now) {
     // Yangi manba (yoki bir hafta oldin rad etilgani qayta yuborildi): «probe» holatida, o'chiq — collector oxirgi
     // xabarlarini ko'rib chiqadi (sourcesToProbe). Boshqa holatdagi mavjud manbaga tegilmaydi → false
     // account — yopiq guruh (name = "-100…"): uni o'qiydigan, foydalanuvchi ulagan akkaunt (2026-11-13); ochig'ida NULL
-    addUserSource({ name, chatId, title = null, members = null, chatType = null, account = null }) {
+    // chatId = null — boshqaruv markazidan qo'shildi (2026-11-27: u ham shu tekshiruvdan o'tadi; natija hech kimga yozilmaydi)
+    addUserSource({ name, chatId, title = null, members = null, chatType = null, account = null, note = "foydalanuvchi qo'shdi" }) {
       const existing = byName.get(name);
       const time = now();
       if (existing && existing.check_state !== "failed") return false;
@@ -80,13 +80,13 @@ export function createUserSourceQueries(db, now) {
           `UPDATE sources SET enabled = 0, added_by = ?, title = ?, members = ?, chat_type = ?, check_state = 'probe', check_at = ?,
              check_until = NULL, check_note = NULL, check_stats = NULL, check_notified = NULL, created_at = ?, account = ?,
              auto_scan = NULL WHERE name = ?`,
-        ).run(chatId, title, members, chatType, time, time, account, existing.name);
+        ).run(chatId ?? null, title, members, chatType, time, time, account, existing.name);
         return true;
       }
       db.prepare(
         `INSERT INTO sources (name, enabled, note, created_at, added_by, title, members, chat_type, check_state, check_at, account)
          VALUES (?, 0, ?, ?, ?, ?, ?, ?, 'probe', ?, ?)`,
-      ).run(name, "foydalanuvchi qo'shdi", time, chatId, title, members, chatType, time, account);
+      ).run(name, note, time, chatId ?? null, title, members, chatType, time, account);
       return true;
     },
 
@@ -116,15 +116,14 @@ export function createUserSourceQueries(db, now) {
     // trialMs gacha), aks holda — rad etildi. stats — nechta xabar, nechtasi yuk e'loniga o'xshaydi va h.k. (JSON)
     finishProbe(name, { ok, note = null, stats = null, trialMs = 24 * HOUR }) {
       const time = now();
-      // Yopiq guruh (raqamli id) e'loni kam bo'lsa ham o'chirilmaydi — u yerda istalgan payt e'lon tushishi mumkin
-      // (Azimjon, 2026-11-16). Faqat o'qib bo'lmasa (stats.error: a'zo emas, topilmadi) — rad
-      // Yuk guruhi deb topilgan yopiq guruh — 24 soatlik sinovsiz, darhol doimiy (Azimjon, 2026-11-16)
-      if (isClosedName(name) && (ok || !stats?.error)) {
-        const kept = ok ? note : `Yopiq guruh — e'lon kam bo'lsa ham doim kuzatiladi (${lowerFirst(note ?? "tekshiruv")})`;
+      // Yuk guruhi deb topilgan yopiq guruh — 24 soatlik sinovsiz, darhol doimiy (Azimjon, 2026-11-16).
+      // Tekshiruvdan o'tmagan yopiq guruh — rad (2026-11-27, Azimjon: «shartlarimizga tushishi kerak emasmi?»; avval
+      // «e'lon kam bo'lsa ham doim kuzatiladi» deb qolardi — auto scan'dan farqli, foydalanuvchi yuborgani shartsiz o'tardi)
+      if (isClosedName(name) && ok) {
         return (
           db
             .prepare("UPDATE sources SET enabled = 1, check_state = 'ok', check_at = ?, check_until = NULL, check_note = ?, check_stats = ? WHERE name = ? AND check_state = 'probe'")
-            .run(time, kept, JSON.stringify({ probe: stats }), name).changes > 0
+            .run(time, note, JSON.stringify({ probe: stats }), name).changes > 0
         );
       }
       const sql = ok
@@ -165,15 +164,9 @@ export function createUserSourceQueries(db, now) {
 
     // Sinov tugadi: ok → doimiy (yoqilganligi o'zgarmaydi — admin o'chirib qo'ygan bo'lsa, o'chiq qoladi), aks holda o'chiriladi
     finishTrial(name, { ok, note = null, stats = null }) {
-      // ok va note quyida yopiq guruh uchun o'zgarishi mumkin
       const row = byName.get(name);
       if (!row || row.check_state !== "trial") return false;
       const stored = JSON.stringify({ ...(parse(row.check_stats) ?? {}), trial: stats });
-      // Yopiq guruh sinovdan yiqilmaydi — doimiy qoladi (finishProbe dagi kabi)
-      if (!ok && isClosedName(row.name)) {
-        ok = true;
-        note = `Yopiq guruh — e'lon kam bo'lsa ham doim kuzatiladi (${lowerFirst(note ?? "sinov")})`;
-      }
       db.prepare(`UPDATE sources SET ${ok ? "" : "enabled = 0, "}check_state = ?, check_at = ?, check_note = ?, check_stats = ? WHERE name = ?`).run(
         ok ? "ok" : "failed",
         now(),

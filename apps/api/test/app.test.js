@@ -102,6 +102,8 @@ test("haydovchilar: faol / pauzani boshqaruv markazidan o'zgartirib bo'lmaydi (f
 
 test("manbalar: qo'shish, takror, o'chirib-yoqish, o'chirish", async () => {
   assert.equal((await send("POST", "/api/sources", { name: "https://t.me/yangi_guruh" })).status, 201);
+  const fresh = (await get("/api/sources")).body.items[0];
+  assert.deepEqual([fresh.enabled, fresh.checkState], [false, "probe"], "qo'lda qo'shilgani ham avval tekshiriladi (2026-11-27)");
   assert.deepEqual((await send("POST", "/api/sources", { name: "@yangi_guruh" })).body, { name: "@yangi_guruh", added: false, account: null });
   assert.equal((await send("POST", "/api/sources", { name: "https://t.me/+yopiq" })).status, 400);
   const name = encodeURIComponent("@yangi_guruh");
@@ -119,7 +121,7 @@ test("manbalar: qo'shish, takror, o'chirib-yoqish, o'chirish", async () => {
 });
 
 test("manbalar: a'zo bo'lish navbati — bittasi, hammasi, bekor qilish", async () => {
-  for (const n of ["@navbat_a", "@navbat_b", "@navbat_c", "@navbat_off"]) await send("POST", "/api/sources", { name: n });
+  for (const n of ["@navbat_a", "@navbat_b", "@navbat_c", "@navbat_off"]) store.addSource(n); // tekshiruvdan o'tgan manbalar
   const join = (n) => `/api/sources/${encodeURIComponent(n)}/join`;
   assert.deepEqual((await send("POST", join("@navbat_a"))).body, { state: "wanted" });
   assert.deepEqual((await send("POST", join("@navbat_a"))).body, { state: "wanted" }, "takror bosish — o'zgarmaydi");
