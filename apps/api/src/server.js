@@ -11,13 +11,14 @@
 // tunnel (src/edge/tunnel.js) nginx'ni internetga chiqaradi. Ikkalasi ham bot va collector kabi jarayon.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { TRANSCRIBE_MODELS, createParserPool, envSeedEntries, parseByRules, resolveSettings, transcribePauseMs, transcribeWithGemini } from "@yuk/parser";
+import { createParserPool, createVoiceTranscriber, envSeedEntries, parseByRules, resolveSettings } from "@yuk/parser";
 import { devAutostart, isDevMode, routeScopeFrom } from "@yuk/shared";
 import { APK_DIR, DEFAULT_DB_FILE, readRelease, createCallLinks, loadSecret, openStore } from "@yuk/store";
 import { createApp, normalizeSourceName } from "./app.js";
 import { createErrorLog } from "./errorLog.js";
 import { createProcessManager } from "./processes.js";
 import { createPublicApp } from "./public.js";
+import { createAvatars } from "./avatars.js";
 import { isAdmin, parseAdminIds } from "@yuk/shared";
 import { chatParser } from "./loadChat.js";
 import { createFeedList } from "./feedList.js";
@@ -92,8 +93,11 @@ const processes = createProcessManager({
 });
 const secret = loadSecret();
 const sessions = createSessions(secret);
+// Guruh/foydalanuvchi rasmlari — boshqaruv markazi (/api/avatar) va Mini App (/pub/avatar) uchun bitta (avatars.js)
+const avatars = createAvatars({ token: process.env.BOT_TOKEN?.trim() });
 const app = createApp({
   store,
+  avatars,
   processes,
   adminDist: path.join(ROOT, "apps/admin/dist"),
   secret,
@@ -133,34 +137,13 @@ async function aiParse(text) {
 }
 const parseLoad = chatParser({ rules: parseByRules, ai: aiParse });
 
-// Ilova «E'lon berish» ovozli xabari → matn. Collector media.js bilan bir tartib: avval faqat o'girish uchun Gemini modellari
-// (TRANSCRIBE_MODELS — tahlil bilan umumiy limiti yo'q), keyin boshqaruv markazidagi Gemini ulanishlari; xato bergan model
-// bir muddat dam oladi (transcribePauseMs). → matn yoki null (hammasi band)
-const voiceRest = new Map();
-async function transcribeVoice(data, mime) {
-  const gemini = store.aiConnections({ secret, env: process.env }).filter((c) => c.provider === "gemini" && c.enabled !== false);
-  const seen = new Set();
-  const list = [];
-  for (const apiKey of new Set(gemini.map((c) => c.apiKey))) for (const model of TRANSCRIBE_MODELS) list.push({ apiKey, model });
-  for (const c of gemini) list.push({ apiKey: c.apiKey, model: c.model });
-  for (const c of list) {
-    const key = `${c.apiKey}|${c.model}`;
-    if (seen.has(key) || (voiceRest.get(key) ?? 0) > Date.now()) continue;
-    seen.add(key);
-    try {
-      const { text } = await transcribeWithGemini({ apiKey: c.apiKey, model: c.model, data, mime, timeoutMs: 20_000 });
-      return text;
-    } catch (error) {
-      voiceRest.set(key, Date.now() + transcribePauseMs(error));
-      log(`Ilova ovozli e'loni: ${c.model} — ${String(error.message ?? error).slice(0, 160)}`);
-    }
-    if (seen.size >= 4) break;
-  }
-  return null;
-}
+// Ilova «E'lon berish» ovozli xabari → matn (@yuk/parser createVoiceTranscriber — botdagi «📦 Yuk berish» bilan bir xil):
+// avval faqat o'girish modellari, keyin boshqaruv markazidagi Gemini ulanishlari; xato bergani dam oladi. → matn | null
+const transcribeVoice = createVoiceTranscriber({ connections: () => store.aiConnections({ secret, env: process.env }), log, label: "Ilova ovozli e'loni" });
 
 const publicApp = createPublicApp({
   store,
+  avatars,
   sessions,
   tgLogin,
   calls: createCallLinks(secret), // «📞 Telefon qilish» sahifasi (/pub/call) — bot bilan bir kalit

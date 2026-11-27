@@ -62,7 +62,7 @@ export const FEED_MODES = {
   },
   guruhlarim: {
     icon: "📌",
-    name: "Faqat mening guruhlarim",
+    name: "Faqat men tanlaydigan guruhlar", // 2026-11-27 gacha «Faqat mening guruhlarim» (Azimjon)
     about: "Faqat siz tanlagan guruh va kanallardagi e'lonlar — darhol",
     vehicle: false,
     groups: true,
@@ -233,7 +233,7 @@ export function rawProfile(feed, prev = null) {
 export const trucksText = (trucks) => (trucks?.length ? trucks.map(truckFilterTitle).join(", ") : "Hammasi");
 export const regionsText = (regions) => (regions?.length ? regions.map(regionTitle).join(", ") : "Hamma joy");
 
-// "🌐 Hamma guruhlar" / "📌 Faqat mening guruhlarim (3 ta guruh) · 🚚 Fura · 📍 Toshkent shahri"
+// "🌐 Hamma guruhlar" / "📌 Faqat men tanlaydigan guruhlar (3 ta guruh) · 🚚 Fura · 📍 Toshkent shahri"
 export function feedLabel(profile) {
   const { mode, sources, regions, trucks } = feedOf(profile);
   const m = FEED_MODES[mode];

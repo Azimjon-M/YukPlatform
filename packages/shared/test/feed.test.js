@@ -80,10 +80,10 @@ test("profil matni: mashinasiz rejimda faqat rejim va guruhlar", () => {
   const mine = { vehicle: null, feed: { mode: "guruhlarim", sources: ["@TutGruz", "-1001234567"] } };
   assert.deepEqual(profileRows(mine).map((r) => r.id), ["feed", "groups"]);
   const names = { "@TutGruz": "Tut Gruz", "-1001234567": "Yopiq guruh" };
-  assert.equal(describeProfile(mine, "qoshni", "haydovchi", { sourceName: (n) => names[n] }), "🎛 Rejim: 📌 Faqat mening guruhlarim\n📌 Guruhlar: Tut Gruz, Yopiq guruh");
+  assert.equal(describeProfile(mine, "qoshni", "haydovchi", { sourceName: (n) => names[n] }), "🎛 Rejim: 📌 Faqat men tanlaydigan guruhlar\n📌 Guruhlar: Tut Gruz, Yopiq guruh");
   assert.equal(describeProfile({ feed: { mode: "tezkor" } }), "🎛 Rejim: 🌐 Hamma guruhlar");
   assert.equal(describeProfile({ feed: { mode: "tezkor", trucks: ["fura"], regions: ["buxoro"] } }), "🎛 Rejim: 🌐 Hamma guruhlar\n🚚 Transport turi: Fura\n📍 Qayerdan: Buxoro viloyati");
-  assert.equal(feedLabel(mine), "📌 Faqat mening guruhlarim (2 ta guruh)");
+  assert.equal(feedLabel(mine), "📌 Faqat men tanlaydigan guruhlar (2 ta guruh)");
   const plus = { vehicle: FURA, feed: { mode: "guruhlarim_plus", sources: ["@a1234"] }, domestic: true, international: false };
   assert.deepEqual(profileRows(plus).map((r) => r.id).slice(0, 3), ["feed", "groups", "vehicle"]);
 });

@@ -105,7 +105,9 @@ before(async () => {
   writeFileSync(path.join(dist, "index.html"), "<!doctype html><title>Yuk Ekspert</title>");
   const notify = async (chatId, text, extra) => notified.push({ chatId, text, extra });
   apkDir = mkdtempSync(path.join(tmpdir(), "yuk-apk-"));
-  const app = createPublicApp({ store, env, sessions, calls, scope: "qoshni", webDist: dist, apkDir, chatAudioDir: mkdtempSync(path.join(tmpdir(), "yuk-audio-")), notify, now: () => NOW });
+  // Guruh rasmlari (avatars.js o'rniga soxtasi): @yuk — bor, qolgani yo'q
+  const avatars = { source: async (name) => (name.toLowerCase() === "@yuk" ? Buffer.from("jpeg") : null) };
+  const app = createPublicApp({ store, env, sessions, calls, scope: "qoshni", webDist: dist, apkDir, chatAudioDir: mkdtempSync(path.join(tmpdir(), "yuk-audio-")), notify, avatars, now: () => NOW });
   await new Promise((resolve) => (server = app.listen(0, "127.0.0.1", resolve)));
   base = `http://127.0.0.1:${server.address().port}`;
 
@@ -1116,4 +1118,15 @@ test("ilova: majburiy kanal/guruhdan chiqqan — lenta bo'sh (sababi member da),
   store.setSubscription(chatId, { ok: false, missing: ["@Yuk_Ekspert_chat"] });
   store.setRequiredChats([]);
   assert.equal((await call("GET", "/pub/feed", APP)).body.member.ok, true);
+});
+
+test("GET /pub/avatar/source/:name — tokensiz, faqat bazadagi yoqilgan manba; rasm yo'q yoki begona nom — 404", async () => {
+  store.addSource("@yuk");
+  store.addSource("@ochiq_emas", { enabled: false });
+  const res = await fetch(`${base}/pub/avatar/source/${encodeURIComponent("@Yuk")}`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "image/jpeg");
+  assert.match(res.headers.get("cache-control"), /max-age=86400/);
+  assert.equal(Buffer.from(await res.arrayBuffer()).toString(), "jpeg");
+  for (const name of ["@ochiq_emas", "@begona_guruh"]) assert.equal((await fetch(`${base}/pub/avatar/source/${encodeURIComponent(name)}`)).status, 404, name);
 });

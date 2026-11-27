@@ -147,5 +147,10 @@ export function createFeedQueries(db, now) {
     sourceTitles() {
       return Object.fromEntries(db.prepare("SELECT name, title FROM sources WHERE title IS NOT NULL").all().map((r) => [r.name.toLowerCase(), r.title]));
     },
+
+    // Kuzatiladigan (yoqilgan) manbami — Mini App guruh rasmini faqat shular uchun beradi (public.js /pub/avatar/source)
+    hasSource(name) {
+      return Boolean(db.prepare("SELECT 1 FROM sources WHERE lower(name) = lower(?) AND enabled = 1").get(String(name)));
+    },
   };
 }

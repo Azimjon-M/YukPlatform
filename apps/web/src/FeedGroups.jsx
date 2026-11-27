@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { foldText } from "@yuk/shared";
 import { getFeedSources } from "./api.js";
 import { CLOSED_PRO_HINT, GROUP_SCOPES, OWN_EMPTY_HINT, groupOptions, pageOf, scopeOptions } from "./feedGroups.js";
-import { Chips, Section, Spinner } from "./ui.jsx";
+import { Chips, Section, SourceAvatar, Spinner } from "./ui.jsx";
 
 export { CLOSED_PRO_HINT, GROUPS_PAGE_SIZE, groupOptions, pageOf, sourceNamer } from "./feedGroups.js";
 
@@ -112,7 +112,13 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
         <Spinner label="Guruhlar ochilyapti..." />
       ) : shown.length ? (
         <>
-          <Chips layout="list" check options={paged.items} selected={picked} onPick={pick} />
+          <Chips
+            layout="list"
+            check
+            options={paged.items.map((o) => ({ ...o, icon: <SourceAvatar name={o.id} label={o.label} closed={o.closed} /> }))}
+            selected={picked}
+            onPick={pick}
+          />
           {paged.pages > 1 && (
             <nav className="pager" aria-label="Sahifalar">
               <button type="button" className="pill" disabled={paged.page === 0} onClick={() => goPage(paged.page - 1)}>

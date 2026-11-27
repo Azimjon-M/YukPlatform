@@ -1,4 +1,6 @@
 // Kichik umumiy bo'laklar: bo'lim, tanlov tugmalari, ikki-uch tanlovli almashtirgich, bo'sh/xato holati.
+import { useState } from "react";
+import { sourceAvatarUrl } from "./api.js";
 import { haptic } from "./telegram.js";
 
 export function Section({ id, title, hint, error, children }) {
@@ -13,7 +15,7 @@ export function Section({ id, title, hint, error, children }) {
 }
 
 // Tanlov tugmalari: selected(id) — tanlanganmi, onPick(id) — bosilganda.
-// Har tanlov: { id, label, sub? (o'ngda, qisqa: "20–40 tonna"), note? (nom ostida, uzunroq izoh) }
+// Har tanlov: { id, label, sub? (o'ngda, qisqa: "20–40 tonna"), note? (nom ostida, uzunroq izoh), icon? (nom oldida — masalan guruh rasmi) }
 // check — chapda chekbox katakchasi: bir nechtasini belgilash mumkinligi ko'rinib tursin
 export function Chips({ options, selected, onPick, layout = "wrap", check = false }) {
   return (
@@ -33,6 +35,7 @@ export function Chips({ options, selected, onPick, layout = "wrap", check = fals
             }}
           >
             {check && <span className="chip-box" aria-hidden="true">{on ? "✓" : ""}</span>}
+            {o.icon}
             {o.note ? (
               <span className="chip-main">
                 <span>{o.label}</span>
@@ -46,6 +49,22 @@ export function Chips({ options, selected, onPick, layout = "wrap", check = fals
         );
       })}
     </div>
+  );
+}
+
+// Guruh/kanal rasmi (2026-11-27, «🎛 Filtr» dagi guruhlar): /pub/avatar/source/<nomi> (apps/api public.js). Kelguncha va
+// yo'q bo'lsa (404) — nomning birinchi harfi. 🔒 — yopiq guruh
+export function SourceAvatar({ name, label, closed = false }) {
+  const [state, setState] = useState("loading"); // loading | ok | none
+  const letter = Array.from(String(label ?? name).replace(/^[@\s]+/, ""))[0]?.toUpperCase() ?? "•";
+  return (
+    <span className="chip-avatar" aria-hidden="true">
+      {state !== "ok" && <span className="chip-avatar-text">{letter}</span>}
+      {state !== "none" && (
+        <img src={sourceAvatarUrl(name)} alt="" loading="lazy" decoding="async" className={state === "ok" ? "is-loaded" : ""} onLoad={() => setState("ok")} onError={() => setState("none")} />
+      )}
+      {closed && <span className="chip-avatar-badge">🔒</span>}
+    </span>
   );
 }
 

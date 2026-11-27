@@ -244,8 +244,47 @@ main {
 }
 
 .chip:has(.chip-box) .chip-main,
-.chip:has(.chip-box) > span:not(.chip-box) {
+.chip:has(.chip-box) > span:not(.chip-box):not(.chip-avatar) {
   flex: 1;
+}
+
+/* Guruh/kanal rasmi (ui.jsx SourceAvatar) — «🎛 Filtr» dagi guruhlar ro'yxatida */
+.chip-avatar {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 16%, var(--card));
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 650;
+}
+.chip.on .chip-avatar {
+  background: color-mix(in srgb, var(--accent-text) 25%, transparent);
+  color: var(--accent-text);
+}
+.chip-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.chip-avatar img.is-loaded {
+  opacity: 1;
+}
+.chip-avatar-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  font-size: 11px;
+  line-height: 1;
 }
 
 /* Nom va ostida izoh («Kamaz» / «samosval, shag'al-sheben...») */

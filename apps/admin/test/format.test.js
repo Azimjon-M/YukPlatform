@@ -155,7 +155,7 @@ test("haydovchi rejimi (2026-11-14): tezkor — mashina shart emas; guruhlarim �
     "Ro'yxatdan o'tgan, mashina kiritmagan — faqat tanlagan guruhlaridan oladi",
   );
   const groups = profileSummary({ vehicle: null, feed: { mode: "guruhlarim", sources: ["@a_guruh", "@b_guruh", "@c_guruh", "@d_guruh"] } });
-  assert.equal(groups.mode, "📌 Faqat mening guruhlarim (4 ta guruh)");
+  assert.equal(groups.mode, "📌 Faqat men tanlaydigan guruhlar (4 ta guruh)");
   assert.equal(groups.groups, "@a_guruh, @b_guruh, @c_guruh va yana 1 ta");
   assert.equal(groups.from, "faqat tanlagan guruhlaridan");
   const plus = profileSummary({ vehicle: null, routeAt: null, feed: { mode: "guruhlarim_plus", sources: ["@a_guruh"] } });

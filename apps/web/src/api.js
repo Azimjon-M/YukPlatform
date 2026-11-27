@@ -5,6 +5,8 @@ import { initData } from "./telegram.js";
 
 export const API_URL = (import.meta.env?.VITE_API_URL ?? "").replace(/\/+$/, "");
 const TOKEN_KEY = "yuk-token";
+// Guruh/kanal rasmi (tokensiz — <img>; server faqat kuzatiladigan manbalar uchun beradi)
+export const sourceAvatarUrl = (name) => `${API_URL}/pub/avatar/source/${encodeURIComponent(name)}`;
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = null, field = null } = {}) {

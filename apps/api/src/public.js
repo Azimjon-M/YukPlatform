@@ -273,7 +273,7 @@ export function callPage(call) {
 // calls — «📞 Telefon qilish» havolalari (@yuk/store createCallLinks, bot bilan bir kalit); null — /pub/call 404
 // errors — boshqaruv markazining xatolar jurnali (errorLog.js); server xatolari u yerda ham ko'rinadi
 // tgLogin — collector uchun Telegram akkaunt qo'shish (tgLogin.js); null — «server qayta ishga tushirilgach»
-export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, apkDir = null, chatAudioDir = CHAT_AUDIO_DIR, parseLoad = null, transcribeVoice = null, notify = null, memberCheck = null, errors = null, tgLogin = null, now = () => Date.now() }) {
+export function createPublicApp({ store, env = process.env, sessions, calls = null, scope, webDist = null, apkDir = null, chatAudioDir = CHAT_AUDIO_DIR, parseLoad = null, transcribeVoice = null, avatars = null, notify = null, memberCheck = null, errors = null, tgLogin = null, now = () => Date.now() }) {
   const app = express();
   app.disable("x-powered-by");
   const botToken = env.BOT_TOKEN?.trim() || null;
@@ -395,6 +395,17 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   });
 
   pub.get("/health", (req, res) => res.json({ ok: true }));
+
+  // Guruh/kanal rasmi «🎛 Filtr» dagi guruhlar ro'yxati uchun (2026-11-27, Azimjon: «Gruhlar iconi bilan … saqlangan
+  // guruh/kanal rasmi filterda tanlayotganida chiqarilishi kerak»). <img> sarlavha yubora olmaydi — shuning uchun tokensiz,
+  // lekin faqat bazadagi (kuzatiladigan) manbalar uchun. Ochig'i — bot oladi, yopig'i — collector yuklab qo'ygani (avatars.js).
+  // Yo'q — 404, ilova bosh harfni ko'rsatadi
+  pub.get("/avatar/source/:name", async (req, res) => {
+    const name = String(req.params.name);
+    const data = avatars && store.hasSource?.(name) ? await avatars.source(name) : null;
+    if (!data) return res.status(404).set("cache-control", "public, max-age=3600").end();
+    res.set({ "content-type": "image/jpeg", "cache-control": "public, max-age=86400" }).send(data);
+  });
 
   // Bot o'z username'ini bazaga yozadi (bot.js init) — sayt «Telegram bilan kirish» tugmasini shu bilan chizadi
   pub.get("/config", (req, res) => {
