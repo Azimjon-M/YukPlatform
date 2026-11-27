@@ -348,7 +348,11 @@ export function createApp({
   // sinov boshlanganidan beri nechta yuk e'loni (store.trialStats; faqat sinovdagilarda)
   api.get("/sources", (req, res) => {
     const stats = store.sourceStats({ maxAgeMs: METRICS_TTL_MS }); // og'ir (posts 24 soat) — 15 s kesh
-    const empty = { posts: 0, duplicates: 0, loads: 0, lastPostAt: null, live: 0, delaySec: null };
+    const empty = { posts: 0, duplicates: 0, loads: 0, deliveries: 0, lastPostAt: null, live: 0, delaySec: null };
+    // Oxirgi 7 tugagan kun (source_days; server fonda to'ldiradi): days — har kun { posts, uniq, loads, deliveries } yoki null
+    const dialogMembers = store.dialogMembers?.() ?? new Map();
+    const week = store.sourceDays?.({ days: 7 }) ?? { days: [], ready: 0, sources: {} };
+    const blankDays = week.days.map((day, i) => (i >= week.days.length - week.ready ? { day, posts: 0, uniq: 0, loads: 0, deliveries: 0 } : null));
     const userOf = (chatId) => {
       if (chatId == null) return null;
       const user = store.getDriver(chatId);
@@ -358,6 +362,8 @@ export function createApp({
       items: store.listSources().map((s) => ({
         ...s,
         stats: stats[s.name] ?? empty,
+        days: week.sources[s.name] ?? blankDays,
+        members: s.members ?? dialogMembers.get(s.name.toLowerCase()) ?? null,
         addedByUser: userOf(s.addedBy),
         trial: s.checkState === "trial" && store.trialStats ? store.trialStats(s.name, s.checkAt) : null,
       })),

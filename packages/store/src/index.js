@@ -294,6 +294,12 @@ function migrate(db) {
   // indekssiz guruhning hamma e'lonlari aylanardi (~700 ms × 12 guruh = 8 s, 2026-11-16) — indeks bilan ~1 ms.
   // Birinchi ishga tushishda ~2 s quriladi
   db.exec("CREATE INDEX IF NOT EXISTS posts_source_created ON posts (source, created_at)");
+  // source_days (2026-11-27, «Manbalar» batafsil): guruh bo'yicha har Toshkent kuni — xabarlar, takrorsiz, yuk e'lonlari,
+  // haydovchilarga yuborilgani. 7 kunni posts dan to'g'ridan sanash ~18 s (million qator) — tugagan kun bir marta
+  // hisoblanib shu yerga yoziladi (fillSourceDays, API fonda). source = '*' — o'sha kunning jami (kun hisoblangan belgisi)
+  db.exec(`CREATE TABLE IF NOT EXISTS source_days (
+    source TEXT NOT NULL, day INTEGER NOT NULL, posts INTEGER NOT NULL, uniq INTEGER NOT NULL,
+    loads INTEGER NOT NULL, deliveries INTEGER NOT NULL, PRIMARY KEY (source, day))`);
   // text_fold (2026-11-16) — qidiruv uchun matn: kichik harf, kirill → lotin, apostrofsiz (@yuk/shared foldText).
   // Yangi e'londa addPost yozadi; eskilari fonda bo'laklab to'ldiriladi (backfillTextFold, apps/api server.js)
   if (!columns.includes("text_fold")) db.exec("ALTER TABLE posts ADD COLUMN text_fold TEXT");

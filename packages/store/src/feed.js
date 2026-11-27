@@ -33,7 +33,20 @@ const isClosedName = (name) => !String(name).startsWith("@");
 const canPick = (row, chatId, pro) => !isClosedName(row.name) || pro || (row.added_by != null && row.added_by === chatId);
 
 export function createFeedQueries(db, now) {
+  // Guruh a'zolari soni akkauntlarimiz guruhlar ro'yxatidan (tg_dialogs): Map("@nom" | "-100…" (kichik harf) → eng kattasi).
+  // sources.members bo'lmasa shu olinadi («🎛 Filtr», boshqaruv markazi «Manbalar»)
+  function dialogMembers() {
+    const out = new Map();
+    for (const d of db.prepare("SELECT peer_id, username, members FROM tg_dialogs WHERE members IS NOT NULL").all()) {
+      for (const key of [d.peer_id && String(d.peer_id).toLowerCase(), d.username && `@${d.username}`.toLowerCase()]) {
+        if (key && !(out.get(key) >= d.members)) out.set(key, d.members);
+      }
+    }
+    return out;
+  }
   return {
+    dialogMembers,
+
     // Tezkor xabar yuborildi (yoki Telegram qabul qilmadi — ok: false, error)
     addPostDelivery({ postId, chatId, ok, error = null }) {
       db.prepare("INSERT INTO post_deliveries (post_id, chat_id, ok, error, sent_at) VALUES (?, ?, ?, ?, ?)").run(
@@ -106,19 +119,14 @@ export function createFeedQueries(db, now) {
       }
       // A'zolar soni sources da bo'lmasa (TG_SOURCES / qo'lda qo'shilgan) — akkauntlarimiz guruhlar ro'yxatidagi soni
       // (tg_dialogs; «🎛 Filtr» da «👥 1.3K», 2026-11-27)
-      const dialogMembers = new Map();
-      for (const d of db.prepare("SELECT peer_id, username, members FROM tg_dialogs WHERE members IS NOT NULL").all()) {
-        for (const key of [d.peer_id && String(d.peer_id).toLowerCase(), d.username && `@${d.username}`.toLowerCase()]) {
-          if (key && !(dialogMembers.get(key) >= d.members)) dialogMembers.set(key, d.members);
-        }
-      }
+      const members = dialogMembers();
       return rows
         .filter((r) => canPick(r, chatId, pro))
         .map((r) => ({
           own: own.has(r.name.toLowerCase()) || (r.added_by != null && r.added_by === chatId),
           name: r.name,
           title: r.title ?? null,
-          members: r.members ?? dialogMembers.get(r.name.toLowerCase()) ?? null,
+          members: r.members ?? members.get(r.name.toLowerCase()) ?? null,
           chatType: r.chat_type ?? null,
           perDay: counts.get(r.name.toLowerCase()) ?? 0,
           mine: r.added_by != null && r.added_by === chatId,

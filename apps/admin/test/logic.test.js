@@ -166,3 +166,22 @@ test("loglar: faqat yangi qatorlar qo'shiladi, server qayta yonsa — boshidan",
   assert.equal(isNearBottom({ scrollTop: 480, scrollHeight: 1000, clientHeight: 500 }), true);
   assert.equal(isNearBottom({ scrollTop: 100, scrollHeight: 1000, clientHeight: 500 }), false);
 });
+
+test("manbalar (2026-11-27): a'zolar qisqa, 7 kun o'rtachasi, yuk ulushi, saralash", async () => {
+  const { compactNumber, weekAverage, loadShare, sortSources, sourceKind, dayLabel } = await import("../src/sources.js");
+  assert.deepEqual([950, 1300, 245_000, 1_700_000, null].map(compactNumber), ["950", "1,3K", "245K", "1,7M", null]);
+  assert.equal(weekAverage([null, null]), null, "hali hisoblanmagan");
+  assert.deepEqual(weekAverage([null, { posts: 10, uniq: 4, loads: 2, deliveries: 1 }, { posts: 20, uniq: 6, loads: 0, deliveries: 3 }]), {
+    days: 2, posts: 15, uniq: 5, loads: 1, deliveries: 2,
+  });
+  assert.equal(loadShare(3, 12), 25);
+  assert.equal(loadShare(0, 0), null);
+  const a = { name: "@a", stats: { loads: 1, posts: 5, duplicates: 0, deliveries: 0, lastPostAt: 5 }, members: 10, days: [] };
+  const b = { name: "-100", chatType: "channel", stats: { loads: 4, posts: 50, duplicates: 10, deliveries: 2, lastPostAt: 1 }, members: null, days: [] };
+  assert.deepEqual(sortSources([a, b], "loads").map((s) => s.name), ["-100", "@a"]);
+  assert.deepEqual(sortSources([a, b], "share").map((s) => s.name), ["@a", "-100"], "20% > 10%");
+  assert.deepEqual(sortSources([b, a], "members").map((s) => s.name), ["@a", "-100"], "a'zosi noma'lum — oxirida");
+  assert.deepEqual(sortSources([b, a], "added").map((s) => s.name), ["-100", "@a"], "server tartibi");
+  assert.equal(sourceKind(b), "Yopiq kanal");
+  assert.equal(dayLabel(Date.UTC(2026, 10, 23, 19)), "24.11", "Toshkent kuni");
+});

@@ -8,6 +8,7 @@ import { formatDateTime, formatNumber, sourceCheckView } from "../format.js";
 import { useApi, useNow, usePaged } from "../hooks.js";
 import { Async, Avatar, Badge, Button, Card, Empty, ExpandRow, ExternalLink, Field, PageHeader, PagedPager, TimeAgo, Toggle, avatarUrl, useTitle, useToast } from "../ui.jsx";
 import { PrivateGroupPicker, TgAccountsCard, useTgAccounts } from "./TgAccounts.jsx";
+import { SOURCE_SORTS, compactNumber, dayLabel, loadShare, sortSources, sourceKind, weekAverage } from "../sources.js";
 
 const NOTE = "O'zgarish collector'da bir necha soniyada kuchga kiradi.";
 // API manzili («@guruh» → /api/sources/%40guruh) va guruhning Telegram havolasi (raqamli id'da havola yo'q)
@@ -239,9 +240,13 @@ function SourceRow({ source, account, now, onChanged }) {
   // Yopiq guruhning manzili yo'q: nomi asosiy, raqami yonida
   const titled = !link && source.title;
   const accountDown = source.account && account?.status !== "ok";
+  const uniq = s.posts - s.duplicates;
+  const week = weekAverage(source.days);
   const sub = [
     titled ? source.name : source.title,
-    `24 s: ${formatNumber(s.posts)} e'lon · ${formatNumber(s.loads)} yuk`,
+    source.members ? `👥 ${compactNumber(source.members)}` : null,
+    `24 s: ${formatNumber(uniq)} xabar · ${formatNumber(s.loads)} yuk · ${formatNumber(s.deliveries)} yuborildi`,
+    week ? `kuniga ~${formatNumber(week.loads)} yuk` : null,
     open && voice ? "🎤" : null,
   ]
     .filter(Boolean)
@@ -282,7 +287,12 @@ function SourceRow({ source, account, now, onChanged }) {
           {enabled ? <ModeBadge joined={source.joined} live={s.live} watch={source.watch} pollMs={source.pollMs} /> : source.checkState !== "probe" && <Badge icon="■">O'chirilgan</Badge>}
           {enabled && source.joined && <span className="muted small">a'zo</span>}
         </div>
-        {source.title && !titled && <p className="small">{source.title}{source.members ? <span className="muted"> · {formatNumber(source.members)} a'zo</span> : null}</p>}
+        <p className="small source-facts">
+          {sourceKind(source)}
+          {source.title && !titled ? ` · ${source.title}` : ""}
+          {source.members ? ` · 👥 ${formatNumber(source.members)} a'zo` : " · a'zolar soni noma'lum"}
+          {!source.addedByUser && source.createdAt ? ` · qo'shilgan ${formatDateTime(source.createdAt)}` : ""}
+        </p>
         {accountDown && (
           <p className="inline-error small">
             «{source.account}» akkaunti {account ? "ishlamayapti" : "topilmadi"} — bu guruh o'qilmayapti{account?.error ? `: ${account.error}` : ""}
@@ -292,21 +302,15 @@ function SourceRow({ source, account, now, onChanged }) {
         {source.note && !source.addedBy && <p className="muted small">{source.note}</p>}
         {source.checkNote && <p className={`small ${source.checkState === "failed" ? "inline-error" : "muted"}`}>Tekshiruv: {source.checkNote}</p>}
         {source.joinState === "error" && source.joinError && !source.joined && <p className="inline-error small">A'zo bo'lib bo'lmadi: {source.joinError}</p>}
+        <SourceNumbers stats={s} week={week} />
         <dl className="source-stats">
           <div>
-            <dt>E'lonlar (24 s)</dt>
-            <dd>{formatNumber(s.posts)}</dd>
+            <dt title="Yangi (takrorsiz) xabarlarning qanchasi yuk e'loni — 24 soat">Yuk ulushi</dt>
+            <dd>{loadShare(s.loads, uniq) == null ? "—" : `${loadShare(s.loads, uniq)}%`}</dd>
           </div>
           <div>
-            <dt>Takrorlar</dt>
-            <dd>
-              {formatNumber(s.duplicates)}
-              {s.posts > 0 && <span className="muted small"> ({Math.round((s.duplicates / s.posts) * 100)}%)</span>}
-            </dd>
-          </div>
-          <div>
-            <dt>Yuklar</dt>
-            <dd>{formatNumber(s.loads)}</dd>
+            <dt title="Boshqa guruhda (yoki shu guruhda) allaqachon bo'lgan bir xil matn — 24 soat">Takrorlar</dt>
+            <dd>{s.posts > 0 ? `${Math.round((s.duplicates / s.posts) * 100)}%` : "—"}</dd>
           </div>
           <div>
             <dt>Oxirgi e'lon</dt>
@@ -320,6 +324,7 @@ function SourceRow({ source, account, now, onChanged }) {
             </dd>
           </div>
         </dl>
+        <DayBars days={source.days} />
       </div>
       <div className="source-controls">
         <Toggle checked={enabled} onChange={toggle} busy={busy} label={enabled ? "Kuzatilyapti" : "O'chiq"} />
@@ -346,6 +351,76 @@ function SourceRow({ source, account, now, onChanged }) {
         )}
       </div>
     </ExpandRow>
+  );
+}
+
+// 24 soat va 7 kunlik o'rtacha (kuniga) yonma-yon
+const NUMBER_ROWS = [
+  { key: "posts", label: "Xabarlar (hammasi)", hint: "Guruhdan o'qilgan hamma xabar, takrorlari bilan", day: (s) => s.posts },
+  { key: "uniq", label: "Yangi xabarlar", hint: "Takrorsiz: boshqa joyda hali bo'lmagan matn", day: (s) => s.posts - s.duplicates },
+  { key: "loads", label: "Yuk e'lonlari", hint: "AI yoki tezkor tekshiruv yuk deb topgani", day: (s) => s.loads },
+  { key: "deliveries", label: "Haydovchilarga yuborildi", hint: "Shu guruh e'lonlari haydovchilarga necha marta yetdi", day: (s) => s.deliveries },
+];
+
+function SourceNumbers({ stats, week }) {
+  return (
+    <table className="source-numbers">
+      <thead>
+        <tr>
+          <th scope="col" />
+          <th scope="col">24 soat</th>
+          <th scope="col" title={week ? `Oxirgi ${week.days} tugagan kun bo'yicha` : "Kunlik hisob server fonda tayyorlanyapti"}>
+            Kuniga o'rtacha{week ? ` (${week.days} kun)` : ""}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {NUMBER_ROWS.map((row) => (
+          <tr key={row.key}>
+            <th scope="row" title={row.hint}>
+              {row.label}
+            </th>
+            <td>{formatNumber(row.day(stats))}</td>
+            <td>{week ? formatNumber(week[row.key], week[row.key] < 10 ? 1 : 0) : "…"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// Oxirgi 7 kun: har kun yuk e'lonlari (ustun) — ustiga olib borilsa, o'sha kunning hamma raqamlari
+function DayBars({ days = [] }) {
+  if (!days.some(Boolean)) return null;
+  const top = Math.max(1, ...days.map((d) => d?.loads ?? 0));
+  const label = days
+    .filter(Boolean)
+    .map((d) => `${dayLabel(d.day)}: ${d.loads} yuk`)
+    .join(", ");
+  return (
+    <figure className="day-bars">
+      <figcaption className="muted small">Yuk e'lonlari, kunma-kun (7 kun)</figcaption>
+      <ol role="img" aria-label={label}>
+        {days.map((d, i) =>
+          d ? (
+            <li
+              key={d.day}
+              title={`${dayLabel(d.day)}: ${formatNumber(d.posts)} xabar, ${formatNumber(d.uniq)} yangi, ${formatNumber(d.loads)} yuk, ${formatNumber(d.deliveries)} yuborildi`}
+            >
+              <span className="day-bar-value">{formatNumber(d.loads)}</span>
+              <span className="day-bar" style={{ height: `${Math.max(2, Math.round((d.loads / top) * 48))}px` }} />
+              <span className="day-bar-label">{dayLabel(d.day)}</span>
+            </li>
+          ) : (
+            <li key={`x${i}`} className="is-empty" title="Bu kun hali hisoblanmagan">
+              <span className="day-bar-value">·</span>
+              <span className="day-bar" style={{ height: "2px" }} />
+              <span className="day-bar-label">—</span>
+            </li>
+          ),
+        )}
+      </ol>
+    </figure>
   );
 }
 
@@ -397,8 +472,12 @@ export function SourcesPage() {
   const [query, setQuery] = useState("");
   const counts = Object.fromEntries(SOURCE_FILTERS.map((f) => [f.id, items.filter(f.test).length]));
   const currentFilter = SOURCE_FILTERS.find((f) => f.id === filter) ?? SOURCE_FILTERS[0];
-  const shown = items.filter((source) => currentFilter.test(source) && sourceMatches(source, query));
-  const paged = usePaged(shown, `${filter}|${query}`, 30);
+  const [sort, setSort] = useState("added");
+  const shown = sortSources(
+    items.filter((source) => currentFilter.test(source) && sourceMatches(source, query)),
+    sort,
+  );
+  const paged = usePaged(shown, `${filter}|${query}|${sort}`, 30);
   const byUsers = items.filter((s) => s.addedBy != null);
   const checking = byUsers.filter((s) => ["probe", "trial"].includes(s.checkState)).length;
 
@@ -504,9 +583,19 @@ export function SourcesPage() {
                     ))}
                   </div>
                 </div>
-                <p className="muted small list-count" ref={paged.ref}>
-                  {formatNumber(shown.length)} ta manba
-                </p>
+                <div className="list-count source-count" ref={paged.ref}>
+                  <span className="muted small">{formatNumber(shown.length)} ta manba</span>
+                  <label className="small">
+                    Saralash:{" "}
+                    <select value={sort} onChange={(e) => setSort(e.target.value)}>
+                      {SOURCE_SORTS.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
                 <ul className="rows">
                   {paged.items.map((source) => (
                     <SourceRow

@@ -439,7 +439,70 @@ export function createAdminQueries(db, now) {
       metricsCache.set(key, { at: now(), value });
       return value;
     },
+
+    // Tugagan Toshkent kunlarini source_days ga yozadi: oxirgi `days` kundan hali yo'qlari, bir chaqiriqda ko'pi bilan `max` ta
+    // (har kun ~1,5 s — server bir marta qisqa qotadi; API har daqiqada bittadan). Nechta kun yozilganini qaytaradi
+    fillSourceDays({ days = 7, max = 1 } = {}) {
+      const today = tashkentDayStart(now());
+      const done = new Set(db.prepare("SELECT day FROM source_days WHERE source = '*' AND day >= ?").all(today - days * DAY).map((r) => r.day));
+      let filled = 0;
+      for (let i = 1; i <= days && filled < max; i++) {
+        const day = today - i * DAY;
+        if (done.has(day)) continue;
+        writeSourceDay(day);
+        filled++;
+      }
+      return filled;
+    },
+
+    // Oxirgi `days` tugagan kun, guruh bo'yicha: { "@a": [{ day, posts, uniq, loads, deliveries } × days] } (eskisidan yangisiga;
+    // hisoblanmagan kun — null). ready — nechta kun hisoblangan
+    sourceDays({ days = 7 } = {}) {
+      const today = tashkentDayStart(now());
+      const list = Array.from({ length: days }, (_, i) => today - (days - i) * DAY);
+      const rows = db.prepare("SELECT * FROM source_days WHERE day >= ? AND day < ?").all(list[0], today);
+      const ready = new Set(rows.filter((r) => r.source === "*").map((r) => r.day));
+      const by = new Map();
+      for (const r of rows) if (r.source !== "*") by.set(`${r.source}|${r.day}`, r);
+      const sources = new Set(rows.filter((r) => r.source !== "*").map((r) => r.source));
+      const out = {};
+      for (const source of sources) {
+        out[source] = list.map((day) => {
+          if (!ready.has(day)) return null;
+          const r = by.get(`${source}|${day}`);
+          return { day, posts: r?.posts ?? 0, uniq: r?.uniq ?? 0, loads: r?.loads ?? 0, deliveries: r?.deliveries ?? 0 };
+        });
+      }
+      return { days: list, ready: list.filter((d) => ready.has(d)).length, sources: out };
+    },
   };
+
+  function writeSourceDay(day) {
+    const end = day + DAY;
+    const out = new Map();
+    const row = (source) => out.get(source) ?? out.set(source, { posts: 0, uniq: 0, loads: 0, deliveries: 0 }).get(source);
+    for (const r of db
+      .prepare("SELECT source, COUNT(*) AS n, SUM(status != 'duplicate') AS u FROM posts INDEXED BY posts_created WHERE created_at >= ? AND created_at < ? GROUP BY source")
+      .all(day, end)) Object.assign(row(r.source), { posts: r.n, uniq: r.u ?? 0 });
+    for (const r of db
+      .prepare("SELECT p.source, COUNT(*) AS n FROM loads l JOIN posts p ON p.id = l.post_id WHERE l.created_at >= ? AND l.created_at < ? AND l.kind = 'yuk' GROUP BY p.source")
+      .all(day, end)) row(r.source).loads = r.n;
+    for (const r of db
+      .prepare("SELECT p.source, COUNT(*) AS n FROM post_deliveries d JOIN posts p ON p.id = d.post_id WHERE d.sent_at >= ? AND d.sent_at < ? AND d.ok = 1 GROUP BY p.source")
+      .all(day, end)) row(r.source).deliveries = r.n;
+    const total = { posts: 0, uniq: 0, loads: 0, deliveries: 0 };
+    for (const v of out.values()) for (const k in total) total[k] += v[k];
+    out.set("*", total);
+    const put = db.prepare("INSERT OR REPLACE INTO source_days (source, day, posts, uniq, loads, deliveries) VALUES (?, ?, ?, ?, ?, ?)");
+    db.exec("BEGIN");
+    try {
+      for (const [source, v] of out) put.run(source, day, v.posts, v.uniq, v.loads, v.deliveries);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
 
   function computeSourceStats(hours) {
     const since = now() - hours * HOUR;
@@ -454,18 +517,25 @@ export function createAdminQueries(db, now) {
     const loads = db
       .prepare("SELECT p.source, COUNT(*) AS loads FROM loads l JOIN posts p ON p.id = l.post_id WHERE l.created_at > ? AND l.kind = 'yuk' GROUP BY p.source")
       .all(since);
+    // Haydovchilarga yuborilgani (post_deliveries, muvaffaqiyatlisi) — yuborilgan vaqti bo'yicha
+    const deliveries = db
+      .prepare("SELECT p.source, COUNT(*) AS n FROM post_deliveries d JOIN posts p ON p.id = d.post_id WHERE d.sent_at > ? AND d.ok = 1 GROUP BY p.source")
+      .all(since);
     const out = {};
+    const blank = () => ({ posts: 0, duplicates: 0, loads: 0, deliveries: 0, lastPostAt: null, live: 0, delaySec: null });
     for (const row of posts) {
       out[row.source] = {
         posts: row.posts,
         duplicates: row.duplicates ?? 0,
         loads: 0,
+        deliveries: 0,
         lastPostAt: row.last_post_at,
         live: row.live ?? 0,
         delaySec: row.delay_ms == null ? null : Math.round(row.delay_ms / 1000),
       };
     }
-    for (const row of loads) (out[row.source] ??= { posts: 0, duplicates: 0, loads: 0, lastPostAt: null, live: 0, delaySec: null }).loads = row.loads;
+    for (const row of loads) (out[row.source] ??= blank()).loads = row.loads;
+    for (const row of deliveries) (out[row.source] ??= blank()).deliveries = row.n;
     return out;
   }
 

@@ -61,7 +61,7 @@ test("manbalar: bir marta .env dan, qo'shish, o'chirish, statistika", () => {
   store.removeSource("@c");
   assert.deepEqual(store.listSources().map((s) => [s.name, s.enabled]), [["@a", true], ["@b", false]]);
   const stats = store.sourceStats();
-  assert.deepEqual(stats["@a"], { posts: 1, duplicates: 0, loads: 1, lastPostAt: stats["@a"].lastPostAt, live: 0, delaySec: 60 });
+  assert.deepEqual(stats["@a"], { posts: 1, duplicates: 0, loads: 1, deliveries: 0, lastPostAt: stats["@a"].lastPostAt, live: 0, delaySec: 60 });
   assert.equal(stats["@b"].duplicates, 1);
 });
 
@@ -191,4 +191,23 @@ test("yurak urishi: egasi fayl vaqtini yangilab turadi, o'chirilsa qayta yozadi"
   release();
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(readRunLock("collector", { dir }), null, "release'dan keyin urish to'xtaydi");
+});
+
+test("manbalar: kunlik hisob (source_days) — tugagan kun bir marta yoziladi, 24 soatda yuborilganlar", () => {
+  const { store, advance, a } = fixture();
+  store.addPostDelivery({ postId: a.id, chatId: 7, ok: true });
+  store.addPostDelivery({ postId: a.id, chatId: 8, ok: false, error: "403" });
+  assert.equal(store.sourceStats()["@a"].deliveries, 1, "faqat muvaffaqiyatlisi");
+  assert.equal(store.fillSourceDays(), 1, "bugun tugamagan — kecha (bo'sh) yoziladi");
+  assert.deepEqual(store.sourceDays({ days: 2 }).sources, {}, "kechagi kunda e'lon yo'q");
+
+  advance(24 * HOUR); // fixture e'lonlari endi «kecha»da
+  assert.equal(store.fillSourceDays({ days: 3, max: 5 }), 2, "kecha va oldingi kun (avvalgisi allaqachon yozilgan)");
+  assert.equal(store.fillSourceDays({ days: 3, max: 5 }), 0, "qayta hisoblanmaydi");
+  const week = store.sourceDays({ days: 3 });
+  assert.equal(week.ready, 3);
+  assert.deepEqual(week.sources["@a"].at(-1), { day: week.days.at(-1), posts: 1, uniq: 1, loads: 1, deliveries: 1 });
+  assert.deepEqual(week.sources["@b"].at(-1), { day: week.days.at(-1), posts: 2, uniq: 1, loads: 1, deliveries: 0 });
+  assert.equal(week.sources["@a"][0].posts, 0, "hisoblangan, lekin e'lonsiz kun — 0");
+  assert.equal(store.sourceDays({ days: 5 }).sources["@a"][0], null, "hisoblanmagan kun — null");
 });

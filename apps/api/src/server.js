@@ -63,6 +63,16 @@ const foldTimer = setInterval(() => {
   }
 }, 1000);
 foldTimer.unref();
+// «Manbalar» 7 kunlik hisobi (source_days, 2026-11-27): tugagan kunni bir marta sanaydi (~1,5 s) — daqiqada bittadan,
+// hammasi yozilgach har daqiqada faqat yengil tekshiruv
+const daysTimer = setInterval(() => {
+  try {
+    store.fillSourceDays({ days: 7, max: 1 });
+  } catch (error) {
+    log(`Manbalar kunlik hisobida xato: ${error.message}`);
+  }
+}, 60_000);
+daysTimer.unref();
 // Manbalar jadvali bo'sh bo'lsa — .env dagi TG_SOURCES dan (collector ham shunday qiladi).
 // Bu yerda ham, chunki web'dan birinchi guruh qo'shilsa, jadval bo'sh bo'lmay qoladi va TG_SOURCES unutiladi.
 const seeded = store.seedSources((process.env.TG_SOURCES ?? "").split(/[,\s]+/).map(normalizeSourceName).filter(Boolean));
@@ -236,6 +246,7 @@ async function shutdown() {
   await processes.shutdown();
   tgLogin.close();
   clearInterval(pushWatch);
+  clearInterval(daysTimer);
   pusher?.stop();
   app.locals.live.close();
   server.close();
