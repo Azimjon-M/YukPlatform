@@ -21,7 +21,27 @@ export const PAYMENT_OPEN = ["held", "asked"];
 // Narx va to'lov sozlamalari (boshqaruv markazi «Haydovchilar» → «💳 Obuna va to'lov»). prices 0 — hali belgilanmagan
 // autoGrant — ishonchli chekda obuna darhol yoqilsinmi (true), yoki har doim avval egasi tasdiqlasinmi (false; Azimjon,
 // 2026-11-27: «pul tushmagan bo'lsa-yu chek haqiqiy deb obuna taqdim etishidan cho'chiyapman»)
-export const DEFAULT_PLAN_SETTINGS = { prices: { pro: 0, max: 0 }, days: 30, payInfo: "", holdHours: 48, autoGrant: true };
+// prices — oylik (days kunga), week — haftalik (WEEK_DAYS kunga; 2026-11-27, Azimjon: «Haftalik obunalar ham kerak»); 0 — yo'q
+export const WEEK_DAYS = 7;
+export const DEFAULT_PLAN_SETTINGS = { prices: { pro: 0, max: 0 }, week: { pro: 0, max: 0 }, days: 30, payInfo: "", holdHours: 48, autoGrant: true };
+
+// Shu obunaning sotiladigan muddatlari: [{ period: "week" | "month", price, days }] (narxi belgilanganlari, arzonidan)
+export function planOffers(settings, plan) {
+  return [
+    { period: "week", price: settings?.week?.[plan] || 0, days: WEEK_DAYS },
+    { period: "month", price: settings?.prices?.[plan] || 0, days: settings?.days ?? DEFAULT_PLAN_SETTINGS.days },
+  ].filter((o) => o.price > 0);
+}
+
+// To'langan summa va aytilgan muddatga qarab taklif: summa yetadigan eng uzun muddat (oylikka yetsa — oy, «haftalik» degan
+// bo'lsa ham); hech biriga yetmasa — aytilgan muddat (yoki eng arzoni): narx shu bo'yicha ko'rsatiladi, egasi hal qiladi
+export function pickOffer(settings, plan, { amount = null, period = null } = {}) {
+  const offers = planOffers(settings, plan);
+  if (!offers.length) return null;
+  const affordable = amount != null ? offers.filter((o) => amount >= o.price) : [];
+  if (affordable.length) return affordable.at(-1);
+  return offers.find((o) => o.period === period) ?? offers[0];
+}
 
 export function cleanPlanSettings(input = {}) {
   const num = (value, fallback, min, max) => {
@@ -30,6 +50,7 @@ export function cleanPlanSettings(input = {}) {
   };
   return {
     prices: { pro: num(input.prices?.pro, 0, 0, 1e9), max: num(input.prices?.max, 0, 0, 1e9) },
+    week: { pro: num(input.week?.pro, 0, 0, 1e9), max: num(input.week?.max, 0, 0, 1e9) },
     days: num(input.days, DEFAULT_PLAN_SETTINGS.days, 1, 366),
     payInfo: String(input.payInfo ?? "").trim().slice(0, 500),
     holdHours: num(input.holdHours, DEFAULT_PLAN_SETTINGS.holdHours, 1, 24 * 14),
@@ -105,7 +126,7 @@ export function createPlanQueries(db, now) {
   return {
     planSettings: settings,
     setPlanSettings(input) {
-      const value = cleanPlanSettings({ ...settings(), ...input, prices: { ...settings().prices, ...(input?.prices ?? {}) } });
+      const value = cleanPlanSettings({ ...settings(), ...input, prices: { ...settings().prices, ...(input?.prices ?? {}) }, week: { ...settings().week, ...(input?.week ?? {}) } });
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(SETTINGS_KEY, JSON.stringify(value));
       return value;
     },
@@ -130,16 +151,20 @@ export function createPlanQueries(db, now) {
     // o'tgan cheki yo'q. Aks holda — asked (egasi hal qiladi). Obuna muddati: hozirgisi shu obuna va hali tugamagan bo'lsa —
     // uning ustiga qo'shiladi (uzaytirish)
     // txn — chekdagi tranzaksiya raqami: avval (rad etilmagan) to'lovda ishlatilgan bo'lsa — darhol yoqilmaydi, dupOf qaytadi
-    claimPayment({ chatId, plan, amount = null, receipt = null, note = null, sure = false, txn = null, paidAt = null }) {
+    // period — foydalanuvchi aytgan muddat ("week" | "month" | null): haqiqiy muddat summaga qarab tanlanadi (pickOffer)
+    claimPayment({ chatId, plan, amount = null, receipt = null, note = null, sure = false, txn = null, paidAt = null, period = null }) {
       if (!PAID_PLANS.includes(plan)) return { ok: false, error: "plan" };
       const user = db.prepare("SELECT chat_id, plan, plan_until FROM drivers WHERE chat_id = ?").get(chatId);
       if (!user) return { ok: false, error: "no_user" };
       const open = db.prepare("SELECT id FROM payments WHERE chat_id = ? AND status IN ('held', 'asked') ORDER BY id DESC").get(chatId);
       if (open) return { ok: false, error: "open", payment: get(open.id) };
       const time = now();
-      const { prices, days, holdHours, autoGrant } = settings();
-      const price = prices[plan] || null;
+      const current = settings();
+      const { holdHours, autoGrant } = current;
       const paid = Number.isFinite(Number(amount)) && Number(amount) > 0 ? Math.round(Number(amount)) : null;
+      const offer = pickOffer(current, plan, { amount: paid, period });
+      const price = offer?.price ?? null;
+      const days = offer?.days ?? current.days;
       const bad = db.prepare("SELECT 1 FROM payments WHERE chat_id = ? AND status IN ('rejected', 'lapsed') AND created_at > ?").get(chatId, time - 30 * DAY);
       const code = txn ? String(txn).replace(/\s+/g, "").slice(0, 60) || null : null;
       const dup = code ? db.prepare("SELECT id FROM payments WHERE txn = ? AND status <> 'rejected' ORDER BY id LIMIT 1").get(code) : null;

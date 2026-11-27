@@ -3092,6 +3092,23 @@ a.btn {
   margin: 10px 0 14px;
 }
 
+.with-unit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.with-unit input {
+  flex: 1;
+  min-width: 0;
+}
+
+.with-unit .unit {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .plan-settings .field-wide {
   grid-column: 1 / -1;
 }

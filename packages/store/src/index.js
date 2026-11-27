@@ -27,7 +27,7 @@ export { APP_LOGIN_CODE, APP_LOGIN_TTL_MS } from "./appLogins.js";
 export { PUSH_TOKEN } from "./push.js";
 export { APK_PATH, readRelease, sizeText } from "./appRelease.js";
 export { hashPhone, MAIN_TG_ACCOUNT, SCAN_RECHECK, TG_ACCOUNT_NAME } from "./tgAccounts.js";
-export { DEFAULT_PLAN_SETTINGS, PAID_PLANS, PAYMENT_OPEN, cleanPlanSettings } from "./plans.js";
+export { DEFAULT_PLAN_SETTINGS, PAID_PLANS, PAYMENT_OPEN, WEEK_DAYS, cleanPlanSettings, pickOffer, planOffers } from "./plans.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // YUK_DB — boshqa fayl bilan sinash uchun (masalan, YUK_DB=data/sinov.db); yo'l YukPlatform papkasiga nisbatan

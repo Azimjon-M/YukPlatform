@@ -20,6 +20,8 @@ export function landingPage({ settings, stats = null, bot = null, support = null
   const days = settings?.days ?? 30;
   const price = (plan) => (plan === "free" ? "Bepul" : settings?.prices?.[plan] ? `${sum(settings.prices[plan])} so'm` : "Narxi tez orada");
   const per = (plan) => (plan !== "free" && settings?.prices?.[plan] ? `${days} kunga` : plan === "free" ? "doim" : "");
+  // Haftalik narx (bo'lsa): «yoki haftasiga 15 000 so'm»; oylik yo'q bo'lsa — asosiy narx shu
+  const weekly = (plan) => (plan !== "free" && settings?.week?.[plan] ? `${sum(settings.week[plan])} so'm` : null);
   const botUrl = bot ? `https://t.me/${esc(bot)}` : null;
   const askUrl = (plan) => (support ? `https://t.me/${esc(support)}?text=${encodeURIComponent(`Assalomu alaykum! ${PLANS[plan].name} obunasini olmoqchiman.`)}` : null);
   const card = (plan) => `
@@ -27,6 +29,7 @@ export function landingPage({ settings, stats = null, bot = null, support = null
         ${plan === "pro" ? '<span class="tag">Ko\'pchilik tanlaydi</span>' : ""}
         <h3>${esc([PLANS[plan].icon, PLANS[plan].name].filter(Boolean).join(" "))}</h3>
         <p class="price">${esc(price(plan))} <small>${esc(per(plan))}</small></p>
+        ${weekly(plan) ? `<p class="alt">yoki 7 kunga — <b>${esc(weekly(plan))}</b></p>` : ""}
         <ul>${FEATURES[plan].map((f) => `<li>${esc(f)}</li>`).join("")}</ul>
         ${plan === "free" ? (botUrl ? `<a class="btn ghost" href="${botUrl}">Botni ochish</a>` : "") : askUrl(plan) ? `<a class="btn ${plan === "pro" ? "" : "ghost"}" href="${askUrl(plan)}">${esc(PLANS[plan].name)} olish</a>` : ""}
       </article>`;
@@ -87,6 +90,10 @@ h2{font-size:clamp(23px,3.2vw,30px);letter-spacing:-.02em;margin:0 0 6px}
 .plan h3{margin:0;font-size:20px}
 .price{margin:8px 0 14px;font-size:27px;font-weight:750;letter-spacing:-.02em}
 .price small{font-size:14px;font-weight:450;color:var(--muted)}
+.price{margin-bottom:4px}
+.alt{margin:0 0 14px;color:var(--muted);font-size:14.5px}
+.alt b{color:var(--text)}
+.plan .price + ul{margin-top:10px}
 .plan ul{margin:0 0 20px;padding:0;list-style:none;flex:1}
 .plan li{position:relative;padding:5px 0 5px 24px;font-size:15px}
 .plan li::before{content:"✓";position:absolute;left:0;color:var(--good);font-weight:700}
@@ -154,7 +161,7 @@ footer a{color:var(--muted)}
         <div class="box step"><h3>Yordamchiga yozing</h3><p>${support ? `Telegram'da <a href="${askUrl("pro")}">@${esc(support)}</a> ga` : "Yordamchimizga"} qaysi obuna kerakligini ayting.</p></div>
         <div class="box step"><h3>To'lang</h3><p>Click, Payme yoki bank ilovasi orqali — yordamchi rekvizitlarni yuboradi.</p></div>
         <div class="box step"><h3>Chekni yuboring</h3><p>To'lov cheki rasmini (skrinshot) o'sha chatga tashlang.</p></div>
-        <div class="box step"><h3>Obuna yoqiladi</h3><p>Chek tekshirilgach obuna shu zahoti yoqiladi va ${esc(String(days))} kun amal qiladi.</p></div>
+        <div class="box step"><h3>Obuna yoqiladi</h3><p>Chek tekshirilgach obuna yoqiladi: haftalik to'lov — 7 kun, oylik — ${esc(String(days))} kun.</p></div>
       </div>
       ${settings?.payInfo ? `<div class="pay"><b>To'lov rekvizitlari</b>${esc(settings.payInfo)}</div>` : ""}
       <p class="note">Obuna Telegram hisobingizga bog'lanadi: bot, Mini App va ilovada birdek ishlaydi. To'lovni admin bank hisobi bo'yicha qo'shimcha tekshiradi: pul tushmagan bo'lsa obuna bekor qilinadi, soxta chek yuborgan hisob esa bloklanadi.${owner ? ` Yordamchi javob bermasa — <a href="https://t.me/${esc(owner)}">@${esc(owner)}</a> ga yozing.` : ""}</p>

@@ -83,7 +83,14 @@ const planLabel = (plan) => [PLANS[plan]?.icon, PLANS[plan]?.name ?? plan].filte
 
 // Obunalar haqida qabulxona biladigan faktlar (narx va rekvizit — boshqaruv markazidagi sozlamadan)
 export function plansText(settings) {
-  const price = (plan) => (settings?.prices?.[plan] ? `${sum(settings.prices[plan])} / ${settings.days} kun` : "narxi hali belgilanmagan — egasi aytadi");
+  // «15 000 so'm / 7 kun yoki 49 000 so'm / 30 kun»
+  const price = (plan) => {
+    const offers = [
+      settings?.week?.[plan] ? `${sum(settings.week[plan])} / 7 kun (haftalik)` : null,
+      settings?.prices?.[plan] ? `${sum(settings.prices[plan])} / ${settings.days} kun (oylik)` : null,
+    ].filter(Boolean);
+    return offers.length ? offers.join(" yoki ") : "narxi hali belgilanmagan — egasi aytadi";
+  };
   return [
     "Obunalar:",
     "- Free (bepul): ochiq guruhlarning matnli e'lonlari, 30 tagacha guruh tanlash, yordamchiga kuniga 3 ta savol.",
@@ -167,11 +174,14 @@ Obuna sotib olish (foydalanuvchi so'rasa yoki chek yuborsa):
    to'lov cheki (Click, Payme, bank ilovasi)mi; holati «muvaffaqiyatli»mi; summa; sana (3 kundan eski emas); qabul qiluvchi
    yuqoridagi rekvizitga mosmi (ko'rinsa). Chek bo'lmasa (boshqa rasm) — oddiy javob ber, blok qo'shma.
 3. Chek bo'lsa, javobing OXIRIGA alohida qatorda (foydalanuvchi ko'rmaydi):
-   <<TOLOV>>{"plan":"pro|max","amount":<chekdagi summa, so'mda, raqam yoki null>,"time":"<chekdagi sana va vaqt, ko'ringanidek, yoki null>","txn":"<tranzaksiya / chek raqami yoki null>","sure":true|false,"why":"egasi uchun 1 jumla: nimani ko'rding (to'lov tizimi, holati, qabul qiluvchi)"}<</TOLOV>>
+   <<TOLOV>>{"plan":"pro|max","period":"week|month|null (foydalanuvchi aytgan muddat: haftalik yoki oylik)","amount":<chekdagi summa, so'mda, raqam yoki null>,"time":"<chekdagi sana va vaqt, ko'ringanidek, yoki null>","txn":"<tranzaksiya / chek raqami yoki null>","sure":true|false,"why":"egasi uchun 1 jumla: nimani ko'rding (to'lov tizimi, holati, qabul qiluvchi)"}<</TOLOV>>
    Egasi bank hisobidan aynan shu VAQT va SUMMAni qidiradi — ularni chekdan aniq ko'chir, taxmin qilma.
    sure:true — FAQAT hammasi aniq bo'lsa (muvaffaqiyatli to'lov, summa obuna narxidan kam emas, sana yangi, qabul qiluvchi
    mos yoki ko'rinmaydi-yu boshqa shubha yo'q). Summa kam, sana eski, rasm xira, tahrirlangandek yoki shubhali — sure:false.
    Qaysi obuna ekanini foydalanuvchi aytmagan bo'lsa — summaga qarab aniqla; aniqlab bo'lmasa blok qo'shma, so'ra.
+   DIQQAT: bir xil summa ikki xil obunaga to'g'ri kelishi mumkin (masalan, Pro oylik va Max haftalik narxi teng bo'lsa) —
+   bunda foydalanuvchi aniq aytmagan bo'lsa, taxmin qilma: «Pro oylikmi yoki Max haftalikmi?» deb so'ra, blok qo'shma.
+   Muddatni tizim summaga qarab o'zi belgilaydi (oylik narx to'langan bo'lsa — oy, haftalik narx — hafta).
 4. Blok qo'shgan javobingda natijani O'ZING e'lon qilma («obuna yoqildi» dema) — «chekni qabul qildim» de, natijani tizim keyingi
    xabarda o'zi yozadi.`;
 };
@@ -490,6 +500,7 @@ export function createResponder({ client, name, ownerId, opsDir, root, audit, gr
     const result = store.claimPayment({
       chatId: Number(entry.fromId), plan: String(data.plan ?? "").toLowerCase(), amount: data.amount, receipt: receipt.path,
       note: data.why, sure: data.sure === true, txn: data.txn ?? null, paidAt: data.time ?? null,
+      period: /^(week|hafta)/i.test(String(data.period ?? "")) ? "week" : /^(month|oy)/i.test(String(data.period ?? "")) ? "month" : null,
     });
     if (!result.ok) {
       if (result.error === "open") return sendTo(entry.fromId, `⏳ Oldingi to'lovingiz (#${result.payment.id}) hali ko'rib chiqilyapti — natijasini yozaman.`);
@@ -582,7 +593,7 @@ export function createResponder({ client, name, ownerId, opsDir, root, audit, gr
         const price = p.price ? ` (narx ${sum(p.price)})` : " (narx belgilanmagan)";
         const how = `Tasdiqlash: /tolov ${p.id} ha\nRad etish: /tolov ${p.id} yoq [sabab]`;
         if (p.status === "held" || p.status === "asked") {
-          const head = `💳 To'lov #${p.id} — ${who(p)} (id ${p.chatId}): ${label}, ${paid}${price}.`;
+          const head = `💳 To'lov #${p.id} — ${who(p)} (id ${p.chatId}): ${label} ${p.days} kunga, ${paid}${price}.`;
           const state = p.status === "held"
             ? `Obuna DARHOL yoqildi. ${dayText(p.holdUntil)} gacha tasdiqlamasangiz — bekor bo'ladi.`
             : "Obuna hali BERILMADI — faqat siz tasdiqlasangiz yoqiladi.";

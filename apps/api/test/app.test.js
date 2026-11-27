@@ -237,7 +237,7 @@ test("web: /admin sahifalari index.html, fayllar o'zi, / → /admin/", async () 
 
 test("obuna sozlamalari va to'lovlar (2026-11-27): narx/rekvizit saqlanadi; to'lovni tasdiqlash / rad etish; obuna muddat bilan", async () => {
   const saved = await send("PUT", "/api/plan-settings", { prices: { pro: 50000, max: 120000 }, days: 30, payInfo: "Click: 8600 …", holdHours: 48 });
-  assert.deepEqual(saved.body, { prices: { pro: 50000, max: 120000 }, days: 30, payInfo: "Click: 8600 …", holdHours: 48, autoGrant: true });
+  assert.deepEqual(saved.body, { prices: { pro: 50000, max: 120000 }, week: { pro: 0, max: 0 }, days: 30, payInfo: "Click: 8600 …", holdHours: 48, autoGrant: true });
   assert.equal((await get("/api/plan-settings")).body.prices.max, 120000);
 
   store.saveDriver(880, { name: "To'lovchi", role: "haydovchi" });

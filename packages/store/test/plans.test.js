@@ -77,9 +77,9 @@ test("to'lov: tekshirib bo'lmagan / summa kam / narx belgilanmagan — darhol yo
   assert.equal(store.claimPayment({ chatId: 7, plan: "vip", amount: 1, sure: true }).error, "plan");
   assert.deepEqual(store.listPayments({ status: "open" }).map((p) => p.chatId), [8]);
 
-  assert.deepEqual(store.setPlanSettings({ prices: { pro: "70000" }, days: 0, holdHours: 24 }), { prices: { pro: 70_000, max: 120_000 }, days: 30, payInfo: "Click: 8600 …", holdHours: 24, autoGrant: true });
+  assert.deepEqual(store.setPlanSettings({ prices: { pro: "70000" }, days: 0, holdHours: 24 }), { prices: { pro: 70_000, max: 120_000 }, week: { pro: 0, max: 0 }, days: 30, payInfo: "Click: 8600 …", holdHours: 24, autoGrant: true });
   const fresh = openStore({ file: ":memory:" });
-  assert.deepEqual(fresh.planSettings(), { prices: { pro: 0, max: 0 }, days: 30, payInfo: "", holdHours: 48, autoGrant: true });
+  assert.deepEqual(fresh.planSettings(), { prices: { pro: 0, max: 0 }, week: { pro: 0, max: 0 }, days: 30, payInfo: "", holdHours: 48, autoGrant: true });
   fresh.saveDriver(1, { name: "X" });
   assert.equal(fresh.claimPayment({ chatId: 1, plan: "pro", amount: 999_999, sure: true }).payment.status, "asked", "narx belgilanmagan — egasi hal qiladi");
 });
@@ -106,4 +106,26 @@ test("to'lov: «darhol yoqish» o'chirilgan (autoGrant: false) — eng ishonchli
   assert.equal(store.getDriver(7).plan, "free");
   store.decidePayment(p.id, true);
   assert.equal(store.getDriver(7).plan, "pro");
+});
+
+test("haftalik obuna (2026-11-27): summa bo'yicha muddat — haftalik narx → 7 kun, oylik narx → 30 kun; kam summa — egasi hal qiladi", () => {
+  const { store, now } = setup();
+  const DAY = 86_400_000;
+  store.setPlanSettings({ prices: { pro: 49_000, max: 149_000 }, week: { pro: 15_000, max: 49_000 } });
+  const week = store.claimPayment({ chatId: 7, plan: "pro", amount: 15_000, sure: true }).payment;
+  assert.deepEqual([week.status, week.days, week.price], ["held", 7, 15_000]);
+  assert.equal(store.getDriver(7).planUntil, now() + 7 * DAY);
+  store.decidePayment(week.id, true);
+  // Oylik narxni to'ladi («haftalik» degan bo'lsa ham) — oy; muddat tugamagan haftaning ustiga qo'shiladi
+  const month = store.claimPayment({ chatId: 7, plan: "pro", amount: 49_000, sure: true, period: "week" }).payment;
+  assert.deepEqual([month.days, month.price], [30, 49_000]);
+  assert.equal(store.getDriver(7).planUntil, now() + 37 * DAY);
+  store.decidePayment(month.id, true);
+  // Max haftalik (49 000) — Pro oylik bilan bir xil summa: obunani yordamchi aniqlaydi, muddat summadan
+  store.saveDriver(8, { name: "Vali" });
+  const maxWeek = store.claimPayment({ chatId: 8, plan: "max", amount: 49_000, sure: true }).payment;
+  assert.deepEqual([maxWeek.status, maxWeek.days, maxWeek.price], ["held", 7, 49_000]);
+  store.saveDriver(9, { name: "Kam" });
+  const low = store.claimPayment({ chatId: 9, plan: "max", amount: 30_000, sure: true, period: "month" }).payment;
+  assert.deepEqual([low.status, low.days, low.price], ["asked", 30, 149_000], "summa hech biriga yetmaydi — aytilgan muddat narxi bilan so'raladi");
 });

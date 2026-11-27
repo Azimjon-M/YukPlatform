@@ -67,7 +67,7 @@ test("to'lov: ishonchli chek — obuna darhol yoqiladi, egasiga chek va /tolov; 
   assert.deepEqual(to(7).map((t) => t.slice(0, 26)), ["Chekni qabul qildim.", "✅ ⭐ Pro obunangiz yoqildi "]);
   const toOwner = to(OWNER);
   assert.equal(toOwner.length, 1);
-  assert.match(toOwner[0], /^💳 To'lov #1 — Ali @ali \(id 7\): ⭐ Pro, 50 000 so'm \(narx 50 000 so'm\)\.\nObuna DARHOL yoqildi[\s\S]*Yordamchi: Click, muvaffaqiyatli[\s\S]*\/tolov 1 ha\nRad etish: \/tolov 1 yoq/);
+  assert.match(toOwner[0], /^💳 To'lov #1 — Ali @ali \(id 7\): ⭐ Pro 30 kunga, 50 000 so'm \(narx 50 000 so'm\)\.\nObuna DARHOL yoqildi[\s\S]*Yordamchi: Click, muvaffaqiyatli[\s\S]*\/tolov 1 ha\nRad etish: \/tolov 1 yoq/);
   assert.deepEqual(files, [[OWNER, "5.jpg", "Chek — to'lov #1"]]);
 
   await say(OWNER, "/tolov 1 yoq chek boshqa odamniki");
@@ -126,7 +126,7 @@ test("Pro/Max: tiket egasiga boradi (Max — MUHIM); matnlar: obunalar, limit, c
   await say(7, "yuk kelmayapti");
   await say(8, "yuk kelmayapti");
   await settle();
-  assert.match(prompts.find((p) => p.system.includes("id 7")).system, /Uning obunasi: ⭐ Pro\.[\s\S]*<<TIKET>>[\s\S]*⭐ Pro \(50 000 so'm \/ 30 kun\)[\s\S]*To'lov: Click: 8600/);
+  assert.match(prompts.find((p) => p.system.includes("id 7")).system, /Uning obunasi: ⭐ Pro\.[\s\S]*<<TIKET>>[\s\S]*⭐ Pro \(50 000 so'm \/ 30 kun \(oylik\)\)[\s\S]*To'lov: Click: 8600/);
   const owner = to(OWNER);
   assert.equal(owner.length, 2);
   assert.ok(owner.some((t) => t.startsWith("🆕 🐞 Muammo #")) && owner.some((t) => t.startsWith("🆕 💎 MUHIM · 🐞 Muammo #")));
