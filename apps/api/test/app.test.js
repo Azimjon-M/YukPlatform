@@ -251,6 +251,16 @@ test("obuna sozlamalari va to'lovlar (2026-11-27): narx/rekvizit saqlanadi; to'l
   assert.equal((await send("POST", `/api/payments/${held.id}/decide`, { ok: true })).status, 409, "hal qilingan");
   assert.equal((await get(`/api/payments/${held.id}/receipt`)).status, 404, "chek fayli yo'q");
 
+  // Pul tushmagan: tasdiqlangan to'lovda ham — obuna bekor, akkaunt bloklanadi; holat «rad etilgan» (yordamchi yozadi)
+  store.saveDriver(881, { name: "Aldoqchi", role: "haydovchi" });
+  const fake = store.claimPayment({ chatId: 881, plan: "max", amount: 120000, sure: true, txn: "T-1", paidAt: "27.11 15:20" }).payment;
+  assert.equal((await send("POST", `/api/payments/${fake.id}/decide`, { ok: true })).body.status, "confirmed");
+  const banned = await send("POST", `/api/payments/${fake.id}/decide`, { ok: false, ban: true });
+  assert.deepEqual([banned.status, banned.body.status, banned.body.reason, banned.body.banned], [200, "rejected", "to'lov tushmagan", true]);
+  assert.deepEqual([store.getDriver(881).plan, Boolean(store.banOf(store.getDriver(881)))], ["free", true]);
+  assert.deepEqual(store.paymentNotices().map((p) => p.id).includes(fake.id), true, "foydalanuvchiga xabar navbatda");
+  assert.equal((await send("POST", "/api/payments/99999/decide", { ok: false, ban: true })).status, 404);
+
   // Qo'lda obuna: muddatsiz yoki N kunga
   const forever = (await send("PATCH", "/api/drivers/880", { plan: "max" })).body;
   assert.deepEqual([forever.plan, forever.planUntil], ["max", null]);

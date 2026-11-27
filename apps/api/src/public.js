@@ -75,6 +75,7 @@ import {
   formatContactPhone,
   isAdmin,
   maxFeedSources,
+  OWNER_CONTACT,
   planOf,
   sourcesLimitText,
   parseAdminIds,
@@ -1357,6 +1358,7 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
         stats: siteStats(),
         bot: (store.getSetting("bot_username") ?? env.BOT_USERNAME ?? "").replace(/^@/, "") || null,
         support: (env.SUPPORT_USERNAME ?? "YukExperti").replace(/^@/, "") || null,
+        owner: (env.OWNER_USERNAME ?? OWNER_CONTACT).replace(/^@/, "") || null,
         apk: Boolean(apkDir && readRelease(apkDir)),
       }),
     );

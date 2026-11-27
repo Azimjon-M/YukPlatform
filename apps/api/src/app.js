@@ -355,9 +355,28 @@ export function createApp({
   api.get("/payments", (req, res) => res.json({ items: store.listPayments({ limit: 100 }) }));
   api.post("/payments/:id/decide", (req, res) => {
     const ok = bool(req.body?.ok, "ok");
-    const done = store.decidePayment(Number(req.params.id), ok, typeof req.body?.reason === "string" ? req.body.reason : null);
-    if (!done) throw httpError(409, "To'lov topilmadi yoki allaqachon hal qilingan");
-    res.json(done);
+    // ban: true (faqat rad etishda) — pul tushmagan: obuna bekor + akkaunt bloklanadi (admin bloklanmaydi). Hal qilingan
+    // (hatto tasdiqlangan) to'lovda ham ishlaydi — pul tushmagani keyin bilinishi mumkin
+    const ban = !ok && req.body?.ban === true;
+    const id = Number(req.params.id);
+    const before = store.getPayment(id);
+    if (!before) throw httpError(404, "To'lov topilmadi");
+    const reason = typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim() : ban ? "to'lov tushmagan" : null;
+    const done = store.decidePayment(id, ok, reason);
+    if (!done && !ban) throw httpError(409, "To'lov allaqachon hal qilingan");
+    let banned = false;
+    if (ban) {
+      const user = store.getDriver(before.chatId);
+      for (const other of store.listPayments({ status: "open", chatId: before.chatId })) store.decidePayment(other.id, false, reason);
+      if (user && user.plan !== "free") store.saveDriver(before.chatId, { plan: "free", why: "admin" });
+      if (user && !isAdmin(user, parseAdminIds(env.ADMIN_IDS))) {
+        store.banDriver(before.chatId);
+        banned = true;
+      }
+      // Avval tasdiqlangan to'lov — yordamchi foydalanuvchiga qayta yozishi uchun holat «rad etilgan» ga o'tadi
+      if (!done) store.db.prepare("UPDATE payments SET status = 'rejected', reason = ?, decided_at = ? WHERE id = ?").run(reason, Date.now(), id);
+    }
+    res.json({ ...store.getPayment(id), banned });
   });
   api.get("/payments/:id/receipt", (req, res) => {
     const payment = store.getPayment(Number(req.params.id));

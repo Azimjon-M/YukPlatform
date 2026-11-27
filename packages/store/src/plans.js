@@ -51,6 +51,8 @@ export function migratePlans(db) {
     receipt TEXT,                      -- chek fayli (apps/collector/receipts/…)
     note TEXT,                         -- yordamchining izohi (chekda nimani ko'rdi)
     reason TEXT,                       -- egasining sababi (rad etganda)
+    txn TEXT,                          -- chekdagi tranzaksiya raqami (bir chek ikki marta ishlatilmasin)
+    paid_at TEXT,                      -- chekdagi sana-vaqt (matn: egasi bank hisobidan shu vaqtni qidiradi)
     prev_plan TEXT, prev_until INTEGER,-- held: rad etilsa yoki muddat o'tsa shu qaytariladi
     hold_until INTEGER,
     created_at INTEGER NOT NULL,
@@ -58,6 +60,9 @@ export function migratePlans(db) {
     notified TEXT
   )`);
   db.exec("CREATE INDEX IF NOT EXISTS payments_chat ON payments (chat_id, created_at)");
+  const pay = db.prepare("PRAGMA table_info(payments)").all().map((c) => c.name);
+  if (!pay.includes("txn")) db.exec("ALTER TABLE payments ADD COLUMN txn TEXT");
+  if (!pay.includes("paid_at")) db.exec("ALTER TABLE payments ADD COLUMN paid_at TEXT");
 }
 
 const paymentRow = (row) =>
@@ -72,6 +77,9 @@ const paymentRow = (row) =>
     receipt: row.receipt ?? null,
     note: row.note ?? null,
     reason: row.reason ?? null,
+    txn: row.txn ?? null,
+    paidAt: row.paid_at ?? null,
+    dupOf: row.dup_of ?? null, // shu tranzaksiya raqami avval ishlatilgan to'lov (claimPayment natijasida)
     holdUntil: row.hold_until ?? null,
     createdAt: row.created_at,
     decidedAt: row.decided_at ?? null,
@@ -118,7 +126,8 @@ export function createPlanQueries(db, now) {
     // Darhol yoqish (held) faqat: sure, narx belgilangan va summa ≥ narx, bu odamning oxirgi 30 kunda rad etilgan / muddati
     // o'tgan cheki yo'q. Aks holda — asked (egasi hal qiladi). Obuna muddati: hozirgisi shu obuna va hali tugamagan bo'lsa —
     // uning ustiga qo'shiladi (uzaytirish)
-    claimPayment({ chatId, plan, amount = null, receipt = null, note = null, sure = false }) {
+    // txn — chekdagi tranzaksiya raqami: avval (rad etilmagan) to'lovda ishlatilgan bo'lsa — darhol yoqilmaydi, dupOf qaytadi
+    claimPayment({ chatId, plan, amount = null, receipt = null, note = null, sure = false, txn = null, paidAt = null }) {
       if (!PAID_PLANS.includes(plan)) return { ok: false, error: "plan" };
       const user = db.prepare("SELECT chat_id, plan, plan_until FROM drivers WHERE chat_id = ?").get(chatId);
       if (!user) return { ok: false, error: "no_user" };
@@ -129,16 +138,18 @@ export function createPlanQueries(db, now) {
       const price = prices[plan] || null;
       const paid = Number.isFinite(Number(amount)) && Number(amount) > 0 ? Math.round(Number(amount)) : null;
       const bad = db.prepare("SELECT 1 FROM payments WHERE chat_id = ? AND status IN ('rejected', 'lapsed') AND created_at > ?").get(chatId, time - 30 * DAY);
-      const held = Boolean(sure) && price != null && paid != null && paid >= price && !bad;
+      const code = txn ? String(txn).replace(/\s+/g, "").slice(0, 60) || null : null;
+      const dup = code ? db.prepare("SELECT id FROM payments WHERE txn = ? AND status <> 'rejected' ORDER BY id LIMIT 1").get(code) : null;
+      const held = Boolean(sure) && price != null && paid != null && paid >= price && !bad && !dup;
       const id = db
         .prepare(
-          `INSERT INTO payments (chat_id, plan, days, amount, price, status, receipt, note, prev_plan, prev_until, hold_until, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO payments (chat_id, plan, days, amount, price, status, receipt, note, prev_plan, prev_until, hold_until, created_at, txn, paid_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(chatId, plan, days, paid, price, held ? "held" : "asked", receipt, note ? String(note).slice(0, 500) : null, user.plan ?? "free", user.plan_until ?? null, held ? time + holdHours * HOUR : null, time)
+        .run(chatId, plan, days, paid, price, held ? "held" : "asked", receipt, note ? String(note).slice(0, 500) : null, user.plan ?? "free", user.plan_until ?? null, held ? time + holdHours * HOUR : null, time, code, paidAt ? String(paidAt).slice(0, 40) : null)
         .lastInsertRowid;
       if (held) setPlan(chatId, plan, this.planEnd(user, plan, days, time));
-      return { ok: true, payment: get(Number(id)) };
+      return { ok: true, payment: { ...get(Number(id)), dupOf: dup?.id ?? null } };
     },
 
     // Yangi muddat oxiri: shu obuna hali amalda bo'lsa — ustiga qo'shiladi

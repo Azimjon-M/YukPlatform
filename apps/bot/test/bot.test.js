@@ -876,7 +876,7 @@ test("/start matni: bot haqida Azimjon matni, keyin menyu; menyuda «Ilovalar» 
       "🚚 Ro'yxatdan o'tish — sizga qanday e'lonlar yo'naltirishimiz haqida\n" +
       "🔄 Rolni almashtirish — haydovchi yoki yuk egasi\n\n" +
       "Tugmalar yo'qolsa — /start ni bosing.\n" +
-      "❓ Tushunmasangiz — @YukExperti ga yozing, yordam beradi.",
+      "❓ Tushunmasangiz — @YukExperti ga yozing, yordam beradi. Javob bo'lmasa — @GT_RUSHSHER.",
   );
   // Keyingi xabar (2026-11-19): rejim so'ralmaydi — darhol ⚡ Tezkor saqlanadi va to'liq menyu
   assert.match(texts(calls).at(-1), /✅ <b>Tayyor!<\/b>/);
@@ -929,7 +929,7 @@ test("/start matni rol tanlanmaganda (Azimjon matni) va yuk beruvchida ham to'g'
     texts(calls)[0],
     "Assalomu alaykum!\n\n" +
       "🚛 <b>Yuk Eksperti</b> — guruhlardagi yuk e'lonlarini shu yerga, darhol yuboradi. Yuk egasi esa yukini to'g'ridan-to'g'ri haydovchiga beradi.\n\n" +
-      "❓ Tushunmasangiz — @YukExperti ga yozing, yordam beradi.",
+      "❓ Tushunmasangiz — @YukExperti ga yozing, yordam beradi. Javob bo'lmasa — @GT_RUSHSHER.",
   );
   assert.equal(texts(calls)[1], "Iltimos, tanlang 👇");
   calls.length = 0;

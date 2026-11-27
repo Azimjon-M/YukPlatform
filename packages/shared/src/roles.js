@@ -103,6 +103,10 @@ export function planFilter(user, ownersOf) {
   };
 }
 
+// Loyiha egasi bilan aloqa (2026-11-27, Azimjon: yordamchi javob bera olmasa yoki limit tugasa — «menga bog'lanishi kerak»).
+// Bot, yordamchi akkaunt va sayt shu manzilni ko'rsatadi (.env OWNER_USERNAME / OPS_OWNER_USERNAME bilan almashtiriladi)
+export const OWNER_CONTACT = "GT_RUSHSHER";
+
 // --- Blok (boshqaruv markazidan; Azimjon, 2026-11-09) ---
 // Bloklangan odam botga nima yozsa ham shu javob (bot.js), web/Mini App esa shu matnli ekran (apps/api public.js 403 "blocked")
 export const BLOCKED_TEXT = "Uzr, sizga xizmat ko'rsata olmaymiz!";

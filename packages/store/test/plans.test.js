@@ -83,3 +83,17 @@ test("to'lov: tekshirib bo'lmagan / summa kam / narx belgilanmagan — darhol yo
   fresh.saveDriver(1, { name: "X" });
   assert.equal(fresh.claimPayment({ chatId: 1, plan: "pro", amount: 999_999, sure: true }).payment.status, "asked", "narx belgilanmagan — egasi hal qiladi");
 });
+
+test("to'lov: bitta tranzaksiya raqami ikkinchi marta — darhol yoqilmaydi (dupOf); rad etilgan chek raqami qayta ishlatilsa — bo'ladi", () => {
+  const { store } = setup();
+  store.saveDriver(8, { name: "Vali", role: "haydovchi" });
+  const a = store.claimPayment({ chatId: 7, plan: "pro", amount: 50_000, sure: true, txn: "4471 120093", paidAt: "27.11.2026 15:20" }).payment;
+  assert.deepEqual([a.status, a.txn, a.paidAt, a.dupOf], ["held", "4471120093", "27.11.2026 15:20", null]);
+  const b = store.claimPayment({ chatId: 8, plan: "pro", amount: 50_000, sure: true, txn: "4471120093" }).payment;
+  assert.deepEqual([b.status, b.dupOf], ["asked", a.id], "o'sha chek boshqa odamda");
+  assert.equal(store.getDriver(8).plan, "free");
+  store.decidePayment(a.id, false);
+  store.decidePayment(b.id, false);
+  store.saveDriver(9, { name: "Yangi", role: "haydovchi" });
+  assert.equal(store.claimPayment({ chatId: 9, plan: "pro", amount: 50_000, sure: true, txn: "4471120093" }).payment.dupOf, null, "rad etilganlar hisobga kirmaydi");
+});

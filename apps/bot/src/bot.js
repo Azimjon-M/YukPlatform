@@ -24,6 +24,7 @@ import {
   feedOf,
   isOwnContact,
   maxFeedSources,
+  OWNER_CONTACT,
   planOf,
   sourcesLimitText,
   normalizeContactPhone,
@@ -133,8 +134,10 @@ const INTRO = `🚛 <b>${NAME}</b> — ${ABOUT}`;
 // AI yordamchi (2026-11-17, Azimjon: «bot boshida agar botni ishlatishga qiynalsangiz bizni AI ga yozing yordam beradi»):
 // operator akkaunt — unga yozilganda Claude javob beradi, muammoni egasiga tiket qilib yetkazadi (collector opsResponder.js)
 const SUPPORT_USERNAME = (process.env.SUPPORT_USERNAME ?? "YukExperti").replace(/^@/, "");
+// Yordamchi javob bermasa (limit, uzilish) — loyiha egasi (2026-11-27); .env OWNER_USERNAME, bo'sh — ko'rsatilmaydi
+const OWNER_USERNAME = (process.env.OWNER_USERNAME ?? OWNER_CONTACT).replace(/^@/, "");
 const SUPPORT_LINE = SUPPORT_USERNAME
-  ? `❓ Tushunmasangiz — @${SUPPORT_USERNAME} ga yozing, yordam beradi.`
+  ? `❓ Tushunmasangiz — @${SUPPORT_USERNAME} ga yozing, yordam beradi.${OWNER_USERNAME ? ` Javob bo'lmasa — @${OWNER_USERNAME}.` : ""}`
   : null;
 const introLines = () => [INTRO, ...(SUPPORT_LINE ? ["", SUPPORT_LINE] : [])];
 

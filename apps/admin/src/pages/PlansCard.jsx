@@ -65,13 +65,18 @@ function PaymentRow({ payment, onChanged }) {
   const [busy, setBusy] = useState(false);
   const open = payment.status === "held" || payment.status === "asked" || payment.status === "lapsed";
   const status = STATUS[payment.status] ?? { tone: "neutral", label: payment.status };
-  async function decide(ok) {
-    const reason = ok ? null : window.prompt("Rad etish sababi (foydalanuvchiga yoziladi, ixtiyoriy):", "");
+  async function decide(ok, ban = false) {
+    const reason = ok
+      ? null
+      : window.prompt(ban ? "Pul tushmagan: obuna bekor qilinadi va akkaunt BLOKLANADI. Sabab (foydalanuvchiga yoziladi):" : "Rad etish sababi (foydalanuvchiga yoziladi, ixtiyoriy):", ban ? "to'lov tushmagan" : "");
     if (!ok && reason === null) return;
     setBusy(true);
     try {
-      await post(`/api/payments/${payment.id}/decide`, { ok, reason: reason || null });
-      notify(ok ? "Tasdiqlandi — yordamchi foydalanuvchiga 1 daqiqa ichida yozadi" : "Rad etildi — obuna qaytarildi", ok ? "good" : "neutral");
+      const result = await post(`/api/payments/${payment.id}/decide`, { ok, ban, reason: reason || null });
+      notify(
+        ok ? "Tasdiqlandi — yordamchi foydalanuvchiga 1 daqiqa ichida yozadi" : ban ? (result.banned ? "Obuna bekor qilindi, akkaunt bloklandi" : "Obuna bekor qilindi (admin — bloklanmadi)") : "Rad etildi — obuna qaytarildi",
+        ok ? "good" : "neutral",
+      );
       onChanged();
     } catch (e) {
       notify(e.message, "critical");
@@ -90,6 +95,13 @@ function PaymentRow({ payment, onChanged }) {
           {payment.price ? ` (narx ${formatNumber(payment.price)})` : ""} · {payment.days} kun · {formatDateTime(payment.createdAt)}
           {payment.status === "held" && payment.holdUntil ? ` · ${formatDateTime(payment.holdUntil)} gacha tasdiqlash kerak` : ""}
         </span>
+        {(payment.paidAt || payment.txn) && (
+          <span className="small">
+            {payment.paidAt ? `Chekdagi vaqt: ${payment.paidAt}` : ""}
+            {payment.paidAt && payment.txn ? " · " : ""}
+            {payment.txn ? `Tranzaksiya: ${payment.txn}` : ""}
+          </span>
+        )}
         {payment.note && <span className="muted small">Yordamchi: {payment.note}</span>}
         {payment.reason && <span className="small text-critical">Sabab: {payment.reason}</span>}
       </div>
@@ -113,6 +125,11 @@ function PaymentRow({ payment, onChanged }) {
               </Button>
             )}
           </div>
+        )}
+        {payment.status !== "rejected" && (
+          <Button variant="ghost" className="danger-text" onClick={() => decide(false, true)} disabled={busy} title="Bank hisobingizda bu to'lov yo'q: obuna bekor qilinadi va akkaunt loyihadan bloklanadi">
+            ⛔ Pul tushmagan — bloklash
+          </Button>
         )}
       </div>
     </li>
@@ -139,7 +156,8 @@ export function PlansCard({ onChanged }) {
       <p className="muted small">
         Foydalanuvchi yordamchi akkauntga (Sarvar) yozib, obunani tanlaydi, to'laydi va chek rasmini yuboradi. Chek ishonchli ko'rinsa — obuna darhol
         yoqiladi va sizga xabar keladi; belgilangan vaqt ichida tasdiqlamasangiz yoki rad etsangiz — obuna qaytarib olinadi. Shubhali chekda obuna
-        faqat siz tasdiqlagandan keyin yoqiladi. Narx 0 bo'lsa — hech bir chek o'zi yoqilmaydi.
+        faqat siz tasdiqlagandan keyin yoqiladi. Chekdagi vaqt va summani bank hisobingiz bilan solishtiring: pul tushmagan bo'lsa —
+        «⛔ Pul tushmagan — bloklash» (Telegram'da /tolov N ban). Narx 0 bo'lsa — hech bir chek o'zi yoqilmaydi.
       </p>
       {settings.data && <SettingsForm key={JSON.stringify(settings.data)} initial={settings.data} onSaved={() => settings.reload()} />}
       {items.length > 0 ? (

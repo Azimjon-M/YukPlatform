@@ -16,7 +16,7 @@ const FEATURES = {
 };
 
 // settings — store.planSettings(); stats — { sources, posts, sent } | null; bot / support — username'lar (@ siz); apk — ilova bormi
-export function landingPage({ settings, stats = null, bot = null, support = null, apk = false } = {}) {
+export function landingPage({ settings, stats = null, bot = null, support = null, owner = null, apk = false } = {}) {
   const days = settings?.days ?? 30;
   const price = (plan) => (plan === "free" ? "Bepul" : settings?.prices?.[plan] ? `${sum(settings.prices[plan])} so'm` : "Narxi tez orada");
   const per = (plan) => (plan !== "free" && settings?.prices?.[plan] ? `${days} kunga` : plan === "free" ? "doim" : "");
@@ -157,7 +157,7 @@ footer a{color:var(--muted)}
         <div class="box step"><h3>Obuna yoqiladi</h3><p>Chek tekshirilgach obuna shu zahoti yoqiladi va ${esc(String(days))} kun amal qiladi.</p></div>
       </div>
       ${settings?.payInfo ? `<div class="pay"><b>To'lov rekvizitlari</b>${esc(settings.payInfo)}</div>` : ""}
-      <p class="note">Obuna Telegram hisobingizga bog'lanadi: bot, Mini App va ilovada birdek ishlaydi. To'lovni admin qo'shimcha tekshiradi; chek tasdiqlanmasa obuna bekor qilinadi.</p>
+      <p class="note">Obuna Telegram hisobingizga bog'lanadi: bot, Mini App va ilovada birdek ishlaydi. To'lovni admin bank hisobi bo'yicha qo'shimcha tekshiradi: pul tushmagan bo'lsa obuna bekor qilinadi, soxta chek yuborgan hisob esa bloklanadi.${owner ? ` Yordamchi javob bermasa — <a href="https://t.me/${esc(owner)}">@${esc(owner)}</a> ga yozing.` : ""}</p>
     </section>
 
     <section>
@@ -171,7 +171,7 @@ footer a{color:var(--muted)}
 
   <footer>
     <span>© ${new Date().getFullYear()} Yuk Ekspert</span>
-    <span>${botUrl ? `<a href="${botUrl}">Bot</a> · ` : ""}${support ? `<a href="https://t.me/${esc(support)}">Yordamchi</a> · ` : ""}<a href="/?web=1">Web ilova</a> · <a href="/admin/">Boshqaruv</a></span>
+    <span>${botUrl ? `<a href="${botUrl}">Bot</a> · ` : ""}${support ? `<a href="https://t.me/${esc(support)}">Yordamchi</a> · ` : ""}${owner ? `<a href="https://t.me/${esc(owner)}">Loyiha egasi</a> · ` : ""}<a href="/?web=1">Web ilova</a> · <a href="/admin/">Boshqaruv</a></span>
   </footer>
 </div>
 </body>
