@@ -32,7 +32,7 @@ function setup({ replies = [] } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "yuk-ops-"));
   const responder = createResponder({ client, name: "t", ownerId: OWNER, opsDir: dir, root: dir, audit: async () => {}, store, receiptsDir: path.join(dir, "receipts"), run, now: () => time });
   const say = (fromId, text, extra = {}) => responder.handle({ fromId: String(fromId), from: `@u${fromId}`, text, id: 1, bot: false, ...extra }, String(fromId));
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const settle = () => responder.idle(); // navbatlar bo'shaguncha (vaqtga bog'liq emas)
   return { store, responder, sent, files, prompts, say, settle, advance: (ms) => (time += ms), to: (id) => sent.filter(([peer]) => peer === String(id)).map(([, text]) => text) };
 }
 

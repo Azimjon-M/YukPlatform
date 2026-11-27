@@ -243,6 +243,8 @@ function lane() {
   let size = 0;
   return {
     get size() { return size; },
+    // Navbatdagi hamma ish tugaguncha (test uchun)
+    idle: async () => { while (size > 0) await tail; },
     push(job) {
       size += 1;
       tail = tail.then(job).catch((e) => console.error(`Navbat xatosi: ${e.message}`)).finally(() => (size -= 1));
@@ -553,6 +555,8 @@ export function createResponder({ client, name, ownerId, opsDir, root, audit, gr
       return () => clearInterval(timer);
     },
     notices,
+    // Hamma navbat bo'shaguncha kutadi (testlar)
+    idle: async () => { for (const l of Object.values(lanes)) await l.idle(); },
     // entry — inbox yozuvi (receipt — saqlangan chek fayli); inputChat — javob qaytadigan joy
     async handle(entry, inputChat) {
       if (entry.bot) return;
