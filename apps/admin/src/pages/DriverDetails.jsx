@@ -275,6 +275,7 @@ export function DriverDetails({ driver, now, onPurged, idleSince = null }) {
             </Item>
             <Item label="Obuna">
               {[PLANS[driver.plan]?.icon, PLANS[driver.plan]?.name ?? driver.plan].filter(Boolean).join(" ")}
+              {driver.plan !== "free" && <span className="muted small"> · {driver.planUntil ? `${formatDateTime(driver.planUntil)} gacha` : "muddatsiz"}</span>}
               {driver.autoPro && <span className="muted small"> · 📡 Telegram akkaunt ulagan</span>}
             </Item>
             {(driver.deletedCount > 0 || shown.deleted) && (

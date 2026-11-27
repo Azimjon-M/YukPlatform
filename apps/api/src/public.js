@@ -103,6 +103,7 @@ import {
 } from "@yuk/shared";
 import { APK_PATH, APP_LOGIN_TTL_MS, CHAT_AUDIO_DIR, MAIN_TG_ACCOUNT, PUSH_TOKEN, readRelease } from "@yuk/store";
 import { createFeedList } from "./feedList.js";
+import { landingPage } from "./landing.js";
 import { SESSION_TTL_S, verifyLoginWidget, verifyWebAppData } from "./telegramAuth.js";
 import { readChats } from "./botMessage.js";
 
@@ -1328,6 +1329,38 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
 
   pub.use((req, res, next) => next(httpError(404, "Topilmadi")));
   app.use("/pub", pub);
+
+  // Bosh sahifa (landing.js, 2026-11-27): oddiy brauzerdan parametrsiz kelgan odamga — loyiha va obunalar haqida.
+  // Telegram Mini App va botning havolalari (?t=…, ?v=…, ?startapp…) — ilovaning o'zi; Telegram ichida parametrsiz ochilsa,
+  // sahifadagi skript #tgWebAppData ni ko'rib ilovaga o'tkazadi. /login — web ilovaga kirish
+  let landingStats = { at: -Infinity, value: null };
+  const siteStats = () => {
+    if (now() - landingStats.at < 10 * 60_000) return landingStats.value;
+    let value = null;
+    try {
+      const sources = store.db.prepare("SELECT COUNT(*) AS n FROM sources WHERE enabled = 1").get().n;
+      const day = store.db.prepare("SELECT uniq FROM source_days WHERE source = '*' ORDER BY day DESC LIMIT 1").get();
+      if (sources && day?.uniq) value = { sources, posts: day.uniq };
+    } catch {
+      value = null; // jadval hali yo'q (eski baza) — raqamlarsiz
+    }
+    landingStats = { at: now(), value };
+    return value;
+  };
+  app.get("/login", (req, res) => res.redirect("/?web=1"));
+  app.get("/", (req, res, next) => {
+    const telegram = /telegram|tgwebapp/i.test(req.get("user-agent") ?? "");
+    if (telegram || Object.keys(req.query).length > 0) return next();
+    res.set("cache-control", "no-cache").type("html").send(
+      landingPage({
+        settings: store.planSettings?.() ?? null,
+        stats: siteStats(),
+        bot: (store.getSetting("bot_username") ?? env.BOT_USERNAME ?? "").replace(/^@/, "") || null,
+        support: (env.SUPPORT_USERNAME ?? "YukExperti").replace(/^@/, "") || null,
+        apk: Boolean(apkDir && readRelease(apkDir)),
+      }),
+    );
+  });
 
   // Web ilovaning o'zi (npm run web:build → apps/web/dist): shu server orqali http://localhost:3001
   const index = webDist ? path.join(webDist, "index.html") : null;

@@ -1142,3 +1142,23 @@ test("GET /pub/avatar/source/:name — tokensiz, faqat bazadagi yoqilgan manba; 
   assert.equal(Buffer.from(await res.arrayBuffer()).toString(), "jpeg");
   for (const name of ["@ochiq_emas", "@begona_guruh"]) assert.equal((await fetch(`${base}/pub/avatar/source/${encodeURIComponent(name)}`)).status, 404, name);
 });
+
+test("bosh sahifa (2026-11-27): oddiy brauzerga — loyiha va obunalar (narx sozlamadan); Telegram yoki parametr bilan — ilova; /login → web ilova", async () => {
+  store.setPlanSettings({ prices: { pro: 50000, max: 0 }, days: 30, payInfo: "Click: 8600 <b>…" });
+  const page = await fetch(`${base}/`, { headers: { "user-agent": "Mozilla/5.0 Chrome" } });
+  const html = await page.text();
+  assert.equal(page.status, 200);
+  assert.match(html, /<title>Yuk Ekspert/);
+  assert.match(html, /⭐ Pro<\/h3>\s*<p class="price">50 000 so&#39;m <small>30 kunga<\/small>/);
+  assert.match(html, /💎 Max<\/h3>\s*<p class="price">Narxi tez orada/);
+  assert.ok(html.includes("Click: 8600 &lt;b&gt;…"), "rekvizit matni xavfsiz chiqariladi");
+  assert.match(html, /t\.me\/YukExperti\?text=/);
+  // Ilova: parametr yoki Telegram brauzeri
+  for (const [url, ua] of [[`${base}/?v=filtr`, "Mozilla/5.0 Chrome"], [`${base}/`, "Mozilla/5.0 Telegram-Android/11"]]) {
+    const app = await fetch(url, { headers: { "user-agent": ua } });
+    assert.ok(!(await app.text()).includes("<title>Yuk Ekspert — yuk e'lonlari"), url);
+  }
+  const login = await fetch(`${base}/login`, { redirect: "manual" });
+  assert.deepEqual([login.status, login.headers.get("location")], [302, "/?web=1"]);
+  store.setPlanSettings({ prices: { pro: 0, max: 0 }, payInfo: "" });
+});

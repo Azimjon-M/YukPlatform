@@ -103,4 +103,5 @@ async function request(method, path, { params, body, timeoutMs = method === "GET
 export const get = (path, params, options) => request("GET", path, { params, ...options });
 export const post = (path, body = {}, options) => request("POST", path, { body, ...options });
 export const patch = (path, body = {}, options) => request("PATCH", path, { body, ...options });
+export const put = (path, body = {}, options) => request("PUT", path, { body, ...options });
 export const del = (path, options) => request("DELETE", path, options);

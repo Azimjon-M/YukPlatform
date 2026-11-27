@@ -64,11 +64,15 @@ export function pageOf(items, page, size = GROUPS_PAGE_SIZE) {
 }
 
 // Obunalar (2026-11-27, @yuk/shared roles.js): Free — ochiq guruhlarning matnli e'lonlari, 30 ta guruh; Pro — + ovozli
-// e'lonlar va O'Z yopiq guruhlari, 100 ta; Max — hamma yopiq guruhlar, 300 ta. Obunani admin beradi
+// e'lonlar va O'Z yopiq guruhlari, 100 ta; Max — hamma yopiq guruhlar, 300 ta. Obuna — yordamchi akkaunt orqali (SUPPORT: to'lov cheki), narxlar — yuk.gtpro.uz
 export const CLOSED_PRO_HINT =
-  "🔒 Yopiq guruhlaringizdagi e'lonlar ⭐ Pro obunada keladi (ovozli e'lonlar ham). Obunani admin beradi.";
+  "🔒 Yopiq guruhlaringizdagi e'lonlar ⭐ Pro obunada keladi (ovozli e'lonlar ham). Obuna olish: «⚙️ Sozlamalar» → «👤 Hisob».";
+// Obuna olish: yordamchi akkauntga yoziladi (to'laydi, chek yuboradi — apps/collector opsResponder.js); narxlar saytda
+export const SUPPORT = "YukExperti";
+export const SITE_URL = "https://yuk.gtpro.uz";
+export const buyUrl = (plan = "pro") => `https://t.me/${SUPPORT}?text=${encodeURIComponent(`Assalomu alaykum! ${plan === "max" ? "Max" : "Pro"} obunasini olmoqchiman.`)}`;
 export const PLAN_ABOUT = {
-  free: "Free — ochiq guruhlarning matnli e'lonlari, 30 tagacha guruh tanlash. ⭐ Pro: ovozli e'lonlar va o'z yopiq guruhlaringiz (100 ta guruh). 💎 Max: hamma yopiq guruhlar (300 ta), e'lon birinchi bo'lib sizga.",
+  free: "Free — ochiq guruhlarning matnli e'lonlari, 30 tagacha guruh tanlash. ⭐ Pro: ovozli e'lonlar va o'z yopiq guruhlaringiz (100 ta guruh). 💎 Max: hamma yopiq guruhlar (300 ta), e'lon birinchi bo'lib sizga. Ikkalasida 24/7 yordamchi.",
   pro: "⭐ Pro — ovozli e'lonlar va o'z akkauntingizdagi yopiq guruhlar, 100 tagacha guruh tanlash. 💎 Max: boshqa yopiq guruhlar ham (300 ta), e'lon birinchi bo'lib sizga.",
   max: "💎 Max — hamma ochiq va yopiq guruhlar, ovozli e'lonlar, 300 tagacha guruh tanlash, e'lon birinchi bo'lib sizga.",
 };

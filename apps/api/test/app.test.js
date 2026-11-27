@@ -234,3 +234,26 @@ test("web: /admin sahifalari index.html, fayllar o'zi, / → /admin/", async () 
   assert.equal(root.status, 302);
   assert.equal(root.headers.get("location"), "/admin/");
 });
+
+test("obuna sozlamalari va to'lovlar (2026-11-27): narx/rekvizit saqlanadi; to'lovni tasdiqlash / rad etish; obuna muddat bilan", async () => {
+  const saved = await send("PUT", "/api/plan-settings", { prices: { pro: 50000, max: 120000 }, days: 30, payInfo: "Click: 8600 …", holdHours: 48 });
+  assert.deepEqual(saved.body, { prices: { pro: 50000, max: 120000 }, days: 30, payInfo: "Click: 8600 …", holdHours: 48 });
+  assert.equal((await get("/api/plan-settings")).body.prices.max, 120000);
+
+  store.saveDriver(880, { name: "To'lovchi", role: "haydovchi" });
+  const held = store.claimPayment({ chatId: 880, plan: "pro", amount: 50000, sure: true }).payment;
+  const list = (await get("/api/payments")).body.items;
+  assert.deepEqual([list[0].id, list[0].status, list[0].name], [held.id, "held", "To'lovchi"]);
+  assert.equal((await send("POST", `/api/payments/${held.id}/decide`, { ok: "ha" })).status, 400);
+  const rejected = await send("POST", `/api/payments/${held.id}/decide`, { ok: false, reason: "chek soxta" });
+  assert.deepEqual([rejected.status, rejected.body.status, rejected.body.reason], [200, "rejected", "chek soxta"]);
+  assert.equal(store.getDriver(880).plan, "free");
+  assert.equal((await send("POST", `/api/payments/${held.id}/decide`, { ok: true })).status, 409, "hal qilingan");
+  assert.equal((await get(`/api/payments/${held.id}/receipt`)).status, 404, "chek fayli yo'q");
+
+  // Qo'lda obuna: muddatsiz yoki N kunga
+  const forever = (await send("PATCH", "/api/drivers/880", { plan: "max" })).body;
+  assert.deepEqual([forever.plan, forever.planUntil], ["max", null]);
+  const month = (await send("PATCH", "/api/drivers/880", { plan: "pro", days: 30 })).body;
+  assert.ok(month.plan === "pro" && month.planUntil > Date.now() + 29 * 86_400_000);
+});

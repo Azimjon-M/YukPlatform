@@ -5,8 +5,8 @@
 // O'chirish — serverda hamma ma'lumot (DELETE /pub/me, botdagi /ochirish bilan bir xil).
 import { useState } from "react";
 import { deleteMe, signOut } from "./api.js";
-import { confirmAction, haptic, showAlert } from "./telegram.js";
-import { PLAN_ABOUT } from "./feedGroups.js";
+import { confirmAction, haptic, openLink, showAlert } from "./telegram.js";
+import { PLAN_ABOUT, SITE_URL, buyUrl } from "./feedGroups.js";
 import { Section } from "./ui.jsx";
 
 const LOGOUT_QUESTION =
@@ -37,7 +37,22 @@ export function AccountCard({ me, onSignedOut, onDeleted }) {
     <Section title="👤 Hisob">
       {who && <p className="account-who">Telegram: {who}</p>}
       {/* Obuna (2026-11-27: Free / Pro / Max) — admin beradi */}
-      {me.role !== "yuk_beruvchi" && <p className="hint">Obuna: {PLAN_ABOUT[me.plan] ?? PLAN_ABOUT.free} Obunani admin beradi.</p>}
+      {me.role !== "yuk_beruvchi" && (
+        <>
+          <p className="hint">Obuna: {PLAN_ABOUT[me.plan] ?? PLAN_ABOUT.free}</p>
+          {me.plan !== "max" && (
+            <p className="hint">
+              <a href={buyUrl(me.plan === "pro" ? "max" : "pro")} onClick={(e) => openLink(buyUrl(me.plan === "pro" ? "max" : "pro"), e)}>
+                {me.plan === "pro" ? "💎 Max'ga o'tish" : "⭐ Obuna olish"} — yordamchiga yozing
+              </a>
+              {" · "}
+              <a href={SITE_URL} onClick={(e) => openLink(SITE_URL, e)}>
+                narxlar
+              </a>
+            </p>
+          )}
+        </>
+      )}
       <div className="account-actions">
         <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => run("logout", LOGOUT_QUESTION, signOut, onSignedOut)}>
           {busy === "logout" ? "Chiqilyapti..." : "🚪 Chiqish"}

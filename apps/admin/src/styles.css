@@ -3083,6 +3083,52 @@ a.btn {
   height: 30px;
 }
 
+/* «💳 Obuna va to'lovlar» (2026-11-27) */
+.plan-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px 14px;
+  align-items: end;
+  margin: 10px 0 14px;
+}
+
+.plan-settings .field-wide {
+  grid-column: 1 / -1;
+}
+
+.plan-settings textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.payments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.payment-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.payment-main,
+.payment-side {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.payment-side {
+  align-items: flex-end;
+}
+
 .admin-mark {
   background: var(--accent-soft);
   color: var(--accent-strong);

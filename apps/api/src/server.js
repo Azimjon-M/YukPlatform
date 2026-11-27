@@ -110,6 +110,7 @@ const app = createApp({
   avatars,
   processes,
   adminDist: path.join(ROOT, "apps/admin/dist"),
+  receiptsDir: path.join(ROOT, "apps/collector/receipts"),
   secret,
   sessions,
   publicUrl: PUBLIC_LOCAL_URL,

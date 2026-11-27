@@ -13,6 +13,7 @@ import { userEvents } from "./history.js";
 import { createAiQueries } from "./ai.js";
 import { AUTO_PRO_SQL, createTgAccountQueries, hashPhone } from "./tgAccounts.js";
 import { createFeedQueries, migrateFeed } from "./feed.js";
+import { createPlanQueries, effectivePlan, migratePlans } from "./plans.js";
 import { createAppLoginQueries } from "./appLogins.js";
 import { createAppDeviceQueries } from "./appDevices.js";
 import { createPushQueries } from "./push.js";
@@ -26,6 +27,7 @@ export { APP_LOGIN_CODE, APP_LOGIN_TTL_MS } from "./appLogins.js";
 export { PUSH_TOKEN } from "./push.js";
 export { APK_PATH, readRelease, sizeText } from "./appRelease.js";
 export { hashPhone, MAIN_TG_ACCOUNT, SCAN_RECHECK, TG_ACCOUNT_NAME } from "./tgAccounts.js";
+export { DEFAULT_PLAN_SETTINGS, PAID_PLANS, PAYMENT_OPEN, cleanPlanSettings } from "./plans.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // YUK_DB — boshqa fayl bilan sinash uchun (masalan, YUK_DB=data/sinov.db); yo'l YukPlatform papkasiga nisbatan
@@ -462,7 +464,8 @@ function markEarlySignOuts(db) {
   }
 }
 
-function driverRow(row) {
+// time — hozir (ms): muddati o'tgan pulli obuna Free deb ko'rinadi (plans.js effectivePlan)
+function driverRow(row, time = Date.now()) {
   if (!row) return null;
   return {
     chatId: row.chat_id,
@@ -475,7 +478,8 @@ function driverRow(row) {
     profiles: parse(row.profiles) ?? {},
     draft: parse(row.draft),
     active: row.active === 1,
-    plan: row.plan ?? "free",
+    plan: effectivePlan(row, time),
+    planUntil: effectivePlan(row, time) === "free" ? null : (row.plan_until ?? null), // obuna qachongacha (NULL — muddatsiz)
     autoPro: row.auto_pro === 1, // o'z Telegram akkauntini ulagan (AUTO_PRO_SQL; nomi eskidan — 2026-11-27 dan Pro bermaydi)
     isAdmin: row.is_admin === 1,
     phone: row.phone ?? null,
@@ -560,6 +564,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
   db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA);
   migrate(db);
+  migratePlans(db);
   migrateFeed(db);
   // Qidiruv: fold(matn) LIKE fold(so'rov) — kirill/lotin va katta-kichik harf farqi yo'q (@yuk/shared searchText.js)
   db.function("fold", { deterministic: true }, (value) => (value == null ? null : foldText(value)));
@@ -634,6 +639,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
     ...createTgAccountQueries(db, now),
     // Haydovchining tezkor rejimi: asl matn bilan kimga ketgani, «Mening guruhlarim» ro'yxati (feed.js)
     ...createFeedQueries(db, now),
+    ...createPlanQueries(db, now),
     // Ilovaga bot orqali kirish kodlari (appLogins.js)
     ...createAppLoginQueries(db, now),
     // Ilova qurilmalari — ko'pi bilan 2 ta (appDevices.js)
@@ -841,7 +847,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
     // --- Haydovchilar ---
     getDriver(chatId) {
-      return driverRow(q.getDriver.get(chatId));
+      return driverRow(q.getDriver.get(chatId), now());
     },
 
     // Ilovaga «kod bilan kirish» (2026-11-25, Azimjon: «ilova global bo'lishi kerak»): raqam (istalgan davlat) yoki
@@ -874,6 +880,8 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
       const before = this.getDriver(chatId);
       q.insertDriver.run(chatId, fields.name ?? null, fields.username ?? null, time, time);
       const columns = { name: fields.name, username: fields.username, active: fields.active, role: fields.role, plan: fields.plan };
+      // Obuna qo'lda berilsa (boshqaruv markazi) — muddat: planUntil (ms) yoki muddatsiz (plans.js)
+      if (fields.plan !== undefined) columns.plan_until = fields.plan === "free" ? null : (fields.planUntil ?? null);
       if ("profile" in fields) columns.profile = json(fields.profile);
       if ("profiles" in fields) columns.profiles = json(fields.profiles);
       if ("draft" in fields) columns.draft = json(fields.draft);
@@ -1160,7 +1168,7 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
 
     // Profili bor va yoqilgan foydalanuvchilar: role = "haydovchi" (yuk oladi) yoki "yuk_beruvchi" (mashina oladi)
     activeUsers(role = "haydovchi") {
-      return q.activeUsers.all(role).map(driverRow);
+      return q.activeUsers.all(role).map((row) => driverRow(row, now()));
     },
 
     // Eski nom: faol haydovchilar

@@ -19,7 +19,7 @@
 //                                        buyruqni ops/<nom>.outbox/ orqali shu ulanishga topshiradi (bitta sessiya — bitta ulanish)
 // --name <nom> — boshqa operator akkaunt (standart: operator)
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -34,6 +34,32 @@ import { createClient, sendLoginCode, signInWithCode, signInWithPassword } from 
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const OPS_DIR = path.resolve(HERE, "../ops");
+// To'lov cheklari (2026-11-27, obuna sotib olish): foydalanuvchi yordamchiga yuborgan rasm / PDF — <id>/<xabar raqami>.<kengaytma>.
+// Gitga kirmaydi (.gitignore); qabulxona Claude'i faqat O'SHA odamning papkasini o'qiy oladi (opsResponder.js receptionDeny)
+export const RECEIPTS_DIR = path.resolve(HERE, "../receipts");
+const RECEIPT_MAX_BYTES = 10 * 1024 * 1024;
+const RECEIPTS_PER_DAY = 5;
+const RECEIPT_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" };
+
+// Shaxsiy xabardagi rasm yoki PDF → fayl yo'li (loyiha papkasiga nisbatan) | null (chek emas, juda katta, kunlik limit)
+async function saveReceipt(client, m, fromId) {
+  const ext = m.photo ? "jpg" : RECEIPT_TYPES[m.document?.mimeType];
+  if (!ext) return null;
+  if (Number(m.document?.size ?? 0) > RECEIPT_MAX_BYTES) return null;
+  const dir = path.join(RECEIPTS_DIR, String(fromId).replace(/\D/g, ""));
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const today = [];
+  for (const f of await readdir(dir).catch(() => [])) {
+    const info = await stat(path.join(dir, f)).catch(() => null);
+    if (info && Date.now() - info.mtimeMs < 24 * 60 * 60 * 1000) today.push(f);
+  }
+  if (today.length >= RECEIPTS_PER_DAY) return null;
+  const data = await client.downloadMedia(m, {});
+  if (!data?.length || data.length > RECEIPT_MAX_BYTES) return null;
+  const file = path.join(dir, `${m.id}.${ext}`);
+  await writeFile(file, data, { mode: 0o600 });
+  return path.relative(ROOT, file);
+}
 const ROOT = path.resolve(HERE, "../../..");
 export const OPS_LOG = path.join(ROOT, "data", "ops.log");
 const NAME = /^[a-z][a-z0-9_-]{1,19}$/;
@@ -411,8 +437,10 @@ async function userInfo(raw) {
       active: d.active,
       pausedAt: time(d.pausedAt),
       pausedBy: d.pausedBy,
-      plan: d.plan,
-      autoPro: d.autoPro,
+      plan: d.plan, // free | pro | max (muddati o'tgan bo'lsa — free)
+      planUntil: time(d.planUntil), // obuna qachongacha («—» — muddatsiz yoki Free)
+      tgAccountLinked: d.autoPro,
+      payments: (store.listPayments?.({ chatId, limit: 5 }) ?? []).map((p) => ({ id: p.id, plan: p.plan, amount: p.amount, status: p.status, at: time(p.createdAt), reason: p.reason })),
       phoneShared: Boolean(d.phone),
       registered: time(d.createdAt),
       lastSeen: `${time(d.seenAt)} (${d.seenVia ?? "?"})`,
@@ -445,9 +473,19 @@ async function listen(name) {
   // Guruhlar (opsGroup.js): faqat ops/<nom>.groups.json dagilar, faqat egasi belgilangan bo'lsa
   const groups = ownerId ? createGroupResponder({ client, name, ownerId, opsDir: OPS_DIR, audit }) : null;
   const groupTitles = groups ? await groups.load().catch((e) => (console.error(`Guruhlar yuklanmadi: ${e.message}`), [])) : [];
+  // Obunalar (2026-11-27): yordamchi foydalanuvchining obunasini (limitlar) va to'lovlarni bazadan ko'radi / yozadi
+  let store = null;
+  if (ownerId) {
+    try {
+      store = (await import("@yuk/store")).openStore();
+    } catch (error) {
+      console.error(`Baza ochilmadi — obuna va to'lovlar ishlamaydi: ${error.message}`);
+    }
+  }
   const responder = ownerId
-    ? createResponder({ client, name, ownerId, opsDir: OPS_DIR, root: ROOT, audit, groups })
+    ? createResponder({ client, name, ownerId, opsDir: OPS_DIR, root: ROOT, audit, groups, store, receiptsDir: RECEIPTS_DIR })
     : null;
+  responder?.start?.();
   client.addEventHandler(async (event) => {
     const m = event.message;
     if (event.isGroup && !m.out && groups) {
@@ -467,6 +505,10 @@ async function listen(name) {
       };
       const inputChat = await m.getInputChat();
       await client.markAsRead(inputChat).catch(() => {});
+      // To'lov cheki bo'lishi mumkin (rasm / PDF) — egasidan boshqa odamniki saqlanadi
+      if (responder && !entry.bot && entry.fromId !== ownerId && m.media) {
+        entry.receipt = await saveReceipt(client, m, entry.fromId).catch((e) => (console.error(`Chek saqlanmadi: ${e.message}`), null));
+      }
       await appendFile(inboxFile(name), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
       console.log(JSON.stringify(entry));
       await responder?.handle(entry, inputChat);

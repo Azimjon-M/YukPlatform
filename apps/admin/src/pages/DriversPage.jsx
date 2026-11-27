@@ -18,6 +18,7 @@ import {
   driverMatches,
   driverPill,
   driverShown,
+  formatDateTime,
   formatNumber,
   initials,
   isProDriver,
@@ -25,6 +26,7 @@ import {
 import { useApi, useNow, usePaged } from "../hooks.js";
 import { Async, Avatar, Badge, Button, ConfirmDialog, Empty, PageHeader, PagedPager, TimeAgo, Toggle, avatarUrl, useTitle, useToast } from "../ui.jsx";
 import { DriverDetails } from "./DriverDetails.jsx";
+import { PlansCard } from "./PlansCard.jsx";
 
 
 // Kanal va guruhga a'zo emas (bot tekshiradi, .env REQUIRED_CHATS): bot ishlamaydi, yuk yuborilmaydi
@@ -164,12 +166,13 @@ function PlanSelect({ driver, onChanged }) {
   const notify = useToast();
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState(PLANS[driver.plan] ? driver.plan : "free");
-  async function change(next) {
+  const [days, setDays] = useState("0"); // qo'lda berilganda: 0 — muddatsiz
+  async function change(next, span = days) {
     const before = plan;
     setBusy(true);
     setPlan(next);
     try {
-      await patch(`/api/drivers/${driver.chatId}`, { plan: next });
+      await patch(`/api/drivers/${driver.chatId}`, { plan: next, days: Number(span) || 0 });
       notify(PLAN_NOTES[next]);
       onChanged();
     } catch (e) {
@@ -189,6 +192,14 @@ function PlanSelect({ driver, onChanged }) {
           </option>
         ))}
       </select>
+      {plan !== "free" && (
+        <select value={days} disabled={busy} aria-label="Obuna muddati" onChange={(e) => (setDays(e.target.value), change(plan, e.target.value))}>
+          <option value="0">{driver.planUntil ? `${formatDateTime(driver.planUntil)} gacha` : "muddatsiz"}</option>
+          <option value="30">30 kunga</option>
+          <option value="90">90 kunga</option>
+          <option value="365">1 yilga</option>
+        </select>
+      )}
     </label>
   );
 }
@@ -348,6 +359,7 @@ export function DriversPage() {
             <Empty title="Haydovchilar yo'q">Haydovchi botga /start yozib, mashinasi va yo'nalishini tanlaganda shu yerda paydo bo'ladi.</Empty>
           ) : (
             <div className="stack">
+              <PlansCard onChanged={state.reload} />
               <div className="stats">
                 <Stat label="jami" value={items.length} />
                 <Stat label="faol" value={counts.active} tone={counts.active ? "good" : null} />

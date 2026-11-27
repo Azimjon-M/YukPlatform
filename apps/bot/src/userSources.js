@@ -331,7 +331,7 @@ export function reviewTrial(stats, { until, now, rules = SOURCE_RULES }) {
 
 // Qo'shgan odamga yoziladigan natija. plan — qo'shgan odamning obunasi (2026-11-27): yopiq guruh e'lonlari Free'ga kelmaydi —
 // «doimiy qo'shildi» deb yozib, hech narsa yubormaslik chalg'itadi
-export const CLOSED_NEEDS_PRO = "🔒 Bu yopiq guruh: undagi e'lonlar sizga ⭐ Pro obunada keladi (obunani admin beradi).";
+export const CLOSED_NEEDS_PRO = "🔒 Bu yopiq guruh: undagi e'lonlar sizga ⭐ Pro obunada keladi. Obuna olish: @YukExperti ga yozing (narxlar: yuk.gtpro.uz).";
 export function resultText(source, { plan = null } = {}) {
   const title = sourceTitle(source);
   const note = source.checkNote ? escapeHtml(source.checkNote) : "";

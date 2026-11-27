@@ -1,5 +1,6 @@
 import { foldText } from "@yuk/shared";
 import { AUTO_PRO_SQL } from "./tgAccounts.js";
+import { effectivePlan } from "./plans.js";
 // Boshqaruv markazi (apps/api) uchun so'rovlar: yuklar ro'yxati va filtrlar, navbat, haydovchilar, manbalar, ko'rsatkichlar.
 // Bot va collector bularni ishlatmaydi — ular index.js dagi asosiy funksiyalar bilan ishlaydi.
 
@@ -197,7 +198,8 @@ export function createAdminQueries(db, now) {
           profile: parse(row.profile),
           registering: row.profile == null && row.draft != null,
           active: row.active === 1,
-          plan: row.plan ?? "free",
+          plan: effectivePlan(row, now()),
+          planUntil: effectivePlan(row, now()) === "free" ? null : (row.plan_until ?? null),
           autoPro: row.auto_pro === 1,
           isAdmin: row.is_admin === 1,
           // O'z raqami (ixtiyoriy). Faqat boshqaruv markazida (localhost) ko'rsatiladi, Mini App'dagi admin ro'yxatida — yo'q

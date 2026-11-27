@@ -96,6 +96,7 @@ export function createApp({
   processes,
   env = process.env,
   adminDist = null,
+  receiptsDir = null, // to'lov cheklari (apps/collector/receipts) — «To'lovlar» da ko'rsatish uchun
   ai = createAiTools(),
   secret = null,
   sessions = null,
@@ -325,7 +326,9 @@ export function createApp({
     if ("plan" in body) {
       // Obuna: free | pro | max (roles.js planAllows, 2026-11-27). Faqat boshqaruv markazidan
       if (!PLAN_IDS.includes(body.plan)) throw httpError(400, `plan: ${PLAN_IDS.join(" | ")}`);
-      res.json(store.saveDriver(chatId, { plan: body.plan, why: "admin" }));
+      // days — necha kunga (berilmasa yoki 0 — muddatsiz)
+      const days = Number(body.days) > 0 ? Math.min(3660, Math.round(Number(body.days))) : null;
+      res.json(store.saveDriver(chatId, { plan: body.plan, planUntil: days ? Date.now() + days * 86_400_000 : null, why: "admin" }));
       return;
     }
     if (!("isAdmin" in body)) throw httpError(400, "isAdmin, plan yoki blocked kerak");
@@ -341,6 +344,27 @@ export function createApp({
     const chatId = Number(req.params.chatId);
     if (!store.getDriver(chatId)) throw httpError(404, "Haydovchi topilmadi");
     res.json({ url: `${publicUrl}/?t=${sessions.issue(chatId, { ttl: 12 * 60 * 60 })}` });
+  });
+
+  // --- Obuna narxlari va to'lovlar (2026-11-27; @yuk/store plans.js) ---
+  // Narx / muddat / rekvizit — sayt (yuk.gtpro.uz), Mini App va yordamchi akkaunt shu sozlamadan o'qiydi.
+  // To'lov cheklarini yordamchi qabul qiladi (apps/collector opsResponder.js); qarorni egasi Telegram'da (/tolov N ha|yoq)
+  // yoki shu yerda beradi — foydalanuvchiga xabarni baribir yordamchi yozadi (store.paymentNotices, ≤ 1 daqiqa)
+  api.get("/plan-settings", (req, res) => res.json(store.planSettings()));
+  api.put("/plan-settings", (req, res) => res.json(store.setPlanSettings(req.body ?? {})));
+  api.get("/payments", (req, res) => res.json({ items: store.listPayments({ limit: 100 }) }));
+  api.post("/payments/:id/decide", (req, res) => {
+    const ok = bool(req.body?.ok, "ok");
+    const done = store.decidePayment(Number(req.params.id), ok, typeof req.body?.reason === "string" ? req.body.reason : null);
+    if (!done) throw httpError(409, "To'lov topilmadi yoki allaqachon hal qilingan");
+    res.json(done);
+  });
+  api.get("/payments/:id/receipt", (req, res) => {
+    const payment = store.getPayment(Number(req.params.id));
+    const file = payment?.receipt && receiptsDir ? path.resolve(path.dirname(path.dirname(path.dirname(receiptsDir))), payment.receipt) : null;
+    // Faqat cheklar papkasi ichidagi fayl
+    if (!file || !file.startsWith(receiptsDir + path.sep) || !existsSync(file)) throw httpError(404, "Chek fayli yo'q");
+    res.set("cache-control", "private, max-age=3600").sendFile(file);
   });
 
   // --- Manbalar (collector kuzatadigan guruhlar; o'zgarish keyingi aylanishda kuchga kiradi) ---

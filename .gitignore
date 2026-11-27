@@ -43,3 +43,6 @@ data/avatars/
 apps/collector/ops/
 data/media/
 data/chat-audio/
+
+# Yordamchi akkauntga yuborilgan to'lov cheklari (shaxsiy ma'lumot)
+apps/collector/receipts/
