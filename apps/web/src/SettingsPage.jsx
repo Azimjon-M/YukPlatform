@@ -202,6 +202,15 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
     if (VEHICLE_SECTIONS.includes(id) && !needVehicle) return false;
     return !registering || wizard.step.sections.includes(id);
   };
+  const scrollToGroups = () =>
+    setTimeout(() => {
+      const el = document.getElementById("groups");
+      if (!el) return;
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      el.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+      el.classList.add("flash");
+      setTimeout(() => el.classList.remove("flash"), 1200);
+    }, 80);
   const pickGroup = (name) => {
     const result = toggleFeedSource(form, name);
     if (result.error) {
@@ -251,9 +260,17 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
             onPick={(id) => {
               setProblem(null);
               setForm((f) => selectFeed(f, id));
+              // Bir sahifali filtrda: guruh rejimi tanlansa — ro'yxat chizilgach unga silliq suriladi
+              if (!registering && FEED_MODES[id]?.groups) scrollToGroups();
             }}
           />
         </Section>
+      )}
+
+      {/* Guruhlar — rejim ostida (2026-11-27, Azimjon: «Faqat mening guruhlarimdan» tanlansa guruh tanlash pastda qolib
+          topilmasdi); rejim tanlanganda shu bo'limga silliq suriladi */}
+      {show("groups") && (
+        <FeedGroups online={online} chosen={form.feedSources} onToggle={pickGroup} error={errorFor("groups")} onList={setGroupList} />
       )}
 
       {show("trucks") && (
@@ -284,10 +301,6 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
             }}
           />
         </Section>
-      )}
-
-      {show("groups") && (
-        <FeedGroups online={online} chosen={form.feedSources} onToggle={pickGroup} error={errorFor("groups")} onList={setGroupList} />
       )}
 
       {show("class") && (

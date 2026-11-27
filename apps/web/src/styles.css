@@ -105,6 +105,27 @@ main {
   scroll-margin: 16px;
 }
 
+/* Rejim «📌 Tanlangan guruhlar» ga o'tganda guruhlar bo'limi bir lahza belgilanadi (SettingsPage scrollToGroups) */
+.section.flash {
+  animation: section-flash 1.2s ease-out;
+}
+@keyframes section-flash {
+  0%,
+  35% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  100% {
+    border-color: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .section.flash {
+    animation: none;
+  }
+}
+
 .section.invalid {
   border-color: var(--error);
 }
