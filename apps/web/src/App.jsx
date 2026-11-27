@@ -26,7 +26,7 @@ import { RouteMapPage } from "./RouteMapPage.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { ShipperSettings } from "./ShipperSettings.jsx";
 import { canSendData, closeApp, haptic, inTelegram, showAlert } from "./telegram.js";
-import { Notice, Spinner } from "./ui.jsx";
+import { Notice, Section, Spinner } from "./ui.jsx";
 
 const SETTINGS_TAB = { id: "sozlamalar", icon: "⚙️", label: "Sozlamalar" };
 // «🎛 Filtr» (Azimjon, 2026-11-27: «Filtr To'liq MiniApp da bo'lsin … Sozlamalar saxifasida esa Telefon raqam, Telegram
@@ -459,7 +459,20 @@ export function App() {
     page = (
       <>
         {listNotice}
-        {/* Haydovchida filtr — alohida «🎛 Filtr» bo'limida; bu yerda faqat raqam, Telegram akkaunt, ilova va hisob */}
+        {/* Haydovchida filtr — alohida «🎛 Filtr» bo'limida; bu yerda rol, raqam, Telegram akkaunt, ilova va hisob */}
+        {/* «🔄 Rol» — to'liq bo'lim, eng tepada (Azimjon, 2026-11-27). Yuk beruvchida yo'q (2026-11-12) */}
+        {role === "haydovchi" && (
+          <Section title="🔄 Rol" hint="Bugun yuk kerak, ertaga yuk berasizmi — rolni almashtiring. Har rolning sozlamalari alohida saqlanadi.">
+            <p className="phone-line">
+              Siz: <strong>{ROLES[role].icon} {ROLES[role].name}</strong>
+            </p>
+            <div className="account-actions">
+              <button type="button" className="secondary" onClick={() => setChangingRole(true)}>
+                🔄 Rolni almashtirish
+              </button>
+            </div>
+          </Section>
+        )}
         {role === "yuk_beruvchi" && <ShipperSettings key={settingsKey} me={me} initialProfile={initialProfile} scope={scope} onSaved={onSaved} />}
         {online && !registering && (
           <PhoneCard
@@ -470,8 +483,6 @@ export function App() {
             }}
           />
         )}
-        {/* Yuk beruvchi sozlamasida rol qatori yo'q (Azimjon, 2026-11-12) — faqat haydovchiga ko'rsatiladi */}
-        {role === "haydovchi" && !registering && roleLine}
         {/* Telegram akkauntini collector'ga ulash — istalgan foydalanuvchi, faqat o'zinikilari (Azimjon, 2026-11-13:
             «adminlik bermasdan shunchaki sozlamalar ichiga qo'shib ber») */}
         {/* Alohida karta (2026-11-19, Azimjon: «Telefon Raqam sectionidan uzib alohida qil» — sarlavha kulrang yozuv edi) */}
