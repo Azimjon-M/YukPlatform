@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { foldText } from "@yuk/shared";
 import { getFeedSources } from "./api.js";
-import { CLOSED_PRO_HINT, GROUP_SCOPES, OWN_CLOSED_EMPTY_HINT, OWN_EMPTY_HINT, groupOptions, pageButtons, pageOf, scopeOptions } from "./feedGroups.js";
+import { CLOSED_PRO_HINT, closedHint, GROUP_SCOPES, OWN_CLOSED_EMPTY_HINT, OWN_EMPTY_HINT, groupOptions, pageButtons, pageOf, scopeOptions } from "./feedGroups.js";
 import { haptic } from "./telegram.js";
 import { Chips, Section, SourceAvatar, Spinner } from "./ui.jsx";
 
@@ -58,7 +58,7 @@ function Pager({ page, pages, onPage, info }) {
 
 // online — server bilan aloqa bormi; onList(list) — ro'yxat kelganda (SettingsPage sarlavhalarni oladi)
 export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost }) {
-  const [state, setState] = useState({ list: [], loading: online, error: null, pro: false });
+  const [state, setState] = useState({ list: [], loading: online, error: null, plan: "free", max: null, hidden: 0 });
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("open"); // open — 🌐 ochiq, closed — 🔒 yopiq
   const [scope, setScope] = useState("all"); // all — 🌍 Global, own — 👤 Akkauntimdagi
@@ -72,13 +72,15 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
     getFeedSources()
       .then((data) => {
         if (!alive) return;
-        setState({ list: data.sources ?? [], loading: false, error: null, pro: Boolean(data.pro) });
+        // plan — obuna (free | pro | max); eski server faqat pro: true/false beradi
+        const plan = data.plan ?? (data.pro ? "pro" : "free");
+        setState({ list: data.sources ?? [], loading: false, error: null, plan, max: data.max ?? null, hidden: data.hiddenClosed ?? 0 });
         onList?.(data.sources ?? []);
       })
       .catch((e) => {
         if (!alive) return;
         if (e.code === "auth") onAuthLost?.();
-        setState({ list: [], loading: false, error: e, pro: false });
+        setState({ list: [], loading: false, error: e, plan: "free", max: null, hidden: 0 });
       });
     return () => {
       alive = false;
@@ -117,7 +119,12 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
       hint="Belgilaganlaringizdagi yuk e'lonlari botga darhol, saralanmasdan keladi. Ro'yxatda yo'q guruhni botdagi «➕ Guruh qo'shish» bilan qo'shing."
       error={error}
     >
-      {chosen.length > 0 && <p className="summary">Tanlangan: {chosen.length} ta</p>}
+      {chosen.length > 0 && (
+        <p className="summary">
+          Tanlangan: {chosen.length}
+          {state.max ? ` / ${state.max}` : ""} ta
+        </p>
+      )}
       {!online && <p className="hint">Guruhlar ro'yxati internet orqali ochiladi — hozir faqat tanlanganlari ko'rinadi.</p>}
       {state.error && <p className="hint">Ro'yxat ochilmadi: {state.error.message}</p>}
       {online && !state.loading && !state.error && (
@@ -146,7 +153,7 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
           ))}
         </div>
       )}
-      {tab === "closed" && <p className="hint">{state.pro ? "🔒 Pro sifatida yopiq guruhlardagi e'lonlar ham sizga keladi." : CLOSED_PRO_HINT}</p>}
+      {tab === "closed" && <p className="hint">{closedHint(state.plan, state.hidden)}</p>}
       {notice && tab !== "closed" && <p className="hint">{notice}</p>}
       <span ref={topRef} />
       {inTab.length > SEARCH_FROM && (

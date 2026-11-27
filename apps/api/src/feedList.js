@@ -50,14 +50,16 @@ export function createFeedList({ store, now = Date.now }) {
     const guruhlarim = feedMode(profile) === "guruhlarim";
     const owners = new Map();
     const ownerOf = (source) => {
-      if (!owners.has(source)) owners.set(source, store.sourceOwner?.(source) ?? null);
+      if (!owners.has(source)) owners.set(source, store.sourceOwners?.(source) ?? []);
       return owners.get(source);
     };
     const items = [];
     for (const post of store.recentPostsSince(now() - minutes * 60_000, 1500)) {
       if (guruhlarim && !rawWanted(profile, post.source)) continue;
       const closed = isClosedSource(post.source);
-      if (closed && (!closedContact(post) || !planAllows(driver, { kind: "yuk", source: post.source, owner: ownerOf(post.source) }))) continue;
+      if (closed && !closedContact(post)) continue;
+      // Obuna (roles.js): yopiq guruh — Max (hammasi) yoki Pro (o'ziniki); ovozli e'lon — faqat Pro/Max
+      if (!planAllows(driver, { kind: "yuk", source: post.source, owners: closed ? ownerOf(post.source) : null, media: post.media })) continue;
       const { look, load } = lookOf(post);
       if (look.chatter || !filtersWanted(profile, look)) continue;
       const phones = extractPhones(post.text ?? "");

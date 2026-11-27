@@ -3075,6 +3075,14 @@ a.btn {
   color: #fff;
 }
 
+.pro-mark.is-max {
+  background: linear-gradient(135deg, #7b4be0, #2a78d6);
+}
+
+.plan-select select {
+  height: 30px;
+}
+
 .admin-mark {
   background: var(--accent-soft);
   color: var(--accent-strong);

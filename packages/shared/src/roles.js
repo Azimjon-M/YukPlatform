@@ -38,42 +38,68 @@ export const appProfileOf = (user) => (roleOf(user) === "haydovchi" ? (user?.pro
 export const ROLE_KIND = { haydovchi: "yuk", yuk_beruvchi: "mashina" };
 export const KIND_ROLE = { yuk: "haydovchi", mashina: "yuk_beruvchi" };
 
-// --- Obuna ---
-// free — bepul; pro — boshqaruv markazidan beriladi (Azimjon, 2026-11-16: «Yopiq guruhlardagi e'lonlar faqat men pro
-// beradigan foydalanuvchilarga … tekin e'lonlar va yopiq/pulli e'lonlar aralashib ketmasin»)
+// --- Obuna (2026-11-27, Azimjon: «Free, Pro, Max obunalarni joriy qilishimiz kerak») ---
+//   free — ochiq guruhlarning matnli e'lonlari (ovozli e'lon yo'q), 30 tagacha guruh tanlash;
+//   pro  — + ovozli e'lonlar (AI matnga o'giradi), + O'Z yopiq guruhlari (o'z Telegram akkaunti a'zo bo'lgan yoki o'zi
+//          qo'shgan; boshqalarnikini ko'rmaydi), 100 tagacha guruh;
+//   max  — + hamma yopiq guruhlar, 300 tagacha guruh, e'lon birinchi bo'lib unga yuboriladi (planRank).
+// Obuna faqat boshqaruv markazidan beriladi. Telegram akkaunt ulash — hammaga bepul (avvalgi «avtomatik Pro» bekor:
+// ulagan odamning guruhlaridan «🔎 Auto scan» yangi ochiq manbalar topadi — bu bizga foyda; yopig'ini olish — Pro)
 export const PLANS = {
-  free: { name: "Bepul" },
-  pro: { name: "Pro" },
+  free: { name: "Free", icon: "", maxSources: 30 },
+  pro: { name: "Pro", icon: "⭐", maxSources: 100 },
+  max: { name: "Max", icon: "💎", maxSources: 300 },
 };
 export const DEFAULT_PLAN = "free";
 export const PLAN_IDS = Object.keys(PLANS);
+export const planOf = (user) => (PLAN_IDS.includes(user?.plan) ? user.plan : DEFAULT_PLAN);
+// Yuborish tartibi: max → pro → free (bir e'lon ko'p odamga ketsa, har chatga oraliq bor — Max birinchi oladi)
+export const planRank = (user) => PLAN_IDS.indexOf(planOf(user));
+export const byPlan = (a, b) => planRank(b) - planRank(a);
+// Nechta guruh tanlay oladi («📌 Faqat men tanlaydigan guruhlar»)
+export const maxFeedSources = (user) => PLANS[planOf(user)].maxSources;
+
+// «Free obunada ko'pi bilan 30 ta guruh tanlash mumkin (Pro — 100, Max — 300)»
+export function sourcesLimitText(plan) {
+  const id = PLAN_IDS.includes(plan) ? plan : DEFAULT_PLAN;
+  const more = PLAN_IDS.slice(PLAN_IDS.indexOf(id) + 1).map((p) => `${PLANS[p].name} — ${PLANS[p].maxSources}`);
+  return `${PLANS[id].name} obunada ko'pi bilan ${PLANS[id].maxSources} ta guruh tanlash mumkin${more.length ? ` (${more.join(", ")})` : ""}`;
+}
 
 // Yopiq guruh (qo'shimcha Telegram akkaunt o'qiydi): manba nomi raqam (-100…), ochiq guruh esa @nomi.
 // Yuk beruvchining o'zi yuborgan yuk (source null yoki "shipper:…") — ochiq
 export const isClosedSource = (source) => typeof source === "string" && /^-\d+$/.test(source);
 
-// Pro: boshqaruv markazidan berilgan (plan) yoki avtomatik — raqamini ulashgan va Telegram akkauntini bog'lagan
-// (store AUTO_PRO_SQL → user.autoPro)
-export const isPro = (user) => user?.plan === "pro" || user?.autoPro === true;
+// Ovozli e'lon (ovozli xabar yoki dumaloq video — AI matnga o'girgan; posts.media)
+export const isVoiceMedia = (media) => media === "voice" || media === "round";
+
+// Pulli obuna (Pro yoki Max)
+export const isPro = (user) => planOf(user) !== "free";
+export const isMax = (user) => planOf(user) === "max";
 
 // Shu e'lon shu foydalanuvchiga ko'rsatilsin / yuborilsinmi.
-// Yopiq guruhdan — faqat Pro obunadagilarga va shu guruhni o'z akkaunti bilan qo'shgan odamning o'ziga (owner — sources.added_by).
-// Ochiq guruhlardan — hammaga. kind, now — keyingi rejalar uchun (masalan, free: kechikib)
+//   source — manba; yopiq guruh: Max — hammasi, Pro — faqat o'ziniki (owners — store.sourceOwners(source): shu guruh
+//            «o'ziniki» bo'lgan chat id'lar), Free — yo'q;
+//   media  — posts.media: ovozli e'lon faqat Pro/Max.
+// Ochiq guruhlarning matnli e'lonlari — hammaga. kind, now — keyingi rejalar uchun
 // eslint-disable-next-line no-unused-vars
-export function planAllows(user, { kind, now, source = null, owner = null } = {}) {
+export function planAllows(user, { kind, now, source = null, owners = null, media = null } = {}) {
+  const plan = planOf(user);
+  if (isVoiceMedia(media) && plan === "free") return false;
   if (!isClosedSource(source)) return true;
-  if (isPro(user)) return true;
-  return owner != null && user?.chatId != null && Number(owner) === Number(user.chatId);
+  if (plan === "max") return true;
+  if (plan === "free") return false;
+  return user?.chatId != null && (owners ?? []).some((id) => Number(id) === Number(user.chatId));
 }
 
-// Ro'yxat uchun (web «📋 Yuklar», xarita, botdagi «📋 Mos yuklar»): source → ko'rsatilsinmi.
-// ownerOf(source) — store.sourceOwner; har yopiq guruh bir marta so'raladi
-export function planFilter(user, ownerOf) {
-  const owners = new Map();
-  return (source) => {
-    if (!isClosedSource(source)) return true;
-    if (!owners.has(source)) owners.set(source, ownerOf?.(source) ?? null);
-    return planAllows(user, { source, owner: owners.get(source) });
+// Ro'yxat uchun (web «📋 Yuklar», xarita, botdagi «📋 Mos yuklar»): (source, media) → ko'rsatilsinmi.
+// ownersOf(source) — store.sourceOwners; har yopiq guruh bir marta so'raladi
+export function planFilter(user, ownersOf) {
+  const cache = new Map();
+  return (source, media = null) => {
+    if (!isClosedSource(source)) return planAllows(user, { source, media });
+    if (!cache.has(source)) cache.set(source, ownersOf?.(source) ?? []);
+    return planAllows(user, { source, owners: cache.get(source), media });
   };
 }
 

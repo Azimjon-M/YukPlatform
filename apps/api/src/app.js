@@ -323,7 +323,7 @@ export function createApp({
       return;
     }
     if ("plan" in body) {
-      // Obuna: «pro» — yopiq guruhlar e'lonlari ham keladi (roles.js planAllows). Faqat boshqaruv markazidan
+      // Obuna: free | pro | max (roles.js planAllows, 2026-11-27). Faqat boshqaruv markazidan
       if (!PLAN_IDS.includes(body.plan)) throw httpError(400, `plan: ${PLAN_IDS.join(" | ")}`);
       res.json(store.saveDriver(chatId, { plan: body.plan, why: "admin" }));
       return;

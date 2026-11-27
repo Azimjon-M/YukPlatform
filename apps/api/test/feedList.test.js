@@ -38,7 +38,8 @@ test("lenta: «📌 Mening guruhlarim», «📍 Qayerdan» filtri va yopiq guruh
   assert.deepEqual(feed.list(driver({ mode: "guruhlarim", sources: ["@yuk_bbb"] })).items.map((i) => i.post.source), ["@yuk_bbb"]);
   assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [], regions: ["toshkent_sh"] })).items.map((i) => i.post.source), ["@yuk_aaa"]);
   assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] })).items.map((i) => i.post.source), ["@yuk_bbb", "@yuk_aaa"]);
-  assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] }, { plan: "pro" })).items.map((i) => i.post.source), ["-1001", "@yuk_bbb", "@yuk_aaa"]);
+  assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] }, { plan: "pro" })).items.map((i) => i.post.source), ["@yuk_bbb", "@yuk_aaa"], "Pro — begona yopiq yo'q");
+  assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] }, { plan: "max" })).items.map((i) => i.post.source), ["-1001", "@yuk_bbb", "@yuk_aaa"]);
 });
 
 test("lenta: ilova pauzada — bo'sh, active: false; bot pauzasi lentaga ta'sir qilmaydi", () => {
@@ -47,4 +48,17 @@ test("lenta: ilova pauzada — bo'sh, active: false; bot pauzasi lentaga ta'sir 
   assert.equal(feed.list(driver({ mode: "tezkor", sources: [] }, { active: false })).total, 1, "bot pauzada — ilova lentasi ishlaydi");
   assert.deepEqual(feed.list(driver({ mode: "tezkor", sources: [] }, { appActive: false })), { minutes: 10, active: false, total: 0, items: [] });
   assert.equal(feed.list(driver({ mode: "tezkor", sources: [] })).active, true);
+});
+
+test("lenta (obunalar, 2026-11-27): ovozli e'lon — faqat Pro/Max; Pro — o'z yopiq guruhi ko'rinadi", () => {
+  const { store, add, feed } = setup();
+  add("@yuk_aaa", LOAD, 60_000);
+  add("@yuk_bbb", "Farg'onadan Toshkentga 5 tonna yuk bor, isuzu kerak. +998 90 000 00 03", 30_000, { media: "voice" });
+  store.addUserSource({ name: "-1001", chatId: 7, account: "u7-1" }); // 7 o'zi qo'shgan yopiq guruh
+  add("-1001", "Andijondan Toshkentga 10 tonna yuk bor. +998 90 000 00 04", 10_000);
+  const sources = (plan, chatId = 7) => feed.list(driver({ mode: "tezkor", sources: [] }, { plan, chatId })).items.map((i) => i.post.source);
+  assert.deepEqual(sources("free"), ["@yuk_aaa"], "Free — ovozli ham, yopiq ham yo'q");
+  assert.deepEqual(sources("pro"), ["-1001", "@yuk_bbb", "@yuk_aaa"], "Pro — ovozli va o'z yopig'i");
+  assert.deepEqual(sources("pro", 8), ["@yuk_bbb", "@yuk_aaa"], "boshqa Pro — begona yopiq yo'q");
+  assert.deepEqual(sources("max", 8), ["-1001", "@yuk_bbb", "@yuk_aaa"]);
 });

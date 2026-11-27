@@ -4,6 +4,8 @@ import {
   CAPACITY_LIMITS_KG,
   FEED_MODES,
   FEED_SOURCES_MAX,
+  PLANS,
+  sourcesLimitText,
   FORM_SIDES,
   INTL_OPTIONS,
   REGION_IDS,
@@ -94,12 +96,14 @@ export function formFromProfile(profile) {
 // Rejim tanlandi. Guruhlar tanlovi qoladi (rejim yana guruhlisiga qaytsa — qayta belgilash shart emas)
 export const selectFeed = (form, mode) => ({ ...form, feed: mode });
 
-// Guruhni belgilash / olib tashlash → { form } yoki { error } (ko'pi bilan FEED_SOURCES_MAX ta)
-export function toggleFeedSource(form, name) {
+// Guruhni belgilash / olib tashlash → { form } yoki { error }. plan — obuna (free | pro | max): Free 30, Pro 100, Max 300 ta
+// (roles.js; noma'lum bo'lsa — eng kattasi, server baribir tekshiradi)
+export function toggleFeedSource(form, name, plan = null) {
+  const max = plan ? (PLANS[plan]?.maxSources ?? FEED_SOURCES_MAX) : FEED_SOURCES_MAX;
   const key = name.toLowerCase();
   const has = form.feedSources.some((n) => n.toLowerCase() === key);
   if (has) return { form: { ...form, feedSources: form.feedSources.filter((n) => n.toLowerCase() !== key) } };
-  if (form.feedSources.length >= FEED_SOURCES_MAX) return { error: `Ko'pi bilan ${FEED_SOURCES_MAX} ta guruh tanlash mumkin` };
+  if (form.feedSources.length >= max) return { error: plan ? sourcesLimitText(plan) : `Ko'pi bilan ${max} ta guruh tanlash mumkin` };
   return { form: { ...form, feedSources: [...form.feedSources, name] } };
 }
 

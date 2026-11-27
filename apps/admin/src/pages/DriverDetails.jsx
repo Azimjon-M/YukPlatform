@@ -274,7 +274,8 @@ export function DriverDetails({ driver, now, onPurged, idleSince = null }) {
               <When ts={driver.updatedAt} now={now} />
             </Item>
             <Item label="Obuna">
-              {driver.plan !== "pro" && driver.autoPro ? "Pro (avtomatik: raqam + bog'langan akkaunt)" : (PLANS[driver.plan]?.name ?? driver.plan)}
+              {[PLANS[driver.plan]?.icon, PLANS[driver.plan]?.name ?? driver.plan].filter(Boolean).join(" ")}
+              {driver.autoPro && <span className="muted small"> · 📡 Telegram akkaunt ulagan</span>}
             </Item>
             {(driver.deletedCount > 0 || shown.deleted) && (
               <Item label="Hisobini o'chirgan">

@@ -74,7 +74,9 @@ import {
   distanceKm,
   formatContactPhone,
   isAdmin,
-  isPro,
+  maxFeedSources,
+  planOf,
+  sourcesLimitText,
   parseAdminIds,
   phoneText,
   placePoint,
@@ -289,7 +291,8 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     name: driver.name,
     username: driver.username,
     role: roleOf(driver),
-    plan: isPro(driver) ? "pro" : (driver.plan ?? "free"), // avtomatik Pro ham (bog'langan akkaunt)
+    plan: planOf(driver), // free | pro | max (roles.js)
+    maxSources: maxFeedSources(driver), // nechta guruh tanlay oladi
     isAdmin: isAdmin(driver, adminIds),
     profile: driver.profile,
     active: driver.active, // bot Telegram'ga yuboradimi
@@ -722,8 +725,10 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     if (result.error) return res.status(400).json({ error: result.error, field: result.field ?? null });
     // «📌 Mening guruhlarim»: faqat shu odamga ko'rinadigan guruhlar (yozilishi — ro'yxatdagidek); hech biri qolmasa — xato
     if (result.profile?.feed && FEED_MODES[result.profile.feed.mode].groups) {
-      const sources = store.allowedFeedSources(req.driver.chatId, result.profile.feed.sources, { pro: isPro(req.driver) });
+      const sources = store.allowedFeedSources(req.driver.chatId, result.profile.feed.sources, { plan: planOf(req.driver) });
       if (!sources.length) return res.status(400).json({ error: "Tanlangan guruhlar ro'yxatda topilmadi — qaytadan tanlang", field: "groups" });
+      const limit = maxFeedSources(req.driver);
+      if (sources.length > limit) return res.status(400).json({ error: sourcesLimitText(planOf(req.driver)), field: "groups" });
       result.profile = { ...result.profile, feed: { ...result.profile.feed, sources } };
     }
     // Ilova: faqat filtr saqlanadi — botning roli va yuborishi (active) o'zgarmaydi
@@ -745,8 +750,15 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
   // pro — shu odam yopiq guruhlarni tanlay oladimi
   pub.get("/me/feed-sources", (req, res) => {
     const feed = req.driver.profile?.feed;
-    const pro = isPro(req.driver);
-    res.json({ sources: store.feedSources(req.driver.chatId, { pro }), chosen: feed?.sources ?? [], max: FEED_SOURCES_MAX, pro });
+    const plan = planOf(req.driver);
+    res.json({
+      sources: store.feedSources(req.driver.chatId, { plan }),
+      chosen: feed?.sources ?? [],
+      max: maxFeedSources(req.driver),
+      plan,
+      pro: plan !== "free", // eski ilova/sahifa uchun
+      hiddenClosed: store.hiddenClosedCount?.(req.driver.chatId, { plan }) ?? 0, // faqat Max'ga ko'rinadigan yopiq guruhlar soni
+    });
   });
 
   // { active } — bot pauzasi (Mini App, ilova Sozlamalari); { appActive } — ilova pauzasi (ilovadagi «⏸ Pauza» tugmasi).
@@ -840,10 +852,10 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const hours = clamp(Number(req.query.hours) || 24, 1, MAX_HOURS);
     const from = text(req.query.from);
     if (from && !validRouteArea(profile, scope, from)) throw httpError(400, "Bunday joy tanlab bo'lmaydi");
-    const allowed = planFilter(req.driver, store.sourceOwner);
+    const allowed = planFilter(req.driver, store.sourceOwners);
     const rows = store
       .recentLoads({ sinceMs: hours * HOUR, limit: 5000, kind: "yuk" })
-      .filter(({ load, post }) => allowed(post.source) && routeInScope(load, scope));
+      .filter(({ load, post }) => allowed(post.source, post.media) && routeInScope(load, scope));
     res.json({ hours, from, ...routeCounts({ profile, scope, rows, from }) });
   });
 
@@ -888,11 +900,11 @@ export function createPublicApp({ store, env = process.env, sessions, calls = nu
     const radius = clamp(Number(req.query.r) || 50, 1, 5000);
     const matches = KIND_MATCHERS[kind];
 
-    // Yopiq guruh e'loni — faqat Pro obunadagilarga (va guruhni qo'shganga): «Hammasi» da ham
-    const allowed = planFilter(req.driver, store.sourceOwner);
+    // Obuna (roles.js planAllows): yopiq guruh — Max yoki Pro'ning o'ziniki, ovozli e'lon — Pro/Max: «Hammasi» da ham
+    const allowed = planFilter(req.driver, store.sourceOwners);
     let rows = store
       .recentLoads({ sinceMs: hours * HOUR, limit: 5000, kind })
-      .filter(({ post }) => allowed(post.source))
+      .filter(({ post }) => allowed(post.source, post.media))
       .filter(({ load }) => routeInScope(load, scope) && atArea(load, "from", from) && atArea(load, "to", to))
       // profile = null (ro'yxatdan o'tmagan) — matchTruck bo'sh profil bilan ishlaydi (cheklovlar yo'q)
       .filter(({ load, post }) => view === "all" || (rawFeed ? rawLoadWanted(profile, load, post.source) : matches(load, profile ?? {}).ok));

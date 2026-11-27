@@ -212,7 +212,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
       setTimeout(() => el.classList.remove("flash"), 1200);
     }, 80);
   const pickGroup = (name) => {
-    const result = toggleFeedSource(form, name);
+    const result = toggleFeedSource(form, name, me?.plan ?? null); // obuna limiti: Free 30, Pro 100, Max 300
     if (result.error) {
       haptic.error();
       showAlert(result.error);

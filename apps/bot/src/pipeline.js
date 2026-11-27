@@ -17,6 +17,7 @@ import {
   loadKeys,
   isClosedSource,
   planAllows,
+  byPlan,
   rawWanted,
   routeChosen,
   routeInScope,
@@ -128,14 +129,15 @@ export async function handleParsed(post, result, deps) {
     fresh.push({ id: store.addLoad({ postId: post.id, key: keys[i], load, kind }), load });
   });
 
-  const users = store.activeUsers(KIND_ROLE[kind]);
+  const users = [...store.activeUsers(KIND_ROLE[kind])];
   const matches = KIND_MATCHERS[kind];
   // Tezkor yo'lda bu e'lonni asl matn bilan olganlar (yoki navbatida turganlar) — ularga yuk qayta yuborilmaydi
   const rawSent = kind === "yuk" && fresh.length ? (deps.rawSentTo?.(post.id) ?? new Set(store.postDeliveredTo?.(post.id) ?? [])) : new Set();
-  // Yopiq guruh e'loni — faqat Pro obunadagilarga va guruhni qo'shgan odamga (roles.js planAllows);
-  // ochiq kanal va guruh bo'limlariga umuman chiqmaydi
+  // Obuna (roles.js planAllows): yopiq guruh e'loni — Max'ga va shu guruh o'ziniki bo'lgan Pro'ga; ovozli e'lon — Pro/Max.
+  // Yopiq guruh e'loni ochiq kanal va guruh bo'limlariga umuman chiqmaydi
   const closed = post.shipper == null && isClosedSource(post.source);
-  const plan = { kind, source: closed ? post.source : null, owner: closed ? (store.sourceOwner?.(post.source) ?? null) : null };
+  const plan = { kind, source: closed ? post.source : null, owners: closed ? (store.sourceOwners?.(post.source) ?? []) : null, media: post.shipper == null ? post.media : null };
+  users.sort(byPlan); // Max → Pro → Free
   let sent = 0;
   // Saralash o'chiq (deps.sortingOff, 2026-11-19): guruh e'loni haydovchilarga faqat tezkor yo'l bilan (asl matn) boradi —
   // AI/qoidalar natijasi hech kimga yuborilmaydi (kech keladi). Yuk beruvchining o'z yuki — hammaga, saralanmasdan
@@ -164,7 +166,7 @@ export async function handleParsed(post, result, deps) {
         if (kind === "yuk" && !routeChosen(user.profile)) continue;
         if (!matches(load, user.profile).ok) continue;
       }
-      // Obuna: yopiq guruh e'loni — faqat Pro (roles.js planAllows)
+      // Obuna: yopiq guruh / ovozli e'lon (roles.js planAllows)
       if (!planAllows(user, plan)) continue;
       // Kanal va guruhimizga a'zo emas — yuborilmaydi (bot.js canReceive o'zi kuniga bir marta «a'zo bo'ling» deb eslatadi)
       if (deps.canReceive && !(await deps.canReceive(user))) continue;
@@ -359,19 +361,20 @@ export function createWorker(
     const already = new Set(store.postDeliveredTo?.(post.id) ?? []);
     const targets = wanted.filter((u) => !already.has(u.chatId) && !rawPending.get(post.id)?.has(u.chatId) && !(quick.outOfScope && feedMode(u.profile) === "tezkor"));
     if (!targets.length) return 0;
+    targets.sort(byPlan); // Max → Pro → Free: navbatga shu tartibda qo'yiladi
     const pending = rawPending.get(post.id) ?? new Set();
     for (const u of targets) pending.add(u.chatId);
     rawPending.set(post.id, pending);
     const phones = extractPhones(post.text);
     const closed = isClosedSource(post.source);
-    const plan = { kind: "yuk", source: closed ? post.source : null, owner: closed ? (store.sourceOwner?.(post.source) ?? null) : null };
+    const plan = { kind: "yuk", source: closed ? post.source : null, owners: closed ? (store.sourceOwners?.(post.source) ?? []) : null, media: post.media };
     let count = 0;
     let left = targets.length;
     const queuedAt = now();
     const sendTo = async (user) => {
       if (controller.signal.aborted) return;
       try {
-        if (!planAllows(user, plan)) return; // yopiq guruh — faqat Pro
+        if (!planAllows(user, plan)) return; // obuna: yopiq guruh / ovozli e'lon
         if (deps.held?.(user.chatId)) return; // sozlash oynasi ochiq (bot.js isBusy) — shu e'lon unga yuborilmaydi
         if (now() - queuedAt > RAW_STALE_MS) return; // navbatda eskirdi
         // Navbatda turgan paytda holati o'zgargan bo'lishi mumkin (2026-11-19 tiket: pauzadan keyin ham kelaverdi) —

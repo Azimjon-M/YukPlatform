@@ -398,7 +398,8 @@ test("foydalanuvchilar ro'yxati: holat belgisi, filtr, qidiruv, bosh harflar", a
   assert.equal(driverPill({ ...base, profile: null, registering: true }, null, now).label, "Ro'yxatda");
   assert.equal(driverPill({ ...base, profile: null }, null, now).label, "Profilsiz");
   assert.equal(driverPill(base, null, now).label, "Faol");
-  assert.equal(isProDriver({ plan: "free", autoPro: true }), true);
+  assert.equal(isProDriver({ plan: "free", autoPro: true }), false, "akkaunt ulash endi Pro bermaydi (2026-11-27)");
+  assert.equal(isProDriver({ plan: "max" }), true);
   assert.equal(isProDriver({ plan: "free" }), false);
   const pro = DRIVER_FILTERS.find((f) => f.id === "pro");
   assert.equal(pro.test({ ...base, plan: "pro" }, now), true);

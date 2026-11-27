@@ -486,7 +486,7 @@ export function App() {
         {online && !registering && (
           <section className="section tg-section" id="tg-akkauntlar" ref={scrollToTgAccounts}>
             <h2>📡 Telegram akkaunt ulash</h2>
-            <p className="hint">Yopiq yuk guruhlariga a'zo alohida Telegram akkauntingizni ulang — o'sha guruhlardagi e'lonlar ham sizga keladi. Raqamingiz ulashilgan bo'lsa — avtomatik Pro.</p>
+            <p className="hint">Telegram akkauntingizni ulang — «🔎 Auto scan» undagi yuk guruhlarini topadi, Filtrda «👤 Akkauntimdagi» bo'limida ko'rinadi. Ulash bepul; yopiq guruhlaringizdagi e'lonlar ⭐ Pro obunada keladi.</p>
             <TgAccounts mine onAuthLost={onAuthLost} />
           </section>
         )}

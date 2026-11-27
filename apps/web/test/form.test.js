@@ -191,10 +191,14 @@ test("rejim: «+ saralangan» — mashina shart (xato avval guruhlarda, keyin tr
   assert.deepEqual(fromBot.feedSources, ["@TutGruz"]);
 });
 
-test("rejim: 500 tadan ortiq guruh tanlab bo'lmaydi", () => {
+test("rejim: guruh tanlash limiti obunaga qarab — Free 30, Pro 100, Max 300 (2026-11-27)", () => {
   let form = selectFeed(formFromProfile(null), "guruhlarim");
-  for (let i = 0; i < 500; i++) form = toggleFeedSource(form, `@guruh_${i}_yuk`).form;
-  assert.match(toggleFeedSource(form, "@yana_bir_guruh").error, /500 ta/);
+  for (let i = 0; i < 30; i++) form = toggleFeedSource(form, `@guruh_${i}_yuk`, "free").form;
+  assert.equal(toggleFeedSource(form, "@yana_bir_guruh", "free").error, "Free obunada ko'pi bilan 30 ta guruh tanlash mumkin (Pro — 100, Max — 300)");
+  assert.ok(toggleFeedSource(form, "@yana_bir_guruh", "pro").form, "Pro'da 100 tagacha");
+  assert.ok(toggleFeedSource(form, "@guruh_3_yuk", "free").form, "olib tashlash — doim mumkin");
+  for (let i = 30; i < 300; i++) form = toggleFeedSource(form, `@guruh_${i}_yuk`).form;
+  assert.match(toggleFeedSource(form, "@yana_bir_guruh").error, /300 ta/);
 });
 
 test("«📌 Mening guruhlarim» ro'yxati: yopiq guruh belgisi, Pro'siz — tanlab bo'lmaydi, raqamli id ko'rsatilmaydi", async () => {
@@ -208,7 +212,7 @@ test("«📌 Mening guruhlarim» ro'yxati: yopiq guruh belgisi, Pro'siz — tanl
   );
   assert.deepEqual(options.map((o) => [o.id, o.closed, o.disabled, o.note]), [
     ["@TutGruz", false, false, "@TutGruz"],
-    ["-1001", true, true, "🔒 Pro uchun"],
+    ["-1001", true, true, "⭐ Pro uchun"],
   ]);
 });
 
@@ -307,4 +311,12 @@ test("guruh qatori: a'zolar soni qisqa (1.3K, 1.7M), nom ostida faqat @username 
   assert.deepEqual([mine.note, mine.sub, mine.sub2, mine.marquee], ["@TutGruz", "1234 ta/kun", "👥 1.3K", true]);
   assert.deepEqual([closed.note, closed.sub2], [null, null]);
   assert.deepEqual([bare.label, bare.note, bare.sub, bare.sub2], ["@nomsiz", null, "kam", "👥 1.7M"]);
+});
+
+test("obuna (2026-11-27): «🔒 Yopiq» bo'limi yozuvi — Free / Pro / Max", async () => {
+  const { closedHint, PLAN_ABOUT } = await import("../src/feedGroups.js");
+  assert.match(closedHint("free", 4), /⭐ Pro obunada keladi[\s\S]*Yana 4 ta yopiq guruh — 💎 Max obunada\./);
+  assert.match(closedHint("pro", 0), /^⭐ Pro: o'z akkauntingiz a'zo bo'lgan yopiq guruhlardagi e'lonlar sizga keladi\.$/);
+  assert.match(closedHint("max", 9), /^💎 Max: hamma yopiq guruhlardagi/);
+  assert.deepEqual(Object.keys(PLAN_ABOUT), ["free", "pro", "max"]);
 });

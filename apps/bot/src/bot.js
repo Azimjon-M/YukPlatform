@@ -23,7 +23,9 @@ import {
   feedLabel,
   feedOf,
   isOwnContact,
-  isPro,
+  maxFeedSources,
+  planOf,
+  sourcesLimitText,
   normalizeContactPhone,
   phoneText,
   planFilter,
@@ -536,10 +538,10 @@ export function createBot({
     if (roleOf(user) === "haydovchi" && !sortedReady(user.profile)) return [];
     const kind = ROLE_KIND[roleOf(user)];
     const matches = KIND_MATCHERS[kind];
-    const allowed = planFilter(user, store.sourceOwner); // yopiq guruh e'loni — faqat Pro
+    const allowed = planFilter(user, store.sourceOwners); // obuna: yopiq guruh — Max / Pro'ning o'ziniki; ovozli — Pro/Max
     return store
       .recentLoads({ sinceMs: LOADS_WINDOW_MS, limit: LOADS_LIMIT, kind })
-      .filter((row) => allowed(row.post.source) && matches(row.load, user.profile ?? {}).ok);
+      .filter((row) => allowed(row.post.source, row.post.media) && matches(row.load, user.profile ?? {}).ok);
   }
 
   // Yangi xabar yoki o'sha xabarni o'zgartirish (tugma bosilganda). "message is not modified" — o'sha tugma ikki marta bosildi.
@@ -1280,8 +1282,8 @@ export function createBot({
       const feed = feedOf(driver?.profile);
       if (roleOf(driver) !== "haydovchi" || !FEED_MODES[feed.mode].groups) return "";
       if (feed.sources.some((name) => name.toLowerCase() === source.name.toLowerCase())) return "";
-      const sources = store.allowedFeedSources(chatId, [...feed.sources, source.name], { pro: isPro(driver) });
-      if (sources.length === feed.sources.length) return "";
+      const sources = store.allowedFeedSources(chatId, [...feed.sources, source.name], { plan: planOf(driver) });
+      if (sources.length === feed.sources.length || sources.length > maxFeedSources(driver)) return "";
       store.saveDriver(chatId, { profile: { ...driver.profile, feed: { ...feed, sources } } });
       return `\n\n📌 «${MENU.groups}» ga qo'shildi — undagi yuk e'lonlari darhol keladi.`;
     } catch (error) {
@@ -1507,9 +1509,10 @@ export function createBot({
     const input = role === "haydovchi" ? withPrevFeed(data?.profile, driver.profile) : data?.profile;
     let { profile, error } = data?.type === "profile" ? sanitizeProfileFor(role, input, { scope }) : { error: "noma'lum ma'lumot keldi" };
     if (profile?.feed && FEED_MODES[profile.feed.mode].groups) {
-      const sources = store.allowedFeedSources(ctx.chat.id, profile.feed.sources, { pro: isPro(driver) });
-      if (sources.length) profile = { ...profile, feed: { ...profile.feed, sources } };
-      else error = "tanlangan guruhlar ro'yxatda topilmadi";
+      const sources = store.allowedFeedSources(ctx.chat.id, profile.feed.sources, { plan: planOf(driver) });
+      if (!sources.length) error = "tanlangan guruhlar ro'yxatda topilmadi";
+      else if (sources.length > maxFeedSources(driver)) error = sourcesLimitText(planOf(driver));
+      else profile = { ...profile, feed: { ...profile.feed, sources } };
     }
     if (error) {
       await ctx.reply(`⚠️ Saqlanmadi: ${error}. Formani qaytadan oching.`, menu(driver));

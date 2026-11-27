@@ -79,8 +79,9 @@ export const FEED_MODES = {
 };
 
 // Bir haydovchi nechta guruh tanlay oladi (bot va web ro'yxati shundan katta bo'lmaydi)
-// 2026-11-19: 50 → 500 («hammasini tanlash» tugmasi: oddiy foydalanuvchiga ~70, Pro'ga ~85 guruh ko'rinadi)
-export const FEED_SOURCES_MAX = 500;
+// 2026-11-27: obunaga qarab — Free 30, Pro 100, Max 300 (roles.js maxFeedSources; server va bot saqlashda tekshiradi).
+// Bu — eng kattasi (Max): forma ko'rinishini tekshirish uchun
+export const FEED_SOURCES_MAX = 300;
 
 export const validFeedMode = (mode) => (FEED_MODE_IDS.includes(mode) ? mode : null);
 

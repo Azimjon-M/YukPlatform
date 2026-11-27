@@ -476,7 +476,7 @@ function driverRow(row) {
     draft: parse(row.draft),
     active: row.active === 1,
     plan: row.plan ?? "free",
-    autoPro: row.auto_pro === 1, // bog'langan akkaunt (AUTO_PRO_SQL) — roles.js planAllows Pro deb biladi
+    autoPro: row.auto_pro === 1, // o'z Telegram akkauntini ulagan (AUTO_PRO_SQL; nomi eskidan — 2026-11-27 dan Pro bermaydi)
     isAdmin: row.is_admin === 1,
     phone: row.phone ?? null,
     phoneAt: row.phone_at ?? null,
@@ -565,6 +565,12 @@ export function openStore({ file = DEFAULT_DB_FILE, now = () => Date.now() } = {
   db.function("fold", { deterministic: true }, (value) => (value == null ? null : foldText(value)));
   // Akkaunt egasini raqam bo'yicha topish (tgAccounts.js OWNS_ACCOUNT_SQL): tg_accounts.phone_hash bilan bir xil xesh
   db.function("tg_phone_hash", { deterministic: true }, (value) => (value == null ? null : hashPhone(value)));
+  // Obunalar (2026-11-27: Free / Pro / Max): «avtomatik Pro» (akkaunt ulagani uchun) bekor bo'ldi — o'sha paytda avtomatik
+  // Pro bo'lganlar bir marta haqiqiy Pro'ga o'tkaziladi (Azimjon: «hozirgi Pro foydalanuvchilar Pro'da qoladi»)
+  if (!db.prepare("SELECT 1 FROM settings WHERE key = 'plans_v2'").get()) {
+    db.exec(`UPDATE drivers SET plan = 'pro' WHERE COALESCE(plan, 'free') = 'free' AND ${AUTO_PRO_SQL}`);
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('plans_v2', ?)").run(String(Date.now()));
+  }
 
   const q = {
     insertPost: db.prepare(

@@ -34,7 +34,7 @@ test("post_deliveries: kimga asl matn bilan ketgani, qo'ng'iroq belgisi, butunla
   assert.deepEqual(store.postDeliveredTo(id), []);
 });
 
-test("feedSources: ochiq va yopiq guruhlar; yopig'ini Pro yoki o'zi qo'shgan ko'radi, boshqaga ko'rinmaydi; o'chirilgan va tekshiruvdan o'tmaganlar yo'q", () => {
+test("feedSources (obunalar, 2026-11-27): Free — o'z yopig'i qulflangan, begonasi ko'rinmaydi; Pro — o'zinikini tanlaydi; Max — hammasini", () => {
   const { store } = setup();
   store.addSource("@TutGruz");
   store.addSource("@Sokin_guruh");
@@ -45,37 +45,44 @@ test("feedSources: ochiq va yopiq guruhlar; yopig'ini Pro yoki o'zi qo'shgan ko'
   store.addUserSource({ name: "@Rad_etilgan", chatId: 10 });
   store.finishProbe("@Rad_etilgan", { ok: false, note: "kam", stats: {} });
   for (let i = 1; i <= 3; i++) store.addPost(post("@tutgruz", i)); // harfi boshqacha (bot o'zi admin bo'lgan guruh)
-  const list = store.feedSources(10);
-  // 2026-11-19: begona yopiq guruh (-1001111111) oddiy foydalanuvchiga umuman ko'rinmaydi
-  assert.deepEqual(list.map((s) => s.name), ["-1002222222", "@TutGruz", "@Sokin_guruh"]);
-  assert.equal(list[1].perDay, 3);
-  assert.deepEqual([list[0].mine, list[0].closed, list[0].locked], [true, true, false], "o'zi qo'shgan yopiq — tanlay oladi");
-  assert.equal(list[1].locked, false);
-  assert.deepEqual(store.feedSources(20).map((s) => s.name), ["@TutGruz", "@Sokin_guruh"], "begona — faqat ochiqlar");
-  // Pro — hamma yopiq guruhni ko'radi va tanlaydi
-  const pro = store.feedSources(20, { pro: true });
-  assert.deepEqual(pro.map((s) => s.name).sort(), ["-1001111111", "-1002222222", "@Sokin_guruh", "@TutGruz"]);
-  assert.ok(pro.every((s) => !s.locked));
-  assert.deepEqual(store.allowedFeedSources(20, ["@tutgruz", "-1002222222", "@Ochiq_emas", "@TutGruz"]), ["@TutGruz"], "Pro emas — yopiq tashlanadi");
-  assert.deepEqual(store.allowedFeedSources(20, ["@tutgruz", "-1001111111"], { pro: true }), ["@TutGruz", "-1001111111"]);
-  assert.deepEqual(store.allowedFeedSources(10, ["-1002222222", "-1001111111"]), ["-1002222222"], "o'zi qo'shgani — Pro'siz ham");
+  const free = store.feedSources(10);
+  assert.deepEqual(free.map((s) => s.name), ["-1002222222", "@TutGruz", "@Sokin_guruh"], "begona yopiq (-1001111111) ko'rinmaydi");
+  assert.equal(free[1].perDay, 3);
+  assert.deepEqual([free[0].mine, free[0].own, free[0].closed, free[0].locked], [true, true, true, true], "Free: o'z yopig'i ko'rinadi, lekin qulflangan");
+  assert.equal(free[1].locked, false);
+  assert.equal(store.feedSources(10, { plan: "pro" })[0].locked, false, "Pro: o'z yopig'ini tanlaydi");
+  assert.deepEqual(store.feedSources(20, { plan: "pro" }).map((s) => s.name), ["@TutGruz", "@Sokin_guruh"], "Pro: begona yopiq ko'rinmaydi");
+  const max = store.feedSources(20, { plan: "max" });
+  assert.deepEqual(max.map((s) => s.name).sort(), ["-1001111111", "-1002222222", "@Sokin_guruh", "@TutGruz"]);
+  assert.ok(max.every((s) => !s.locked));
+  assert.deepEqual([store.hiddenClosedCount(10, { plan: "pro" }), store.hiddenClosedCount(20), store.hiddenClosedCount(20, { plan: "max" })], [1, 2, 0]);
+
+  assert.deepEqual(store.allowedFeedSources(10, ["@tutgruz", "-1002222222", "@Ochiq_emas", "@TutGruz"]), ["@TutGruz"], "Free — yopiq tashlanadi");
+  assert.deepEqual(store.allowedFeedSources(10, ["-1002222222", "-1001111111"], { plan: "pro" }), ["-1002222222"], "Pro — faqat o'ziniki");
+  assert.deepEqual(store.allowedFeedSources(20, ["@tutgruz", "-1001111111"], { plan: "max" }), ["@TutGruz", "-1001111111"]);
   assert.equal(store.sourceTitles()["-1002222222"], "O'z yopig'im");
 });
 
-test("feedSources own: o'z Telegram akkaunti a'zo bo'lgan guruh/kanal (id yoki @username bo'yicha) va o'zi qo'shgani — 👤 Akkauntimdagi", () => {
+test("feedSources own va sourceOwners: o'z Telegram akkaunti a'zo bo'lgan guruh/kanal (id yoki @username bo'yicha) va o'zi qo'shgani", () => {
   const { store } = setup();
   store.addSource("@TutGruz");
   store.addSource("@Mening_kanalim");
   store.addSource("-1003333333", { account: "u9-1", title: "A'zo yopiq guruhim" });
   store.saveDriver(10, { name: "A", role: "haydovchi" });
+  store.saveDriver(20, { name: "B", role: "haydovchi" });
   store.setTgAccountOwner("u9-1", 10);
   store.setTgDialogs("u9-1", [
     { id: "-1003333333", title: "A'zo yopiq guruhim", type: "supergroup" },
     { id: "-1004444444", title: "Kanalim", username: "mening_kanalim", type: "channel" },
   ]);
   const own = (chatId, opts) => Object.fromEntries(store.feedSources(chatId, opts).map((s) => [s.name, s.own]));
-  assert.deepEqual(own(10, { pro: true }), { "@TutGruz": false, "@Mening_kanalim": true, "-1003333333": true });
-  assert.deepEqual(own(20, { pro: true }), { "@TutGruz": false, "@Mening_kanalim": false, "-1003333333": false }, "begonada own yo'q");
+  assert.deepEqual(own(10, { plan: "pro" }), { "@TutGruz": false, "@Mening_kanalim": true, "-1003333333": true });
+  assert.deepEqual(own(20, { plan: "max" }), { "@TutGruz": false, "@Mening_kanalim": false, "-1003333333": false }, "begonada own yo'q");
+  // Yopiq guruh kimlarniki: a'zo akkaunt egasi; qo'shgan odam (added_by) ham
+  assert.deepEqual(store.sourceOwners("-1003333333"), [10]);
+  store.addUserSource({ name: "-1005555555", chatId: 20, account: "u9-1" });
+  assert.deepEqual(store.sourceOwners("-1005555555"), [20]);
+  assert.deepEqual(store.sourceOwners("-1009999999"), []);
 });
 
 test("feedSources members: sources dagi soni, bo'lmasa akkauntlarimiz guruhlar ro'yxatidagi (tg_dialogs) eng kattasi", () => {

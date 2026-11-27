@@ -3,6 +3,7 @@
 //     (deliveries jadvali yuklar uchun: u yerda load_id bor, bu yerda — e'lonning o'zi, yuk hali tushunilmagan).
 //     Keyin AI shu e'londan yuk topsa, bot o'sha haydovchiga uni ikkinchi marta yubormaydi (postDeliveredTo).
 //   • feedSources — haydovchi «Mening guruhlarim» ro'yxatida qaysi guruhlarni ko'radi va tanlay oladi.
+import { OWNS_ACCOUNT_SQL } from "./tgAccounts.js";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -25,12 +26,14 @@ CREATE INDEX IF NOT EXISTS post_deliveries_chat ON post_deliveries (chat_id, sen
 
 // «📌 Mening guruhlarim» ro'yxatidagi guruhlar (SQL sharti): yoqilgan, tekshiruvdan o'tayotgan yoki o'tgan (probe / failed — yo'q).
 // Ochiq (@nomi) va yopiq (raqamli id) — ikkalasi ham (Azimjon, 2026-11-16: «publik va private guruhlardan tanlaydigan qil»).
-// Yopiq guruh e'lonlari faqat Pro'ga boradi (@yuk/shared planAllows) — shuning uchun yopig'ini Pro yoki uni o'zi qo'shgan
-// tanlaydi; boshqalarga u «locked» bo'lib ko'rinadi (tanlab bo'lmaydi, bot/ilova Pro haqida aytadi)
+// Yopiq guruh (2026-11-27, obunalar — @yuk/shared planAllows): Max — hammasini tanlaydi; Pro — faqat o'zinikini (o'z
+// akkaunti a'zo yoki o'zi qo'shgan), boshqalarniki unga ko'rinmaydi; Free — o'ziniki «locked» bo'lib ko'rinadi (Pro kerak)
 const LISTED = `enabled = 1 AND (check_state IS NULL OR check_state IN ('trial', 'ok'))`;
 const isClosedName = (name) => !String(name).startsWith("@");
-// Shu odam tanlay oladimi: ochig'i — hamma, yopig'i — Pro yoki o'zi qo'shgan
-const canPick = (row, chatId, pro) => !isClosedName(row.name) || pro || (row.added_by != null && row.added_by === chatId);
+// Ko'rinadimi: ochig'i — hammaga; yopig'i — Max'ga hammasi, qolganlarga faqat o'ziniki
+const canSee = (name, plan, own) => !isClosedName(name) || plan === "max" || own;
+// Tanlay oladimi: ochig'i — hamma; yopig'i — Max (hammasini) yoki Pro (o'zinikini)
+const canPick = (name, plan, own) => !isClosedName(name) || plan === "max" || (plan === "pro" && own);
 
 export function createFeedQueries(db, now) {
   // Guruh a'zolari soni akkauntlarimiz guruhlar ro'yxatidan (tg_dialogs): Map("@nom" | "-100…" (kichik harf) → eng kattasi).
@@ -43,6 +46,21 @@ export function createFeedQueries(db, now) {
       }
     }
     return out;
+  }
+  // Shu odamning «o'z» guruhlari: o'z Telegram akkaunti(lari) a'zo (tg_dialogs — id yoki @username) yoki o'zi qo'shgan
+  // (sources.added_by). → Set(kichik harfda)
+  function ownNames(store, chatId) {
+    const own = new Set();
+    const accounts = (store.tgAccountsOf?.(chatId) ?? []).map((a) => a.name);
+    if (accounts.length) {
+      const marks = accounts.map(() => "?").join(",");
+      for (const d of db.prepare(`SELECT peer_id, username FROM tg_dialogs WHERE account IN (${marks})`).all(...accounts)) {
+        if (d.peer_id) own.add(String(d.peer_id).toLowerCase());
+        if (d.username) own.add(`@${d.username}`.toLowerCase());
+      }
+    }
+    for (const r of db.prepare("SELECT name FROM sources WHERE added_by = ?").all(chatId)) own.add(r.name.toLowerCase());
+    return own;
   }
   return {
     dialogMembers,
@@ -93,10 +111,12 @@ export function createFeedQueries(db, now) {
       };
     },
 
-    // «📌 Mening guruhlarim» ro'yxati: ochiq va yopiq guruh/kanallar, eng faoli birinchi. pro — @yuk/shared isPro(driver).
-    // → [{ name, title, members, chatType, perDay, mine, closed, locked }]: perDay — oxirgi 24 soatda nechta e'lon
-    // (takrorlarsiz), mine — o'zi «➕ Guruh qo'shish» bilan qo'shgan, closed — yopiq, locked — yopiq va tanlab bo'lmaydi (Pro emas)
-    feedSources(chatId, { pro = false } = {}) {
+    // «📌 Faqat men tanlaydigan guruhlar» ro'yxati: ochiq va yopiq guruh/kanallar, eng faoli birinchi. plan — free | pro | max.
+    // → [{ name, title, members, chatType, perDay, mine, own, closed, locked }]: perDay — oxirgi 24 soatda nechta e'lon
+    // (takrorlarsiz), mine — o'zi «➕ Guruh qo'shish» bilan qo'shgan, own — o'z akkaunti a'zo yoki o'zi qo'shgan (Azimjon,
+    // 2026-11-26: «global va o'z accountimdagi»), closed — yopiq, locked — ko'rinadi, lekin tanlab bo'lmaydi (Free'da o'z
+    // yopiq guruhi — Pro kerak). Boshqalarning yopiq guruhlari faqat Max'ga ko'rinadi
+    feedSources(chatId, { plan = "free" } = {}) {
       const rows = db.prepare(`SELECT name, title, members, chat_type, added_by FROM sources WHERE ${LISTED}`).all();
       const counts = new Map(
         db
@@ -104,26 +124,14 @@ export function createFeedQueries(db, now) {
           .all(now() - 24 * HOUR)
           .map((r) => [r.source, r.n]),
       );
-      // Oddiy (Pro emas) foydalanuvchiga yopiq guruhlar umuman ko'rinmaydi (2026-11-19, Azimjon: «oddiy foydalanuvchilarda
-      // yopiq guruhlar ko'rinmasin! ammo public guruhlarni tanlay olsin») — faqat o'zi qo'shgani qoladi
-      // own — shu odamning o'z Telegram akkaunti(lari) a'zo bo'lgan guruh/kanal (tg_dialogs; Azimjon, 2026-11-26: «guruh
-      // tanlashda global va o'z accountimdagi ochiq/yopiq guruh/kanallardan tanlash kerak»). Mos — id (-100…) yoki @username
-      const accounts = (this.tgAccountsOf?.(chatId) ?? []).map((a) => a.name);
-      const own = new Set();
-      if (accounts.length) {
-        const marks = accounts.map(() => "?").join(",");
-        for (const d of db.prepare(`SELECT peer_id, username FROM tg_dialogs WHERE account IN (${marks})`).all(...accounts)) {
-          if (d.peer_id) own.add(String(d.peer_id).toLowerCase());
-          if (d.username) own.add(`@${d.username}`.toLowerCase());
-        }
-      }
+      const own = ownNames(this, chatId);
       // A'zolar soni sources da bo'lmasa (TG_SOURCES / qo'lda qo'shilgan) — akkauntlarimiz guruhlar ro'yxatidagi soni
       // (tg_dialogs; «🎛 Filtr» da «👥 1.3K», 2026-11-27)
       const members = dialogMembers();
       return rows
-        .filter((r) => canPick(r, chatId, pro))
+        .filter((r) => canSee(r.name, plan, own.has(r.name.toLowerCase())))
         .map((r) => ({
-          own: own.has(r.name.toLowerCase()) || (r.added_by != null && r.added_by === chatId),
+          own: own.has(r.name.toLowerCase()),
           name: r.name,
           title: r.title ?? null,
           members: r.members ?? members.get(r.name.toLowerCase()) ?? null,
@@ -131,19 +139,27 @@ export function createFeedQueries(db, now) {
           perDay: counts.get(r.name.toLowerCase()) ?? 0,
           mine: r.added_by != null && r.added_by === chatId,
           closed: isClosedName(r.name),
-          locked: !canPick(r, chatId, pro),
+          locked: !canPick(r.name, plan, own.has(r.name.toLowerCase())),
         }))
         .sort((a, b) => Number(b.mine) - Number(a.mine) || b.perDay - a.perDay || a.name.localeCompare(b.name));
     },
 
-    // Tashqaridan kelgan tanlovni qisqartirish: faqat shu odam tanlay oladigan guruhlar (yopig'i — Pro yoki o'zi qo'shgan),
+    // Shu odamga ko'rinmaydigan (boshqalarning) yopiq guruhlari soni — «💎 Max'da yana N ta yopiq guruh» yozuvi uchun
+    hiddenClosedCount(chatId, { plan = "free" } = {}) {
+      if (plan === "max") return 0;
+      const own = ownNames(this, chatId);
+      return db.prepare(`SELECT name FROM sources WHERE ${LISTED}`).all().filter((r) => isClosedName(r.name) && !own.has(r.name.toLowerCase())).length;
+    },
+
+    // Tashqaridan kelgan tanlovni qisqartirish: faqat shu odam tanlay oladigan guruhlar (yopig'i — Max yoki Pro'ning o'ziniki),
     // ro'yxatdagi yozilishi bilan. → ["@TutGruz", "-100…", ...] (tartib — kelgan tartibda)
-    allowedFeedSources(chatId, names, { pro = false } = {}) {
+    allowedFeedSources(chatId, names, { plan = "free" } = {}) {
+      const own = ownNames(this, chatId);
       const visible = new Map(
         db
-          .prepare(`SELECT name, added_by FROM sources WHERE ${LISTED}`)
+          .prepare(`SELECT name FROM sources WHERE ${LISTED}`)
           .all()
-          .filter((r) => canPick(r, chatId, pro))
+          .filter((r) => canPick(r.name, plan, own.has(r.name.toLowerCase())))
           .map((r) => [r.name.toLowerCase(), r.name]),
       );
       const out = [];
@@ -154,9 +170,22 @@ export function createFeedQueries(db, now) {
       return out;
     },
 
-    // Yopiq guruhni o'z akkaunti bilan qo'shgan foydalanuvchi (roles.js planAllows owner) → chat id | null
-    sourceOwner(name) {
-      return db.prepare("SELECT added_by FROM sources WHERE name = ?").get(String(name))?.added_by ?? null;
+    // Yopiq guruh kimlarniki (roles.js planAllows owners — Pro faqat o'z yopiq guruhini oladi): qo'shgan odam (added_by) va
+    // shu guruhga a'zo ulangan akkauntlarning egalari (tg_dialogs → tg_accounts → OWNS_ACCOUNT_SQL). → [chat id, ...]
+    sourceOwners(name) {
+      const key = String(name);
+      const out = new Set();
+      const added = db.prepare("SELECT added_by FROM sources WHERE name = ?").get(key)?.added_by;
+      if (added != null) out.add(added);
+      const rows = db
+        .prepare(
+          `SELECT DISTINCT drivers.chat_id AS id FROM tg_dialogs d JOIN tg_accounts t ON t.name = d.account
+             JOIN drivers ON ${OWNS_ACCOUNT_SQL}
+           WHERE d.peer_id = ? AND COALESCE(t.status, 'ok') NOT IN ('logged_out', 'duplicate')`,
+        )
+        .all(key);
+      for (const r of rows) out.add(r.id);
+      return [...out];
     },
 
     // Guruh nomi (@nomi o'rniga sarlavha): bot va boshqaruv markazidagi profil matni uchun → { "@nomi": "Sarlavha" }

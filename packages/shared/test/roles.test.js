@@ -11,6 +11,11 @@ import {
   parseAdminIds,
   isClosedSource,
   planAllows,
+  byPlan,
+  isPro,
+  maxFeedSources,
+  planOf,
+  sourcesLimitText,
   planFilter,
   roleOf,
   sanitizeProfileFor,
@@ -42,21 +47,33 @@ test("admin: .env dagi ADMIN_IDS yoki boshqaruv markazidagi belgi", () => {
   assert.equal(isAdmin(null, [123]), false);
 });
 
-test("obuna: ochiq guruh e'loni — hammaga, yopiq guruh e'loni — faqat Pro va guruhni qo'shganga", () => {
+test("obuna (2026-11-27): Free — ochiq matnli; Pro — + ovozli va O'Z yopiq guruhi; Max — hamma yopiq guruhlar; guruh limiti 30/100/300", () => {
   assert.equal(planAllows({ plan: "free" }, { kind: "yuk" }), true);
   assert.equal(planAllows({}, {}), true);
   assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "@TutGruz" }), true);
   assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "shipper:5" }), true);
   assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "-1001234567" }), false);
-  assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "-1001234567", owner: 2 }), false);
-  assert.equal(planAllows({ plan: "free", chatId: 2 }, { source: "-1001234567", owner: 2 }), true);
-  assert.equal(planAllows({ plan: "pro", chatId: 1 }, { source: "-1001234567" }), true);
-  assert.equal(planAllows({ plan: "free", autoPro: true, chatId: 1 }, { source: "-1001234567" }), true, "avtomatik Pro");
+  assert.equal(planAllows({ plan: "free", chatId: 2 }, { source: "-1001234567", owners: [2] }), false, "Free — o'ziniki ham yo'q");
+  assert.equal(planAllows({ plan: "free", autoPro: true, chatId: 2 }, { source: "-1001234567", owners: [2] }), false, "akkaunt ulash endi Pro bermaydi");
+  assert.equal(planAllows({ plan: "pro", chatId: 1 }, { source: "-1001234567", owners: [2, 3] }), false, "Pro — boshqaniki yo'q");
+  assert.equal(planAllows({ plan: "pro", chatId: 3 }, { source: "-1001234567", owners: [2, 3] }), true, "Pro — o'ziniki");
+  assert.equal(planAllows({ plan: "max", chatId: 1 }, { source: "-1001234567" }), true, "Max — hammasi");
+  // Ovozli e'lon — Pro/Max
+  assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "@TutGruz", media: "voice" }), false);
+  assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "@TutGruz", media: "round" }), false);
+  assert.equal(planAllows({ plan: "pro", chatId: 1 }, { source: "@TutGruz", media: "voice" }), true);
+  assert.equal(planAllows({ plan: "free", chatId: 1 }, { source: "@TutGruz", media: "photo" }), true, "rasm — ovoz emas");
+  // Limit, tartib, matn
+  assert.deepEqual([{}, { plan: "pro" }, { plan: "max" }, { plan: "vip" }].map(maxFeedSources), [30, 100, 300, 30]);
+  assert.deepEqual([{ plan: "free" }, { plan: "max" }, { plan: "pro" }].sort(byPlan).map(planOf), ["max", "pro", "free"]);
+  assert.deepEqual([isPro({ plan: "free", autoPro: true }), isPro({ plan: "pro" }), isPro({ plan: "max" })], [false, true, true]);
+  assert.equal(sourcesLimitText("free"), "Free obunada ko'pi bilan 30 ta guruh tanlash mumkin (Pro — 100, Max — 300)");
+  assert.equal(sourcesLimitText("max"), "Max obunada ko'pi bilan 300 ta guruh tanlash mumkin");
   assert.equal(isClosedSource("-1001234567"), true);
   assert.equal(isClosedSource("@abc"), false);
   assert.equal(isClosedSource(null), false);
   const asked = [];
-  const allowed = planFilter({ plan: "free", chatId: 7 }, (s) => (asked.push(s), s === "-1002" ? 7 : null));
+  const allowed = planFilter({ plan: "pro", chatId: 7 }, (s) => (asked.push(s), s === "-1002" ? [7] : []));
   assert.deepEqual(["@a", "-1001", "-1002", "-1001", null].map(allowed), [true, false, true, false, true]);
   assert.deepEqual(asked, ["-1001", "-1002"], "har yopiq guruh bir marta so'raladi");
 });

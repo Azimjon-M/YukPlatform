@@ -177,7 +177,7 @@ test("config: bot username va doira; CORS va OPTIONS", async () => {
 test("kirish: Mini App initData → token; haydovchi bazaga yoziladi; xato imzo — 401", async () => {
   const { token, me } = await login();
   assert.ok(token);
-  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", isAdmin: false, profile: null, active: false, appActive: true, phone: null, phoneAt: null, loadPhones: [] });
+  assert.deepEqual(me, { chatId: 555, name: "Ali Valiyev", username: "ali_haydovchi", role: null, plan: "free", maxSources: 30, isAdmin: false, profile: null, active: false, appActive: true, phone: null, phoneAt: null, loadPhones: [] });
   assert.equal(store.getDriver(555).name, "Ali Valiyev");
 
   const bad = await call("POST", "/pub/auth", { body: { initData: "user=%7B%22id%22%3A1%7D&auth_date=1&hash=00" } });
@@ -223,7 +223,7 @@ test("yuklar: hammasi — faqat doiradagilar, eng yangisi birinchi, telefon bila
   assert.equal((await call("GET", "/pub/loads?view=all&hours=1", { token })).body.total, 0);
 });
 
-test("yopiq guruh e'loni: bepulga ko'rinmaydi («Hammasi» da ham), Pro'ga — ko'rinadi", async () => {
+test("yopiq guruh e'loni: bepulga va (begonasi) Pro'ga ko'rinmaydi («Hammasi» da ham), Max'ga — ko'rinadi", async () => {
   const { token } = await login();
   const post = store.addPost({ source: "-1009876543", messageId: 99, text: "yopiq e'lon", postedAt: NOW - HOUR });
   store.addLoad({ postId: post.id, key: "k99", load: { fromRegion: "buxoro", toRegion: "navoiy", truckClass: "fura" }, kind: "yuk" });
@@ -231,7 +231,9 @@ test("yopiq guruh e'loni: bepulga ko'rinmaydi («Hammasi» da ham), Pro'ga — k
   assert.equal(await total(), 3, "bepul — yopiq guruh yuki yo'q");
   const pro = await fetch(`${adminBase}/api/drivers/${USER.id}`, { method: "PATCH", headers: { "x-yuk-admin": "1", "content-type": "application/json" }, body: JSON.stringify({ plan: "pro" }) });
   assert.equal(pro.status, 200);
-  assert.equal(await total(), 4, "Pro — ko'rinadi");
+  assert.equal(await total(), 3, "Pro — begona yopiq guruh ko'rinmaydi (2026-11-27)");
+  store.saveDriver(USER.id, { plan: "max" });
+  assert.equal(await total(), 4, "Max — ko'rinadi");
   store.saveDriver(USER.id, { plan: "free" });
   assert.equal(await total(), 3);
 });
@@ -859,7 +861,7 @@ test("rejim: guruhlar ro'yxati; profilda rejim saqlanadi, begona guruh tushadi; 
   assert.ok(names.includes("@TutGruz") && names.includes("@Yuk_markazi"));
   assert.ok(!names.includes("@Ochiq_emas"), "o'chirilgan guruh ro'yxatda yo'q");
   assert.deepEqual(list.body.chosen, []);
-  assert.equal(list.body.max, 500);
+  assert.deepEqual([list.body.max, list.body.plan, list.body.hiddenClosed], [30, "free", 0], "Free — 30 tagacha guruh");
 
   // Tezkor — mashinasiz saqlanadi, yuborish yoqiladi
   const fast = await call("PUT", "/pub/me/profile", { token, body: { profile: { domestic: true, international: false, feed: { mode: "tezkor" } } } });
@@ -888,6 +890,16 @@ test("rejim: guruhlar ro'yxati; profilda rejim saqlanadi, begona guruh tushadi; 
   const empty = await call("PUT", "/pub/me/profile", { token, body: { profile: { domestic: true, feed: { mode: "guruhlarim", sources: [] } } } });
   assert.equal(empty.body.field, "groups");
   assert.deepEqual(store.getDriver(590).profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"] }, "xato — hech narsa o'zgarmadi");
+  // Obuna limiti (2026-11-27): Free — 30 ta guruh; Pro — 100
+  const many = Array.from({ length: 31 }, (_, i) => `@limit_guruh_${i}`);
+  for (const name of many) store.addSource(name);
+  const over = await call("PUT", "/pub/me/profile", { token, body: { profile: { domestic: true, feed: { mode: "guruhlarim", sources: many } } } });
+  assert.deepEqual([over.status, over.body.field, over.body.error], [400, "groups", "Free obunada ko'pi bilan 30 ta guruh tanlash mumkin (Pro — 100, Max — 300)"]);
+  store.saveDriver(590, { plan: "pro" });
+  assert.equal((await call("PUT", "/pub/me/profile", { token, body: { profile: { domestic: true, feed: { mode: "guruhlarim", sources: many } } } })).status, 200);
+  assert.equal((await call("GET", "/pub/me/feed-sources", { token })).body.max, 100);
+  store.saveDriver(590, { plan: "free" });
+  await call("PUT", "/pub/me/profile", { token, body: { profile: { domestic: true, feed: { mode: "guruhlarim", sources: ["@TutGruz"] } } } });
 
   // Rejimni yubormagan (eski) forma — rejim qoladi, mashina qo'shiladi
   const vehicleForm = { vehicle: { truckClass: "fura", bodyType: "tent", capacityKg: 22000, loadingSides: [] }, domestic: true, international: false };

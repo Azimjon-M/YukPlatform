@@ -601,14 +601,16 @@ export function driverPill(driver, idleSince = null, now = Date.now()) {
   return { tone: v.tone, icon: v.icon, label: v.label };
 }
 
-export const isProDriver = (driver) => driver.plan === "pro" || driver.autoPro === true;
+// Pulli obuna (Pro yoki Max). 2026-11-27 dan akkaunt ulash (autoPro) Pro bermaydi
+export const isProDriver = (driver) => driver.plan === "pro" || driver.plan === "max";
 
 // Filtr tugmalari: id → shart
 export const DRIVER_FILTERS = [
   { id: "all", label: "Hammasi", test: () => true },
   { id: "active", label: "Faol", test: (d) => Boolean(d.profile) && d.active && !driverShown(d).deleted },
   { id: "online", label: "Onlayn", test: (d, now) => activityView(d, now).online },
-  { id: "pro", label: "Pro", test: (d) => isProDriver(d) },
+  { id: "pro", label: "⭐ Pro", test: (d) => d.plan === "pro" },
+  { id: "max", label: "💎 Max", test: (d) => d.plan === "max" },
   { id: "paused", label: "Pauzada", test: (d) => Boolean(d.profile) && !d.active },
   { id: "noprofile", label: "Ro'yxatsiz", test: (d) => !d.profile && !driverShown(d).deleted && !driverShown(d).signedOut },
   { id: "gone", label: "Chiqqan / o'chirgan", test: (d) => driverShown(d).deleted || driverShown(d).signedOut },

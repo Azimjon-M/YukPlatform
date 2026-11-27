@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { deleteMe, signOut } from "./api.js";
 import { confirmAction, haptic, showAlert } from "./telegram.js";
+import { PLAN_ABOUT } from "./feedGroups.js";
 import { Section } from "./ui.jsx";
 
 const LOGOUT_QUESTION =
@@ -35,6 +36,8 @@ export function AccountCard({ me, onSignedOut, onDeleted }) {
   return (
     <Section title="👤 Hisob">
       {who && <p className="account-who">Telegram: {who}</p>}
+      {/* Obuna (2026-11-27: Free / Pro / Max) — admin beradi */}
+      {me.role !== "yuk_beruvchi" && <p className="hint">Obuna: {PLAN_ABOUT[me.plan] ?? PLAN_ABOUT.free} Obunani admin beradi.</p>}
       <div className="account-actions">
         <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => run("logout", LOGOUT_QUESTION, signOut, onSignedOut)}>
           {busy === "logout" ? "Chiqilyapti..." : "🚪 Chiqish"}

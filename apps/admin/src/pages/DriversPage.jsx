@@ -8,7 +8,7 @@
 // Hisobini o'chirgan (bot /ochirish yoki web «🗑 Hisobni o'chirish»): qator qoladi — o'chirgan paytdagi rol, sozlamalar,
 // raqam va «N marta o'chirgan». Hammasi sig'maydi — har qatorda «Batafsil» (akkordeon, DriverDetails.jsx).
 import { useState } from "react";
-import { BLOCKED_TEXT, formatContactPhone } from "@yuk/shared";
+import { BLOCKED_TEXT, PLANS, PLAN_IDS, formatContactPhone } from "@yuk/shared";
 import { get, patch } from "../api.js";
 import {
   DRIVER_FILTERS,
@@ -153,30 +153,43 @@ function AdminToggle({ driver, onChanged }) {
   return <Toggle checked={checked} onChange={change} busy={busy} label="Admin" />;
 }
 
-// Pro obuna: yopiq guruhlardagi e'lonlar faqat Pro'larga boradi (@yuk/shared roles.js planAllows)
-function ProToggle({ driver, onChanged }) {
+// Obuna (2026-11-27: Free / Pro / Max — @yuk/shared roles.js planAllows): Free — ochiq guruhlarning matnli e'lonlari, 30 ta
+// guruh; Pro — + ovozli e'lonlar va o'z yopiq guruhlari, 100 ta; Max — hamma yopiq guruhlar, 300 ta, birinchi bo'lib
+const PLAN_NOTES = {
+  free: "Free: ochiq guruhlarning matnli e'lonlari, 30 tagacha guruh",
+  pro: "Pro berildi: ovozli e'lonlar va o'z yopiq guruhlari, 100 tagacha guruh",
+  max: "Max berildi: hamma yopiq guruhlar, 300 tagacha guruh, e'lon birinchi bo'lib",
+};
+function PlanSelect({ driver, onChanged }) {
   const notify = useToast();
   const [busy, setBusy] = useState(false);
-  const [checked, setChecked] = useState(driver.plan === "pro");
-  async function change(pro) {
+  const [plan, setPlan] = useState(PLANS[driver.plan] ? driver.plan : "free");
+  async function change(next) {
+    const before = plan;
     setBusy(true);
-    setChecked(pro);
+    setPlan(next);
     try {
-      await patch(`/api/drivers/${driver.chatId}`, { plan: pro ? "pro" : "free" });
-      notify(pro ? "Pro berildi — endi yopiq guruhlardagi e'lonlar ham boradi" : "Pro olindi — faqat ochiq guruhlardagi e'lonlar");
+      await patch(`/api/drivers/${driver.chatId}`, { plan: next });
+      notify(PLAN_NOTES[next]);
       onChanged();
     } catch (e) {
-      setChecked(!pro);
+      setPlan(before);
       notify(e.message, "critical");
     } finally {
       setBusy(false);
     }
   }
   return (
-    <>
-      <Toggle checked={checked} onChange={change} busy={busy} label="Pro" />
-      {driver.autoPro && !checked && <div className="muted small">⭐ Pro avtomatik: raqam ulashgan + akkaunt bog'lagan</div>}
-    </>
+    <label className="plan-select small" title={PLAN_NOTES[plan]}>
+      Obuna{" "}
+      <select value={plan} disabled={busy} onChange={(e) => change(e.target.value)}>
+        {PLAN_IDS.map((id) => (
+          <option key={id} value={id}>
+            {[PLANS[id].icon, PLANS[id].name].filter(Boolean).join(" ")}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -239,8 +252,8 @@ function DriverRow({ driver, open, onToggle, now, reload, idleSince }) {
           <span className="person-name">
             <strong>{driver.name || "Ismsiz"}</strong>
             {isProDriver(driver) && (
-              <span className="pro-mark" title={driver.plan === "pro" ? "Pro (qo'lda berilgan)" : "Pro (avtomatik: raqam + akkaunt)"}>
-                PRO
+              <span className={`pro-mark ${driver.plan === "max" ? "is-max" : ""}`} title={PLAN_NOTES[driver.plan]}>
+                {driver.plan === "max" ? "MAX" : "PRO"}
               </span>
             )}
             {driver.isAdmin && <span className="admin-mark">admin</span>}
@@ -259,7 +272,7 @@ function DriverRow({ driver, open, onToggle, now, reload, idleSince }) {
         <div className="person-body" id={detailsId}>
           <div className="person-controls">
             {!shown.deleted && <AdminToggle key={`${driver.chatId}:admin:${driver.isAdmin}`} driver={driver} onChanged={reload} />}
-            {!shown.deleted && <ProToggle key={`${driver.chatId}:plan:${driver.plan}`} driver={driver} onChanged={reload} />}
+            {!shown.deleted && <PlanSelect key={`${driver.chatId}:plan:${driver.plan}`} driver={driver} onChanged={reload} />}
             <BlockToggle driver={driver} onChanged={reload} />
           </div>
           {(driver.banned || driver.subOk === false) && (

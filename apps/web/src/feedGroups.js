@@ -25,7 +25,7 @@ export function groupOptions(list, chosen) {
     label: s.title ?? s.name,
     // Nom ostida — @username (yopiq guruhning raqamli id'si hech narsa demaydi — ko'rsatilmaydi). Kim qo'shgani yozilmaydi
     // (2026-11-27, Azimjon: «Kim tomonidan qo'shilgani kerak emas!»)
-    note: [s.title && !s.closed ? s.name : null, s.locked ? "🔒 Pro uchun" : null].filter(Boolean).join(" · ") || null,
+    note: [s.title && !s.closed ? s.name : null, s.locked ? "⭐ Pro uchun" : null].filter(Boolean).join(" · ") || null,
     sub: s.perDay == null ? null : perDayText(s.perDay),
     sub2: membersText(s.members) ? `👥 ${membersText(s.members)}` : null, // o'ngda, «ta/kun» ostida
     marquee: true, // uzun nom bir qatorda, chapga-o'ngga suriladi (ui.jsx Marquee)
@@ -63,8 +63,22 @@ export function pageOf(items, page, size = GROUPS_PAGE_SIZE) {
   return { items: items.slice(from, from + size), page: current, pages, first: total ? from + 1 : 0, last: Math.min(total, from + size), total };
 }
 
+// Obunalar (2026-11-27, @yuk/shared roles.js): Free — ochiq guruhlarning matnli e'lonlari, 30 ta guruh; Pro — + ovozli
+// e'lonlar va O'Z yopiq guruhlari, 100 ta; Max — hamma yopiq guruhlar, 300 ta. Obunani admin beradi
 export const CLOSED_PRO_HINT =
-  "Yopiq guruhlardagi e'lonlar faqat Pro foydalanuvchilarga keladi. Pro avtomatik beriladi: botda o'z Telegram akkauntingizni bog'lang (/account_qosh).";
+  "🔒 Yopiq guruhlaringizdagi e'lonlar ⭐ Pro obunada keladi (ovozli e'lonlar ham). Obunani admin beradi.";
+export const PLAN_ABOUT = {
+  free: "Free — ochiq guruhlarning matnli e'lonlari, 30 tagacha guruh tanlash. ⭐ Pro: ovozli e'lonlar va o'z yopiq guruhlaringiz (100 ta guruh). 💎 Max: hamma yopiq guruhlar (300 ta), e'lon birinchi bo'lib sizga.",
+  pro: "⭐ Pro — ovozli e'lonlar va o'z akkauntingizdagi yopiq guruhlar, 100 tagacha guruh tanlash. 💎 Max: boshqa yopiq guruhlar ham (300 ta), e'lon birinchi bo'lib sizga.",
+  max: "💎 Max — hamma ochiq va yopiq guruhlar, ovozli e'lonlar, 300 tagacha guruh tanlash, e'lon birinchi bo'lib sizga.",
+};
+// «🔒 Yopiq» bo'limi ustidagi yozuv. hidden — shu odamga ko'rinmaydigan (boshqalarning) yopiq guruhlari soni
+export function closedHint(plan, hidden = 0) {
+  if (plan === "max") return "💎 Max: hamma yopiq guruhlardagi e'lonlar sizga keladi.";
+  const more = hidden > 0 ? ` Yana ${hidden} ta yopiq guruh — 💎 Max obunada.` : "";
+  if (plan === "pro") return `⭐ Pro: o'z akkauntingiz a'zo bo'lgan yopiq guruhlardagi e'lonlar sizga keladi.${more}`;
+  return `${CLOSED_PRO_HINT}${more}`;
+}
 
 // sources — [{ name, title }] → nom bo'yicha sarlavha («Tekshiring» ro'yxati uchun)
 export const sourceNamer = (list) => {

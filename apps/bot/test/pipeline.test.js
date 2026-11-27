@@ -866,30 +866,32 @@ test("tezkor: deliverRaw berilmasa (eski main.js) — tezkor yo'l o'chiq, tezkor
 // --- Obuna: yopiq guruh (qo'shimcha akkaunt o'qiydi, manba nomi -100…) e'loni — faqat Pro va guruhni qo'shganga ---
 const CLOSED = "-1001234567";
 
-test("yopiq guruh: yuk faqat Pro va guruhni qo'shgan haydovchiga; kanal va guruh bo'limlariga chiqmaydi", async () => {
+test("yopiq guruh (obunalar, 2026-11-27): yuk Max'ga va guruh o'ziniki bo'lgan Pro'ga; Free va begona Pro'ga — yo'q; kanal va guruh bo'limlariga chiqmaydi", async () => {
   const { store, deps, published, delivered } = setup([
     { ok: true, postType: "yuk_bor", loads: [LOAD] },
     { ok: true, postType: "yuk_bor", loads: [{ ...LOAD, toCity: "Buxoro", toRegion: "buxoro" }] },
   ]);
-  store.saveDriver(4, { profile: FURA, active: true, plan: "pro" });
-  store.saveDriver(5, { profile: FURA, active: true });
+  store.saveDriver(4, { profile: FURA, active: true, plan: "max" });
+  store.saveDriver(5, { profile: FURA, active: true, plan: "pro" });
+  store.saveDriver(6, { profile: FURA, active: true, plan: "pro" }); // Pro, lekin guruh uniki emas
+  store.saveDriver(9, { profile: FURA, active: true }); // Free, guruhni o'zi qo'shgan bo'lsa ham
   store.addUserSource({ name: CLOSED, chatId: 5, account: "dost" });
   store.addPost({ source: CLOSED, messageId: 1, text: `yopiq ${"x".repeat(20)}`, postedAt: Date.now() - 2000, sender: "ali_yuk" });
   await processPost(store.takeNewPosts()[0], deps);
-  assert.deepEqual(delivered.sort(), [4, 5], "1 (bepul) olmaydi; 4 — Pro, 5 — guruhni o'zi qo'shgan");
+  assert.deepEqual(delivered, [4, 5], "1 va 9 (Free), 6 (begona Pro) olmaydi; 4 — Max (birinchi), 5 — Pro, guruh o'ziniki");
   assert.equal(published.length, 0, "ochiq kanal / guruh bo'limlariga yo'q");
   // Ochiq guruhdagi yuk — avvalgidek hammaga va kanalga
   delivered.length = 0;
   store.addPost({ source: "@g", messageId: 2, text: `ochiq ${"x".repeat(20)}`, postedAt: Date.now() - 1000 });
   await processPost(store.takeNewPosts()[0], deps);
-  assert.deepEqual(delivered.sort(), [1, 4, 5]);
+  assert.deepEqual(delivered, [4, 5, 6, 1, 9], "tartib: Max → Pro → Free");
   assert.equal(published.length, 1);
 });
 
-test("yopiq guruh: tezkor rejimda ham asl matn faqat Pro'ga", async () => {
+test("yopiq guruh: tezkor rejimda ham asl matn faqat Max'ga (Pro'ga — o'ziniki bo'lsa)", async () => {
   const { store, deps, raw, post } = rawSetup();
   deps.pool = noAi;
-  store.saveDriver(10, { role: "haydovchi", profile: TEZKOR, active: true, plan: "pro" });
+  store.saveDriver(10, { role: "haydovchi", profile: TEZKOR, active: true, plan: "max" });
   post(CLOSED, 1, LOAD_TEXT);
   post("@g", 2, LOAD_TEXT.replace("0001", "0005"));
   await createWorker(deps, { log: () => {} }).runOnce();
@@ -902,6 +904,7 @@ test("ovozli xabar: ochiq guruhda raqamsiz va lichkasiz ham yuboriladi (havola b
   const { store, deps, raw, post } = rawSetup();
   deps.pool = noAi;
   deps.requireContact = true;
+  store.saveDriver(7, { plan: "pro" }); // ovozli e'lon — Pro/Max (2026-11-27)
   const text = "Toshkentdan Samarqandga 20 tonna un bor, tent fura kerak";
   store.addPost({ source: "@g", messageId: 1, link: "https://t.me/g/1", text, postedAt: Date.now() - 1000, media: "voice" });
   store.addPost({ source: "-1001234567", messageId: 2, text: `${text}.`, postedAt: Date.now() - 1000, media: "voice" });
@@ -913,11 +916,22 @@ test("ovozli xabar: ochiq guruhda raqamsiz va lichkasiz ham yuboriladi (havola b
   assert.ok(closed.every((p) => p.status === "done" && p.error?.startsWith("Aloqasiz")));
 });
 
+test("ovozli e'lon (obunalar, 2026-11-27): ochiq guruhda ham Free'ga yuborilmaydi, Pro'ga — yuboriladi", async () => {
+  const { store, deps, raw } = rawSetup();
+  deps.pool = noAi;
+  store.saveDriver(10, { role: "haydovchi", profile: TEZKOR, active: true, plan: "pro" });
+  const text = "Toshkentdan Samarqandga 20 tonna un bor, tent fura kerak 90 123 45 67";
+  store.addPost({ source: "@g", messageId: 1, link: "https://t.me/g/1", text, postedAt: Date.now() - 1000, media: "voice" });
+  store.addPost({ source: "@g", messageId: 2, link: "https://t.me/g/2", text: `${text}!`, postedAt: Date.now() - 1000 });
+  await createWorker(deps, { log: () => {} }).runOnce();
+  assert.deepEqual(raw.map(([chatId, id]) => `${id}→${chatId}`).sort(), ["1→10", "2→10", "2→7"], "7 (Free) — faqat matnli e'lon");
+});
+
 test("ovozli xabar: yopiq guruhda — gapirgan odam bot foydalanuvchisi bo'lsa (ID bilan «💬 Lichkasi»); begona ID — aloqa emas", async () => {
   const { store, deps, raw } = rawSetup();
   deps.pool = noAi;
   deps.requireContact = true;
-  store.saveDriver(7, { plan: "pro" }); // yopiq guruh e'loni — faqat Pro
+  store.saveDriver(7, { plan: "max" }); // begona yopiq guruh e'loni — faqat Max
   store.saveDriver(5551234, { name: "Gapirgan" }); // botga yozgan — bot uni taniydi
   const text = "Toshkentdan Samarqandga 20 tonna un bor, tent fura kerak";
   store.addPost({ source: "-1001234567", messageId: 1, text, postedAt: Date.now() - 1000, media: "voice", senderId: "5551234" });
@@ -927,10 +941,10 @@ test("ovozli xabar: yopiq guruhda — gapirgan odam bot foydalanuvchisi bo'lsa (
   assert.deepEqual(raw.map(([chatId, id]) => `${id}→${chatId}`), ["1→7"], "ID'siz va begona ID — aloqasiz");
 });
 
-test("«📌 Mening guruhlarim»da yopiq guruh: Pro haydovchiga asl matn keladi; Pro'si yo'qolsa — kelmaydi", async () => {
+test("«📌 Mening guruhlarim»da yopiq guruh: Max haydovchiga asl matn keladi; obunasi yo'qolsa — kelmaydi", async () => {
   const { store, deps, raw, post } = rawSetup();
   deps.pool = noAi;
-  store.saveDriver(8, { plan: "pro", profile: { ...GURUHLARIM, feed: { mode: "guruhlarim", sources: ["-1001234567"] } } });
+  store.saveDriver(8, { plan: "max", profile: { ...GURUHLARIM, feed: { mode: "guruhlarim", sources: ["-1001234567"] } } });
   post("-1001234567", 1, LOAD_TEXT);
   await createWorker(deps, { log: () => {} }).runOnce();
   assert.ok(raw.some(([chatId, id]) => chatId === 8 && id === 1));
@@ -1067,7 +1081,7 @@ test("yopiq guruh: bog'lanish yo'li yo'q e'lon hech kimga ketmaydi (saralash o'c
   const { store, deps, raw, post } = rawSetup();
   deps.pool = noAi;
   deps.sortingOff = true;
-  store.saveDriver(7, { role: "haydovchi", plan: "pro", profile: TEZKOR, active: true });
+  store.saveDriver(7, { role: "haydovchi", plan: "max", profile: TEZKOR, active: true });
   const text = (n) => `Toshkentdan Samarqandga ${n} tonna un bor, tent fura kerak`;
   const add = (id, extra) => store.addPost({ source: "-1001234567890", messageId: id, text: text(10 + id), postedAt: Date.now() - 1000, ...extra });
   add(1, { senderId: "555" }); // faqat ID, bot tanimaydi
