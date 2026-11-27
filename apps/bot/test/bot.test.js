@@ -354,7 +354,7 @@ test("pastki menyudagi «🔄 Rolni almashtirish» — /rol bilan bir xil: hozir
   // Ro'yxatdan o'tish kerak emas!» + «⏸ Pauza/"davom etish" va "➕ Guruh qo'shish" faqat haydovchi roli uchun!» —
   // yuk beruvchi tartibi: [📦 Yuk berish] / [🚚 Bo'sh mashinalar + 🔄 Rolni almashtirish] /
   // [📱 Raqam ulashish + ❓ Yordam] / [⚙️ Sozlamalar] / [🛠 Boshqaruv] — Pauza yo'q
-  assert.deepEqual(rows(), [[MENU.giveLoad], [MENU.role, MENU.phone], [MENU.help, MENU.settings], [MENU.admin]]); // 2026-11-27: «🚚 Bo'sh mashinalar» yo'q
+  assert.deepEqual(rows(), [[MENU.giveLoad], [MENU.role, MENU.help], [MENU.settings], [MENU.admin]]); // 2026-11-27: «🚚 Bo'sh mashinalar» va «📱 Raqam ulashish» yo'q
   assert.ok(!buttons(lastMarkup(calls)).some((b) => b.text === MENU.register), "yuk beruvchida «🚚 Ro'yxatdan o'tish» tugmasi yo'q");
   // Haydovchiga qaytdi — sozlamalari tiklandi, to'liq menyu. Tartib (Azimjon, 2026-11-10): mos yuklar, pauza, rol, raqam,
   // yordam, sozlamalar; admin tugmasi alohida pastda
@@ -385,7 +385,7 @@ test("«⏸ Pauza / ▶️ Davom ettirish» va «➕ Guruh qo'shish» FAQAT hayd
   store.saveDriver(42, { role: "yuk_beruvchi", profile: { fromAreas: ["toshkent"], truckClasses: [] }, active: true, phone: "+998901234567", phoneAskedAt: 1 });
   await message(PRIVATE, MENU.help);
   texts_ = buttons(lastMarkup(calls)).map((b) => b.text);
-  assert.deepEqual(texts_, [MENU.giveLoad, MENU.role, MENU.phone, MENU.help, MENU.settings]);
+  assert.deepEqual(texts_, [MENU.giveLoad, MENU.role, MENU.help, MENU.settings]);
   assert.ok(!texts_.includes(MENU.pause) && !texts_.includes(MENU.resume), "yuk beruvchida pauza tugmasi yo'q");
   assert.ok(!texts_.includes(MENU.addGroup), "yuk beruvchida «➕ Guruh qo'shish» yo'q");
   // Handler o'chirilmagan: yuk beruvchi eski menyudan «⏸ Pauza» ni yuborsa — baribir ishlaydi (FAQAT tugma ko'rsatilmaydi)
@@ -724,7 +724,7 @@ test("yuk beruvchi: rol → «Yuk berish» namunasi (matn yoki ovoz); «🚚 Bo'
   assert.ok(!/forma/i.test(introMsg), "formaga yo'naltirish yo'q");
   assert.equal(store.getDriver(42).draft, null);
   const shipperMenuTexts = () => buttons(lastMarkup(calls)).map((b) => b.text);
-  assert.deepEqual(shipperMenuTexts(), [MENU.giveLoad, MENU.role, MENU.phone, MENU.help, MENU.settings]);
+  assert.deepEqual(shipperMenuTexts(), [MENU.giveLoad, MENU.role, MENU.help, MENU.settings]);
   // Eski menyudagi «🚚 Bo'sh mashinalar» — ro'yxat emas, yuk berish yo'li
   await message(PRIVATE, MENU.trucks);
   assert.match(texts(calls).at(-1), /Bo'sh mashinalar bo'limi endi yo'q[\s\S]*ovozli xabar/);
@@ -1924,4 +1924,17 @@ test("ilovaga kirish: a'zo bo'lmaguncha yo'q; a'zo bo'lgach /start app_<kod> →
   assert.match(texts(calls, "editMessageText").at(-1), /eskirgan/);
   await press("al:no");
   assert.match(texts(calls, "editMessageText").at(-1), /Bog'lanmadi/);
+});
+
+test("yuk beruvchidan bot o'zi raqam so'ramaydi, yordamda raqam qatori yo'q (2026-11-27); haydovchidan — so'raydi", async () => {
+  const { store, calls, command, message } = setup();
+  store.saveDriver(42, { role: "yuk_beruvchi", profile: { fromAreas: ["toshkent"], truckClasses: [] }, active: true });
+  await command("/start");
+  assert.ok(!texts(calls).some((t) => /ulashasizmi/.test(t)), "yuk beruvchi — so'ralmaydi");
+  await message(PRIVATE, MENU.help);
+  assert.ok(!texts(calls).at(-1).includes(MENU.phone));
+  store.saveDriver(42, { role: "haydovchi", profile: PROFILE, active: true });
+  calls.length = 0;
+  await command("/start");
+  assert.ok(texts(calls).some((t) => /ulashasizmi/.test(t)), "haydovchi — bir marta so'raladi");
 });

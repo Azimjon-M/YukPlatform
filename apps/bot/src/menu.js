@@ -123,14 +123,13 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   // Azimjon, 2026-11-12: «⏸ Pauza / ▶️ Davom ettirish» va «➕ Guruh qo'shish» FAQAT haydovchi roli uchun —
   // yuk_beruvchida menyuda yo'q (handlerlar saqlangan: eski menyuda bosilsa yoki idle DM'dagi inline
   // «▶️ Davom ettirish» bosilsa ishlayveradi). «📱 Raqam ulashish» ikkala rolda ham bor (raqam — umumiy
-  // identifikatsiya). Yuk beruvchi tartibi: [📦 Yuk berish] / [🔄 Rolni almashtirish, 📱 Raqam ulashish] /
-  // [❓ Yordam, ⚙️ Sozlamalar] / (adminga [🛠 Boshqaruv]). «🚚 Bo'sh mashinalar» yo'q (Azimjon, 2026-11-27: «biz faqat yuk
+  // identifikatsiya). Yuk beruvchi tartibi: [📦 Yuk berish] / [🔄 Rolni almashtirish, ❓ Yordam] / [⚙️ Sozlamalar] /
+  // (adminga [🛠 Boshqaruv]). «📱 Raqam ulashish» ham yo'q (Azimjon, 2026-11-27: raqam e'londa baribir so'raladi, matnda yoki
+  // ovozda aytiladi; oxirgi raqamlari tugma bo'lib turadi) — /raqam va Mini App Sozlamalaridagi «📱 Telefon raqam» qoladi. «🚚 Bo'sh mashinalar» yo'q (Azimjon, 2026-11-27: «biz faqat yuk
   // e'lonlarini qidiramiz endi bo'sh mashinalarniham qidirsak ortiqcha!») — eski menyuda bosilsa bot tushuntiradi
   if (role === "yuk_beruvchi") {
     // Rol tanlangan (shu tarmoq shartiga ko'ra) — «🔄 Rolni almashtirish» har doim qo'yiladi
-    const shipperKb = loadRow(new Keyboard()).text(MENU.role);
-    // «📱 Raqam ulashish» ikkala rolda ham bor; raqami bo'lsa ham bosilsa yangi raqam saqlanadi (esmada saqlash — /raqam)
-    shipperKb.text(MENU.phone).row().text(MENU.help);
+    const shipperKb = loadRow(new Keyboard()).text(MENU.role).text(MENU.help).row();
     settingsButton(shipperKb);
     const shipperAdminUrl = admin ? miniAppUrl(miniappUrl, null, scope, { view: "admin", role, token }) : null;
     if (shipperAdminUrl) shipperKb.row().webApp(MENU.admin, shipperAdminUrl);

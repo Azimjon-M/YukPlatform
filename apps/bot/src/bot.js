@@ -202,9 +202,8 @@ function helpText(driver) {
         ...(isShipper ? [] : mode.sorted ? [`${matchesLabel(driver)} — ${t.matches}`] : feedLines),
         ...(isShipper ? [] : [`${MENU.pause} — yuk kelishini to'xtatish (${MENU.resume} — qayta yoqish)`]),
         roleLine,
-        driver.phone && !isShipper
-          ? ADD_GROUP_TEXT
-          : `${MENU.phone} — sizni doim taniymiz, sozlamalar yo'qolmaydi`,
+        // Yuk beruvchida raqam qatori yo'q (2026-11-27) — raqam e'lon berishda so'raladi
+        ...(isShipper ? [] : [driver.phone ? ADD_GROUP_TEXT : `${MENU.phone} — sizni doim taniymiz, sozlamalar yo'qolmaydi`]),
         settingsLine,
         ...(mode.sorted ? feedLines : []),
       ]
@@ -474,6 +473,8 @@ export function createBot({
     const token = driver?.chatId != null && url ? linkToken(driver.chatId) : null;
     return { reply_markup: mainMenu(driver, url, scope, { admin: isAdmin(driver, config.admins ?? []), token }) };
   };
+  // Raqamni bot o'zi bir marta so'raydi — faqat haydovchidan (2026-11-27: yuk beruvchida raqam e'lon berishda so'raladi)
+  const askPhoneFor = (driver) => roleOf(driver) !== "yuk_beruvchi" && shouldAskPhone(driver);
   const html = (driver) => ({ parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...menu(driver) });
 
   // «📞 Telefon qilish» sahifasining manzili: Mini App bilan bir server (nginx /pub/ ni haydovchilar serveriga uzatadi).
@@ -737,7 +738,7 @@ export function createBot({
     // ixtiyoriy) → yo'nalish. Raqamga javob bergach (ulashdi yoki «Keyinroq») — afterPhone() yo'nalishni so'raydi.
     // 2026-11-07…10 da raqam yo'nalishdan KEYIN so'ralardi.
     if (role === "haydovchi" && sortedReady(profile) && !routeChosen(profile)) {
-      if (shouldAskPhone(driver)) {
+      if (askPhoneFor(driver)) {
         // Faqat «✅ Saqlandi.» — sozlamalar ro'yxatisiz (Azimjon, 2026-11-10): uzun ro'yxat keyingi raqam savolini
         // ekrandan chiqarib yuborardi; xato bo'lsa — «⚙️ Sozlamalar» da ko'radi va tuzatadi.
         // Menyusiz: darhol keyingi xabardagi raqam klaviaturasi uning o'rnini oladi, menyu javobdan keyin qaytadi
@@ -751,7 +752,7 @@ export function createBot({
     }
     // Birinchi marta sozlagach (yuk beruvchi, yoki yo'nalishi tiklangan haydovchi) — raqamni bir marta so'raymiz (ixtiyoriy).
     // Shunda ham faqat «✅ Saqlandi.» (Azimjon, 2026-11-10: yuk beruvchida ham — ro'yxat raqam savolini ekrandan chiqarardi)
-    if (shouldAskPhone(driver)) {
+    if (askPhoneFor(driver)) {
       await ctx.reply("✅ Saqlandi.");
       await askPhone(ctx, driver);
       return;
@@ -881,7 +882,7 @@ export function createBot({
       await ctx.reply(ROUTE_NEXT, menu(driver));
       return askRoute(ctx, driver);
     }
-    if (shouldAskPhone(driver)) await askPhone(ctx, driver);
+    if (askPhoneFor(driver)) await askPhone(ctx, driver);
   }
 
   async function setActive(ctx, active) {
@@ -973,7 +974,7 @@ export function createBot({
     if (!shown) await bot.api.sendMessage(chatId, text, { parse_mode: "HTML" });
     if (members.active() && !isAdmin(driver, config.admins ?? []) && !(await members.check(chatId)).ok) return;
     await listMatchesIn(chatId, driver);
-    if (shouldAskPhone(driver)) await askPhoneIn(chatId, driver);
+    if (askPhoneFor(driver)) await askPhoneIn(chatId, driver);
   }
   // Raqamini web sozlamalarida o'chirdi (server DELETE /pub/me/phone → bot_notices "phone_deleted"). Chatdagi pastki
   // menyu eskirdi («➕ Guruh qo'shish» turibdi) — botdagi «Faqat raqamni o'chirish» kabi yozib, menyuni yangilaymiz.
@@ -1071,7 +1072,7 @@ export function createBot({
     if (driver.profile) {
       await ctx.reply(`${hello}\n\n<b>Sizning sozlamalaringiz:</b>\n${escapeHtml(describe(driver.profile, role))}`, html(driver));
       // Raqam so'rash paydo bo'lishidan oldin ro'yxatdan o'tganlar — bir marta shu yerda so'raladi
-      if (shouldAskPhone(driver)) await askPhone(ctx, driver);
+      if (askPhoneFor(driver)) await askPhone(ctx, driver);
       return;
     }
     // Yuk beruvchi: ro'yxatdan o'tish shart emas — «📦 Yuk berish» (forma yoki oddiy xabar)
@@ -1665,7 +1666,7 @@ export function createBot({
     await listMatches(ctx, updated);
     // Odatda raqam formadan keyin so'ralgan bo'ladi (saved). Bu — forma botga kelmagan hollar uchun (masalan, web saytda
     // to'ldirgan yoki 2026-11-10 dan oldin yo'nalishsiz qolgan): raqam baribir bir marta so'raladi
-    if (shouldAskPhone(updated)) await askPhone(ctx, updated);
+    if (askPhoneFor(updated)) await askPhone(ctx, updated);
   });
 
   // Chatdagi savol-javob (Mini App bo'lmasa)
