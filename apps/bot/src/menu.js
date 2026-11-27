@@ -99,13 +99,9 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   const url = role ? miniAppUrl(miniappUrl, driver?.profile ?? null, scope, { role, token }) : null;
   const settingsButton = (keyboard) => (url ? keyboard.webApp(label, url) : keyboard.text(label));
   // Yuk beruvchi: «📦 Yuk berish» — alohida, birinchi qatorda (Azimjon, 2026-11-10: rol tanlanishi bilan, ro'yxatdan
-  // o'tmasdan ham). Forma — web ilovaning «📦 Yuk berish» bo'limi (?v=yuk); manzil yo'q bo'lsa — oddiy tugma (bot
-  // «shu yerga oddiy xabar qilib yozing» deydi)
-  const loadUrl = role === "yuk_beruvchi" ? miniAppUrl(miniappUrl, null, scope, { view: "yuk", role, token }) : null;
-  const loadRow = (keyboard) => {
-    if (role !== "yuk_beruvchi") return keyboard;
-    return (loadUrl ? keyboard.webApp(MENU.giveLoad, loadUrl) : keyboard.text(MENU.giveLoad)).row();
-  };
+  // o'tmasdan ham). Oddiy tugma: bot namunani ko'rsatadi, yuk shu chatga matn yoki ovoz bilan yoziladi (Azimjon,
+  // 2026-11-27: «Ilovadagi kabi yozib (abrazavanyaga qarab) yoki audioham jo'nataversin … Formaga yo'naltirish kerak emas»)
+  const loadRow = (keyboard) => (role === "yuk_beruvchi" ? keyboard.text(MENU.giveLoad).row() : keyboard);
 
   // Rol tanlangan, lekin ro'yxatdan o'tmagan (forma hali to'ldirilmagan) — FAQAT 3 tugma (Azimjon, 2026-11-10):
   //   [🚚 Ro'yxatdan o'tish]
@@ -127,14 +123,15 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   // Azimjon, 2026-11-12: «⏸ Pauza / ▶️ Davom ettirish» va «➕ Guruh qo'shish» FAQAT haydovchi roli uchun —
   // yuk_beruvchida menyuda yo'q (handlerlar saqlangan: eski menyuda bosilsa yoki idle DM'dagi inline
   // «▶️ Davom ettirish» bosilsa ishlayveradi). «📱 Raqam ulashish» ikkala rolda ham bor (raqam — umumiy
-  // identifikatsiya). Yuk beruvchi tartibi: [📦 Yuk berish] / [🚚 Bo'sh mashinalar, 🔄 Rolni almashtirish] /
-  // [📱 Raqam ulashish, ❓ Yordam] / [⚙️ Sozlamalar] / (adminga [🛠 Boshqaruv])
+  // identifikatsiya). Yuk beruvchi tartibi: [📦 Yuk berish] / [🔄 Rolni almashtirish, 📱 Raqam ulashish] /
+  // [❓ Yordam, ⚙️ Sozlamalar] / (adminga [🛠 Boshqaruv]). «🚚 Bo'sh mashinalar» yo'q (Azimjon, 2026-11-27: «biz faqat yuk
+  // e'lonlarini qidiramiz endi bo'sh mashinalarniham qidirsak ortiqcha!») — eski menyuda bosilsa bot tushuntiradi
   if (role === "yuk_beruvchi") {
     // Rol tanlangan (shu tarmoq shartiga ko'ra) — «🔄 Rolni almashtirish» har doim qo'yiladi
-    const shipperKb = loadRow(new Keyboard()).text(MENU.trucks).text(MENU.role);
+    const shipperKb = loadRow(new Keyboard()).text(MENU.role);
     // «📱 Raqam ulashish» ikkala rolda ham bor; raqami bo'lsa ham bosilsa yangi raqam saqlanadi (esmada saqlash — /raqam)
-    shipperKb.row().text(MENU.phone).text(MENU.help);
-    settingsButton(shipperKb.row());
+    shipperKb.text(MENU.phone).row().text(MENU.help);
+    settingsButton(shipperKb);
     const shipperAdminUrl = admin ? miniAppUrl(miniappUrl, null, scope, { view: "admin", role, token }) : null;
     if (shipperAdminUrl) shipperKb.row().webApp(MENU.admin, shipperAdminUrl);
     return shipperKb.resized().placeholder("Menyudan tanlang");

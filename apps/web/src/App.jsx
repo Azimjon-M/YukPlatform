@@ -2,8 +2,8 @@
 //   haydovchi:     📋 Yuklar (menga mos — tanlangan yo'nalish bo'yicha / hammasi) · 🗺 Xarita · 🎛 Filtr (qaysi yuklar kelsin:
 //                  mashina, qayerdan, guruhlar — 2026-11-27 dan botda emas, faqat shu yerda) · ⚙️ Sozlamalar (raqam, Telegram
 //                  akkaunt, ilova, hisob)
-//   yuk beruvchi:  📦 Yuk berish (o'z yukini haydovchilarga) · 🚚 Mashinalar (bo'sh mashinalar) · ⚙️ Sozlamalar (yo'nalish va
-//                  kerakli mashina — faqat bo'sh mashina e'lonlari uchun; yuk berishga shart emas)
+//   yuk beruvchi:  📦 Yuk berish (o'z yukini haydovchilarga) · ⚙️ Sozlamalar (raqam, Telegram akkaunt, ilova, hisob).
+//                  «🚚 Mashinalar» va bo'sh mashina sozlamalari yo'q (Azimjon, 2026-11-27: «biz faqat yuk e'lonlarini qidiramiz»)
 // Rol tanlanmagan bo'lsa — «Siz kimsiz?» ekrani. Bot ham shu sozlamalar bo'yicha shaxsiy xabar yuboradi.
 // Adminlarga qo'shimcha 🛠 Boshqaruv (botdagi «🛠 Boshqaruv» tugmasi ?v=admin bilan ochadi).
 // Kirish (api.js resume): Telegram'da inline / menyu tugmasidan — o'zi (initData); botning PASTKI MENYU tugmasidan —
@@ -24,8 +24,7 @@ import { AppCard } from "./AppCard.jsx";
 import { RolePage } from "./RolePage.jsx";
 import { RouteMapPage } from "./RouteMapPage.jsx";
 import { SettingsPage } from "./SettingsPage.jsx";
-import { ShipperSettings } from "./ShipperSettings.jsx";
-import { canSendData, closeApp, haptic, inTelegram, showAlert } from "./telegram.js";
+import { closeApp, haptic, inTelegram, showAlert } from "./telegram.js";
 import { Notice, Section, Spinner } from "./ui.jsx";
 
 const SETTINGS_TAB = { id: "sozlamalar", icon: "⚙️", label: "Sozlamalar" };
@@ -35,7 +34,7 @@ const FILTER_TAB = { id: "filtr", icon: "🎛", label: "Filtr" };
 const LOAD_TAB = { id: "yuk", icon: "📦", label: "Yuk berish" };
 const ROLE_TABS = {
   haydovchi: [{ id: "yuklar", icon: "📋", label: "Yuklar" }, { id: "xarita", icon: "🗺", label: "Xarita" }, FILTER_TAB, SETTINGS_TAB],
-  yuk_beruvchi: [LOAD_TAB, { id: "mashinalar", icon: "🚚", label: "Mashinalar" }, SETTINGS_TAB],
+  yuk_beruvchi: [LOAD_TAB, SETTINGS_TAB],
 };
 // Rol tanlangach / sozlamalarsiz ochilganda qaysi bo'lim: yuk beruvchi — «📦 Yuk berish» (sozlamalar unga shart emas),
 // haydovchi — «🎛 Filtr» (ro'yxatdan o'tish)
@@ -217,8 +216,7 @@ export function App() {
     setRouteMap(null);
     setSession({ status: "in", me: saved, error: null });
     setView("mine");
-    // Yuk beruvchi sozlamalari — bo'sh mashinalar uchun: saqlangach o'shalar ro'yxatiga
-    setTab(saved.role === "yuk_beruvchi" ? "mashinalar" : (ROLE_TABS[saved.role]?.[0].id ?? "sozlamalar"));
+    setTab(ROLE_TABS[saved.role]?.[0].id ?? "sozlamalar");
     // Saralanmaydigan rejim — yuklar botga darhol keladi (bu yerda «Menga mos» yo'q)
     const raw = saved.role === "haydovchi" && saved.profile && !sortedReady(saved.profile);
     setToast(raw ? "✅ Saqlandi. Yuk e'lonlari botga darhol keladi." : (ROLE_TEXT[saved.role]?.saved ?? "✅ Saqlandi"));
@@ -388,7 +386,8 @@ export function App() {
   // Admin bo'limi faqat server bilan aloqa bo'lsa (ma'lumot serverdan, huquq ham serverda tekshiriladi)
   // Yuk berish formasi ham botga sendData bilan yubora oladi (pastki menyu tugmasidan ochilganda)
   // Haydovchida oflayn faqat «🎛 Filtr» (raqam, akkaunt, hisob — server bilan)
-  const offlineTabs = role === "yuk_beruvchi" ? (canSendData ? [LOAD_TAB, SETTINGS_TAB] : [SETTINGS_TAB]) : role === "haydovchi" ? [FILTER_TAB] : [SETTINGS_TAB];
+  // Yuk beruvchida oflayn faqat «📦 Yuk berish» (Sozlamalardagi hamma narsa server bilan)
+  const offlineTabs = role === "yuk_beruvchi" ? [LOAD_TAB] : role === "haydovchi" ? [FILTER_TAB] : [SETTINGS_TAB];
   const tabs = online ? [...(ROLE_TABS[role] ?? []), ...(me.isAdmin ? [ADMIN_TAB] : [])] : offlineTabs;
   // ?p= dagi profil faqat o'sha rolniki bo'lsa (rol keyin almashtirilgan bo'lishi mumkin)
   const initialProfile = role === profileRole ? decodeProfile(params.get("p"), { scope, role }) : null;
@@ -455,7 +454,6 @@ export function App() {
       </>
     );
   } else if (current === "sozlamalar") {
-    const settingsKey = `${me?.chatId ?? "offline"}-${role}`;
     page = (
       <>
         {listNotice}
@@ -473,7 +471,6 @@ export function App() {
             </div>
           </Section>
         )}
-        {role === "yuk_beruvchi" && <ShipperSettings key={settingsKey} me={me} initialProfile={initialProfile} scope={scope} onSaved={onSaved} />}
         {online && !registering && (
           <PhoneCard
             me={me}
@@ -513,11 +510,11 @@ export function App() {
     page = (
       <LoadsPage
         key={current}
-        kind={current === "mashinalar" ? "mashina" : "yuk"}
+        kind="yuk"
         scope={scope}
-        view={current === "mashinalar" ? view : shownView}
-        onView={current === "mashinalar" ? setView : viewChange}
-        feedNote={current === "mashinalar" ? null : feedNote}
+        view={shownView}
+        onView={viewChange}
+        feedNote={feedNote}
         profile={me?.profile ?? null}
         onRouteSaved={onRouteSaved}
         onRouteMap={openRouteMap}

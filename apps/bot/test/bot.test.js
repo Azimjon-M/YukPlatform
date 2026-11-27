@@ -16,7 +16,7 @@ const CHANNEL = { id: -1009876543210, type: "channel", title: "Yuk Ekspert", use
 
 // fail(method, payload) → true (403 «bloklagan») yoki Telegram javobi obyekti (masalan 400) — shu so'rov xato bilan qaytadi
 // answer(method, payload) → Telegram javobidagi result (masalan getChatMember uchun { status }) yoki undefined — standart
-function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued, mediaDir, catchUpDelayMs } = {}) {
+function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUrl, linkToken, callLink, postCallLink, parseLoad, onLoadQueued, mediaDir, catchUpDelayMs, transcribeVoice, downloadFile } = {}) {
   const store = openStore({ file: ":memory:" });
   const config = { channel: "@Yuk_Ekspert", channelId: CHANNEL.id, admins: [], miniappUrl: null, ...extra };
   const { bot, init, publish, deliver, deliverRaw, isBusy, canReceive, directDone, notices, sources, holdReminder, setCatchUp } = createBot({
@@ -34,6 +34,8 @@ function setup({ fail, answer, slow, actionHoldMs = 0, config: extra = {}, appUr
     onLoadQueued,
     mediaDir,
     catchUpDelayMs,
+    transcribeVoice,
+    downloadFile,
   });
   const calls = [];
   let messageId = 100;
@@ -352,7 +354,7 @@ test("pastki menyudagi «🔄 Rolni almashtirish» — /rol bilan bir xil: hozir
   // Ro'yxatdan o'tish kerak emas!» + «⏸ Pauza/"davom etish" va "➕ Guruh qo'shish" faqat haydovchi roli uchun!» —
   // yuk beruvchi tartibi: [📦 Yuk berish] / [🚚 Bo'sh mashinalar + 🔄 Rolni almashtirish] /
   // [📱 Raqam ulashish + ❓ Yordam] / [⚙️ Sozlamalar] / [🛠 Boshqaruv] — Pauza yo'q
-  assert.deepEqual(rows(), [[MENU.giveLoad], [MENU.trucks, MENU.role], [MENU.phone, MENU.help], [MENU.settings], [MENU.admin]]);
+  assert.deepEqual(rows(), [[MENU.giveLoad], [MENU.role, MENU.phone], [MENU.help, MENU.settings], [MENU.admin]]); // 2026-11-27: «🚚 Bo'sh mashinalar» yo'q
   assert.ok(!buttons(lastMarkup(calls)).some((b) => b.text === MENU.register), "yuk beruvchida «🚚 Ro'yxatdan o'tish» tugmasi yo'q");
   // Haydovchiga qaytdi — sozlamalari tiklandi, to'liq menyu. Tartib (Azimjon, 2026-11-10): mos yuklar, pauza, rol, raqam,
   // yordam, sozlamalar; admin tugmasi alohida pastda
@@ -383,7 +385,7 @@ test("«⏸ Pauza / ▶️ Davom ettirish» va «➕ Guruh qo'shish» FAQAT hayd
   store.saveDriver(42, { role: "yuk_beruvchi", profile: { fromAreas: ["toshkent"], truckClasses: [] }, active: true, phone: "+998901234567", phoneAskedAt: 1 });
   await message(PRIVATE, MENU.help);
   texts_ = buttons(lastMarkup(calls)).map((b) => b.text);
-  assert.deepEqual(texts_, [MENU.giveLoad, MENU.trucks, MENU.role, MENU.phone, MENU.help, MENU.settings]);
+  assert.deepEqual(texts_, [MENU.giveLoad, MENU.role, MENU.phone, MENU.help, MENU.settings]);
   assert.ok(!texts_.includes(MENU.pause) && !texts_.includes(MENU.resume), "yuk beruvchida pauza tugmasi yo'q");
   assert.ok(!texts_.includes(MENU.addGroup), "yuk beruvchida «➕ Guruh qo'shish» yo'q");
   // Handler o'chirilmagan: yuk beruvchi eski menyudan «⏸ Pauza» ni yuborsa — baribir ishlaydi (FAQAT tugma ko'rsatilmaydi)
@@ -712,81 +714,24 @@ test("tunnel manzili o'zgarsa: «📞 Telefon qilish» va pastki menyu yangi man
   assert.ok(buttons(markup).some((b) => b.text === MENU.settings));
 });
 
-test("yuk beruvchi: rol → «Yuk berish»; ro'yxat shart emas — «🚚 Bo'sh mashinalar» filtrsiz, «⚙️ Sozlamalar» ixtiyoriy", async () => {
-  const { store, calls, command, press, message, webAppData } = setup();
+test("yuk beruvchi: rol → «Yuk berish» namunasi (matn yoki ovoz); «🚚 Bo'sh mashinalar» yo'q (2026-11-27), sozlash shart emas", async () => {
+  const { store, calls, command, press, message } = setup();
   await command("/start");
   await press("r:yuk_beruvchi");
-  // Rol tanlangach savol-javob boshlanmaydi: yuk berish uchun ro'yxat shart emas (Azimjon, 2026-11-10: «Shart emas»).
-  // Oxirgi qator o'zgardi (Azimjon, 2026-11-12: «Bizga yuk beruvchi uchun Ro'yxatdan o'tish kerak emas!»): yuk
-  // beruvchida «🚚 Ro'yxatdan o'tish» so'zi umuman qolmadi — tugma «⚙️ Sozlamalar» va u IXTIYORIY e'lan qilinadi.
-  // Azimjon, 2026-11-12 (yangi): «bot chatiga yuk haqida ma'lumotni yozib tushsam ham bo'lishligini 1-o'rinda va bold
-  // qilib yozib ber» — loadIntro endi «yozib yuboring» (bold) ni formadan OLDIN qo'yadi (tartib index bilan tekshiriladi)
   const introMsg = texts(calls).at(-1);
-  assert.match(introMsg, /^📦 <b>Yukingizni shu chatga yozib yuboring<\/b>[\s\S]*Masalan:\n<b>Andijondan Toshkentga/);
-  // Bu stendda miniapp yo'q (form=false) — forma qatori yo'q
-  assert.ok(!introMsg.includes("forma"), "web forma manzili yo'q — forma qatori yo'q");
+  assert.match(introMsg, /^📦 <b>Yukingizni shu chatga yozib yuboring yoki 🎤 ovozli xabar qilib ayting<\/b>/);
+  assert.match(introMsg, /📍 Qayerdan → qayerga: <i>Andijondan Toshkentga<\/i>[\s\S]*📞 Telefon[\s\S]*Masalan:\n<b>Andijondan Toshkentga/);
+  assert.ok(!/forma/i.test(introMsg), "formaga yo'naltirish yo'q");
   assert.equal(store.getDriver(42).draft, null);
-  // Eski kutish 3 tugma edi ([📦 Yuk berish] / [🚚 Ro'yxatdan o'tish] / [🔄 Rol + ❓ Yordam]) — endi ro'yxatsiz yuk
-  // beruvchi ham TO'LIQ menyuni oladi (Azimjon, 2026-11-12); «🚚 Ro'yxatdan o'tish» tugmasi yo'q.
-  // Azimjon, 2026-11-12 ( Yangi qoida): «⏸ Pauza» va «➕ Guruh qo'shish» FAQAT haydovchi uchun — yuk beruvchi
-  // menyularida ular yo'q. Tartib: [📦 Yuk berish] / [🚚 Bo'sh mashinalar + 🔄 Rolni almashtirish] /
-  // [📱 Raqam ulashish + ❓ Yordam] / [⚙️ Sozlamalar]
   const shipperMenuTexts = () => buttons(lastMarkup(calls)).map((b) => b.text);
-  assert.deepEqual(shipperMenuTexts(), [MENU.giveLoad, MENU.trucks, MENU.role, MENU.phone, MENU.help, MENU.settings]);
-  assert.ok(!shipperMenuTexts().includes(MENU.pause) && !shipperMenuTexts().includes(MENU.resume), "yuk beruvchida pauza tugmasi yo'q");
-  assert.ok(!shipperMenuTexts().includes(MENU.addGroup), "yuk beruvchida «➕ Guruh qo'shish» tugmasi yo'q");
-
-  // 24 soatdagi bo'sh mashinalar (profil yo'q): FILTRSIZ ro'yxat — Samarqanddagi ham, Nukusdagi ham keladi; yuk
-  // e'loni (kind "yuk") emas. Azimjon, 2026-11-12: ««Mashinalar» Sozlamalar formasiga bog'liq bo'lmasin» — profil
-  // bo'lmasa matchTruck({}) bilan tekshiriladi (bo'sh cheklov = cheklov yo'q)
-  const post = store.addPost({ source: "@yuk_guruh", messageId: 9, link: "https://t.me/yuk_guruh/9", text: "Samarqanddan bo'sh fura bor", postedAt: Date.now() });
-  store.addLoad({ postId: post.id, key: "m1", kind: "mashina", load: { fromCity: "Samarqand", fromRegion: "samarqand", truckClass: "fura", bodyType: "tent", weightT: 22, phones: ["+998900000009"] } });
-  store.addLoad({ postId: post.id, key: "m2", kind: "mashina", load: { fromCity: "Nukus", fromRegion: "qoraqalpogiston", truckClass: "fura", phones: ["+998900000008"] } });
-  store.addLoad({ postId: post.id, key: "y1", load: { fromCity: "Samarqand", fromRegion: "samarqand", toCity: "Toshkent", weightT: 20, phones: ["+998900000007"] } });
-  calls.length = 0;
+  assert.deepEqual(shipperMenuTexts(), [MENU.giveLoad, MENU.role, MENU.phone, MENU.help, MENU.settings]);
+  // Eski menyudagi «🚚 Bo'sh mashinalar» — ro'yxat emas, yuk berish yo'li
   await message(PRIVATE, MENU.trucks);
-  let sent = calls.filter((c) => c.method === "sendMessage");
-  assert.equal(sent.length, 3, "profil bo'lmasa — ikkala bo'sh mashina ham (filtr yo'q)");
-  assert.match(sent[0].payload.text, /mos 2 ta bo'sh mashina/);
-  // Eskisidan yangisigacha: chatda eng pastda eng yangisi (Nukus) turadi
-  assert.match(sent[1].payload.text, /Bo'sh mashina: Samarqand → istalgan joyga[\s\S]*22 tonna ko'taradi[\s\S]*\+998900000009/);
-  assert.match(sent[2].payload.text, /Bo'sh mashina: Qoraqalpog'iston, Nukus → istalgan joyga/);
-
-  // «⚙️ Sozlamalar» ilovasiz chatda yuk beruvchiga savol-javobni boshlamaydi (Azimjon, 2026-11-12: ro'yxat funksiyasi
-  // olib tashlandi) — qisqa tushuntirish qaytadi, qoralama (draft) ochilmaydi. Eski testda shu yerda savol-javob
-  // («Yukingiz qayerda yuklanadi») boshlanardi; chatdagi savol-javob endi faqat haydovchida
+  assert.match(texts(calls).at(-1), /Bo'sh mashinalar bo'limi endi yo'q[\s\S]*ovozli xabar/);
+  // «⚙️ Sozlamalar» (ilovasiz) — savol-javob ochilmaydi
   await message(PRIVATE, MENU.settings);
-  assert.match(texts(calls).at(-1), /⚙️ Sozlamalar — ixtiyoriy[\s\S]*sozlamalarsiz ham ochiladi/);
+  assert.match(texts(calls).at(-1), /sozlash shart emas/);
   assert.equal(store.getDriver(42).draft, null);
-
-  // Sozlamalar ixtiyoriy — xohlasa formadan saqlaydi (sendData; eskisidagi chat savol-javobi endi haydovchiga xos).
-  // Samarqand + fura tanlanadi: profil bo'lgach moslash filtrli ishlaydi (eski xatti-harakat saqlanadi)
-  await webAppData(JSON.stringify({ type: "profile", role: "yuk_beruvchi", profile: { fromAreas: ["samarqand"], truckClasses: ["fura"] } }));
-  const user = store.getDriver(42);
-  assert.equal(user.role, "yuk_beruvchi");
-  assert.equal(user.active, true);
-  assert.deepEqual(user.profile.truckClasses, ["fura"]);
-  // Birinchi saqlash: faqat «✅ Saqlandi.», oxirgisi — raqam so'rovi (Azimjon, 2026-11-10: yuk beruvchida ham ro'yxatsiz)
-  assert.equal(texts(calls).at(-2), "✅ Saqlandi.");
-  assert.match(texts(calls).at(-1), /Telefon raqamingizni ulashasizmi/);
-  await message(PRIVATE, PHONE.later);
-  assert.deepEqual(shipperMenuTexts(), [MENU.giveLoad, MENU.trucks, MENU.role, MENU.phone, MENU.help, MENU.settings]);
-  assert.doesNotMatch(texts(calls).at(-1), /qayerdan qayerga/, "yuk beruvchidan yo'nalish so'ralmaydi — formada bor");
-  // Qayta saqlash — sozlamalar ro'yxati bilan (/sozlamalar endi qisqa javob beradi, shuning uchun forma yuboriladi)
-  await webAppData(JSON.stringify({ type: "profile", role: "yuk_beruvchi", profile: { fromAreas: ["samarqand"], truckClasses: ["fura"] } }));
-  assert.match(texts(calls).at(-1), /Saqlandi\. Endi mos bo'sh mashinalar[\s\S]*Yuk qayerda: Samarqand/);
-
-  // Profil paydo bo'ldi — ro'yxat yana filtrli: mos keladigani (Samarqand, fura); boshqa viloyat va yuk e'loni — yo'q
-  calls.length = 0;
-  await message(PRIVATE, MENU.trucks);
-  sent = calls.filter((c) => c.method === "sendMessage");
-  assert.equal(sent.length, 2);
-  assert.match(sent[0].payload.text, /mos 1 ta bo'sh mashina/);
-  assert.match(sent[1].payload.text, /Bo'sh mashina: Samarqand → istalgan joyga[\s\S]*22 tonna ko'taradi[\s\S]*\+998900000009/);
-  // Eski «📋 Mos yuklar» tugmasi bosilsa ham — hozirgi rol bo'yicha
-  calls.length = 0;
-  await message(PRIVATE, MENU.loads);
-  assert.match(texts(calls)[0], /bo'sh mashina/);
 });
 
 test("/rol: boshqa rolga o'tsa sozlamalari saqlanadi, qaytsa tiklanadi; o'sha rol — hech narsa o'zgarmaydi", async () => {
@@ -1455,15 +1400,15 @@ const callbacks = (payload) => payload.reply_markup.inline_keyboard.flat().map((
 
 // Azimjon, 2026-11-12: «bot chatiga yuk haqida ma'lumotni yozib tushsam ham bo'lishligini 1-o'rinda va bold qilib
 // yozib ber. hozirda u 2-o'rinda va ko'rimsiz» — web forma BOR bo'lganda ham chatga yozish 1️⃣ va QALIN, forma 2️⃣
-test("«📦 Yuk berish» matni (forma bor): chatga yozish 1️⃣ va bold, forma 2️⃣; misol ham bold", async () => {
-  const { calls, message } = shipperSetup(null, { config: { miniappUrl: MINIAPP } });
-  await message(PRIVATE, MENU.giveLoad); // eski stildagi oddiy tugma bosilgandek (forma Mini App'da ochiladi, chatda matn yo'q)
+test("«📦 Yuk berish» tugmasi (ilova bor bo'lsa ham) — oddiy tugma, chatda namuna; formaga yo'naltirmaydi (2026-11-27)", async () => {
+  const { calls, message, command } = shipperSetup(null, { config: { miniappUrl: MINIAPP } });
+  await command("/start");
+  const give = buttons(lastMarkup(calls)).find((b) => b.text === MENU.giveLoad);
+  assert.equal(give.web_app, undefined, "Mini App ochilmaydi");
+  await message(PRIVATE, MENU.giveLoad);
   const intro = texts(calls).at(-1);
-  assert.match(intro, /^📦 <b>Yukingizni shu chatga yozib yuboring<\/b> — mos haydovchilar o'zlari qo'ng'iroq qiladi/);
   assert.ok(intro.includes("Masalan:\n<b>Andijondan Toshkentga 20 tonna un bor, tent fura kerak, 3 mln, ertaga. 90 123 45 67</b>"), "misol bold");
-  assert.ok(intro.endsWith("\nYoki pastdagi «📦 Yuk berish» tugmasi — forma."), "forma — ikkinchi yo'l");
-  assert.ok(intro.indexOf("yozib yuboring") < intro.indexOf("forma"), "chatga yozish formadan OLDIN");
-  assert.ok(!intro.includes("<i>"), "eski <i> kursiv ishlatilmaydi");
+  assert.ok(!/forma/i.test(intro));
 });
 
 test("yuk beruvchi oddiy xabar yozdi: raqamli — darhol ko'rinish, «✅ Yuborish» → navbatga, natija chatga", async () => {
@@ -1534,6 +1479,32 @@ test("yuk beruvchi: matnda raqam yo'q — «Qaysi raqamga?»: oldingi raqami tug
   assert.deepEqual(store.shipperPosts(42)[0].direct[0].phones, ["+998900000005"]);
 });
 
+test("yuk beruvchi ovozli xabar yuboradi (2026-11-27): Telegram'dan olinadi → matnga → «🎤 Eshitdim» → odatdagi tasdiqlash", async () => {
+  const heardFrom = [];
+  let spoken = "Andijondan Toshkentga 20 tonna un bor 90 000 00 01";
+  const { calls, send, parsed } = shipperSetup({ ok: true, postType: "yuk_bor", loads: [{ ...LOAD, phones: ["+998900000001"] }] }, {
+    answer: (method, payload) => (method === "getFile" ? { file_id: payload.file_id, file_unique_id: "u", file_path: "voice/file_1.oga" } : undefined),
+    downloadFile: async (filePath) => Buffer.from(`ovoz:${filePath}`),
+    transcribeVoice: async (data, mime) => {
+      heardFrom.push([String(data), mime]);
+      return spoken;
+    },
+  });
+  const voice = (duration) => send({ message: { message_id: 500 + duration, date: 1_700_000_000, chat: PRIVATE, from: USER, voice: { file_id: "v1", file_unique_id: "u1", duration, mime_type: "audio/ogg" } } });
+  await voice(9);
+  assert.deepEqual(heardFrom, [["ovoz:voice/file_1.oga", "audio/ogg"]]);
+  assert.deepEqual(parsed, [spoken], "eshitilgani matndek tushuniladi");
+  assert.match(texts(calls).at(-2), /🎤 Eshitdim: <i>«Andijondan Toshkentga 20 tonna un bor/);
+  assert.deepEqual(callbacks(lastSent(calls)), ["yb:send", "yb:no"], "tasdiqlash tugmalari");
+  // Tushunilmadi — yozib yuborish taklifi; juda uzun — 2 daqiqagacha
+  spoken = null;
+  await voice(5);
+  assert.match(texts(calls).at(-1), /Ovozingizni tushuna olmadim[\s\S]*masalan/);
+  await voice(200);
+  assert.match(texts(calls).at(-1), /juda uzun/);
+  assert.equal(heardFrom.length, 2, "uzun ovoz yuklab olinmaydi");
+});
+
 test("yuk beruvchi: tushunilmadi / bo'sh mashina / boshqa yo'nalish / AI band / chegara; haydovchi xabari yuk emas", async () => {
   let result = { ok: true, postType: "boshqa", loads: [] };
   const { store, calls, message } = shipperSetup(() => result);
@@ -1547,7 +1518,7 @@ test("yuk beruvchi: tushunilmadi / bo'sh mashina / boshqa yo'nalish / AI band / 
   result = { ok: true, postType: "yuk_bor", loads: [{ ...LOAD, toCity: "Moskva", toRegion: "xorij", toCountry: "Rossiya", phones: ["+998900000001"] }] };
   assert.match(await reply("Andijondan Moskvaga 20 tonna"), /Bu yo'nalish hozircha qo'llanmaydi: Andijon → Rossiya, Moskva./);
   result = null;
-  assert.match(await reply("Andijondan Toshkentga 20 tonna"), /AI band/);
+  assert.match(await reply("Andijondan Toshkentga 20 tonna"), /tushuna olmadim/);
   // 24 soatda 20 ta — keyingisi qabul qilinmaydi
   for (let i = 0; i < 20; i++) store.addDirectPost({ chatId: 42, text: `yuk ${i}`, loads: [{ ...LOAD, phones: ["+998900000001"] }] });
   result = { ok: true, postType: "yuk_bor", loads: [{ ...LOAD, phones: ["+998900000001"] }] };
@@ -1561,19 +1532,12 @@ test("yuk beruvchi: tushunilmadi / bo'sh mashina / boshqa yo'nalish / AI band / 
   assert.equal(texts(driver.calls).at(-1), "Pastdagi tugmalardan birini bosing 👇");
 });
 
-test("«📦 Yuk berish» tugmasi: forma bor — Mini App (?v=yuk); formadan kelgan yuk (sendData) — tekshirilib navbatga", async () => {
+test("«📦 Yuk berish»: tasdiqlashda formaga havola yo'q; ilova formasidan kelgan yuk (sendData) — tekshirilib navbatga", async () => {
   const { store, calls, webAppData, command, queued } = shipperSetup(null, { config: { miniappUrl: MINIAPP } });
-  await command("/start");
-  const give = buttons(lastMarkup(calls)).find((b) => b.text === MENU.giveLoad);
-  const url = new URL(give.web_app.url);
-  assert.equal(url.searchParams.get("v"), "yuk");
-  assert.equal(url.searchParams.get("r"), "yuk_beruvchi");
-  // Tasdiqlash xabarida «✏️ Formada tuzatish» — qoralama bilan
+  // Tasdiqlash xabarida «✏️ Formada tuzatish» yo'q (2026-11-27) — faqat ✅ / ❌
   const desk = shipperSetup({ ok: true, postType: "yuk_bor", loads: [{ ...LOAD, phones: ["+998900000001"] }] }, { config: { miniappUrl: MINIAPP } });
   await desk.message(PRIVATE, "Andijondan Toshkentga 20 tonna un. 90 000 00 01");
-  const edit = lastSent(desk.calls).reply_markup.inline_keyboard.flat().find((b) => b.web_app);
-  assert.equal(edit.text, "✏️ Formada tuzatish");
-  assert.equal(new URL(edit.web_app.url).searchParams.get("d"), "1");
+  assert.ok(!lastSent(desk.calls).reply_markup.inline_keyboard.flat().some((b) => b.web_app));
 
   // Formadan (server bilan aloqa yo'q edi) — noto'g'risi rad etiladi, to'g'risi navbatga
   await webAppData(JSON.stringify({ type: "load", load: { from: "andijon", to: "toshkent_sh", weight: "20", phones: [] } }));

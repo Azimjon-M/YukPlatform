@@ -176,10 +176,12 @@ function helpText(driver) {
   // Matnlar — Azimjon (2026-11-10; ro'yxatdan o'tmagan haydovchining /start ekrani bo'yicha, umumiy qatorlar hammaga)
   const roleLine = `${MENU.role} — haydovchi yoki yuk egasi`;
   // Yuk beruvchida birinchi qator — «📦 Yuk berish» (menu.js)
-  const loadLine = role === "yuk_beruvchi" ? [`${MENU.giveLoad} — yukingizni haydovchilarga yuborish (yoki shu chatga yozing)`] : [];
+  const loadLine = role === "yuk_beruvchi" ? [`${MENU.giveLoad} — yukingizni shu chatga yozing yoki 🎤 ovozli xabar qiling`] : [];
   // Sozlamalar qatori: profil bo'lsa — nima tanlangani, bo'lmasa — nima uchun kerakligi. Yuk beruvchida u qator
   // «ixtiyoriy» ni aytadi (t.register), haydovchida — «1 daqiqalik forma» (/start oxirida)
-  const settingsLine = driver?.profile
+  const settingsLine = role === "yuk_beruvchi"
+    ? `${settingsLabel(driver)} — raqam, Telegram akkaunt, ilova va hisob`
+    : driver?.profile
     ? `${settingsLabel(driver)} — ${t.settings}`
     : `${settingsLabel(driver)} — ${t.register ?? "sizga qanday e'lonlar yo'naltirishimiz haqida"}`;
   // Yuk beruvchi (Azimjon, 2026-11-12): ro'yxat shart emas — menyuda hamma tugma bor, yordamda ham shular ro'yxati.
@@ -197,7 +199,7 @@ function helpText(driver) {
   const menuLines = driver?.profile || isShipper
     ? [
         // Menyu tartibida: birinchi tugma (haydovchida — «🎛 Filtr»), keyin pauza…
-        ...(isShipper || mode.sorted ? [`${matchesLabel(driver)} — ${t.matches}`] : feedLines),
+        ...(isShipper ? [] : mode.sorted ? [`${matchesLabel(driver)} — ${t.matches}`] : feedLines),
         ...(isShipper ? [] : [`${MENU.pause} — yuk kelishini to'xtatish (${MENU.resume} — qayta yoqish)`]),
         roleLine,
         driver.phone && !isShipper
@@ -291,6 +293,8 @@ export function postFromMessage(chat, message) {
 // postCallLink({ postId, phone, chatId }) — o'sha, tezkor xabar uchun (yuk hali tushunilmagan — e'lonning o'zi bo'yicha)
 // parseLoad(text) — yuk beruvchi chatga yozgan yukni tushunish (main.js: qoidaviy parser, bo'lmasa AI; null — AI band);
 // onLoadQueued() — yuk beruvchining yuki navbatga tushdi (main.js: ishchi darhol uyg'onadi)
+// transcribeVoice(data, mime) — yuk beruvchining ovozli xabari → matn (main.js: Gemini, ilova chati bilan bir xil) | null
+// downloadFile(filePath) — Telegram'dagi fayl (getFile.file_path) → Buffer (testda soxta)
 export function createBot({
   actionHoldMs = 60_000, // har amaldan keyin e'lonlar shu chatga qancha uzilib turadi (testlar 0 beradi)
   token,
@@ -304,6 +308,8 @@ export function createBot({
   postCallLink = () => null,
   parseLoad = async () => null,
   onLoadQueued = () => {},
+  transcribeVoice = async () => null,
+  downloadFile = null,
   apkDir = APK_DIR, // Android ilova (serverda yig'ilgan APK + latest.json, @yuk/store appRelease.js)
   mediaDir, // ovozli xabar / dumaloq videoning asl fayllari (collector yozadi); berilmasa — @yuk/store MEDIA_DIR
   catchUpMs = 2 * 60_000, // e'lon olish boshlanganda shuncha oldingi e'lonlar ham (pipeline catchUp)
@@ -504,16 +510,6 @@ export function createBot({
     return url.href;
   };
 
-  // «📦 Yuk berish» formasi (web ilovaning «yuk» bo'limi). Inline «✏️ Formada tuzatish» tugmasi uchun — tokensiz
-  // (routeMapUrl dagidek: inline tugmadan ochilganda Telegram kimlikni o'zi beradi), d=1 — botdagi qoralama bilan ochiladi.
-  // Pastki menyudagi «📦 Yuk berish» tugmasi — menu.js (u yerda token bilan). Faqat https
-  const loadFormUrl = ({ draft = false } = {}) => {
-    const base = appUrl();
-    if (!base?.startsWith("https://")) return null;
-    const url = new URL(miniAppUrl(base, null, scope, { view: "yuk", role: "yuk_beruvchi" }));
-    if (draft) url.searchParams.set("d", "1");
-    return url.href;
-  };
   // Haydovchi ro'yxatdan o'tish formasi (matndan preview'dagi «✏️ Formada tuzatish» uchun). Inline Mini App initData oladi,
   // shuning uchun ?t= token shart emas (route.js xaritasidagidek)
   const regFormUrl = () => {
@@ -522,7 +518,8 @@ export function createBot({
   };
 
   // Botga yozilgan yuk: tushunish → raqam (yo'q bo'lsa) → tasdiqlash → navbat (shipperLoads.js)
-  const desk = createLoadDesk({ store, parse: parseLoad, scope, onQueued: () => onLoadQueued(), editUrl: () => loadFormUrl({ draft: true }) });
+  // «✏️ Formada tuzatish» yo'q (2026-11-27: yuk faqat chatda — matn yoki ovoz; xato bo'lsa qaytadan yozadi)
+  const desk = createLoadDesk({ store, parse: parseLoad, scope, onQueued: () => onLoadQueued() });
 
   function rememberUser(ctx) {
     const from = ctx.from;
@@ -714,7 +711,7 @@ export function createBot({
     if (!role) return showStart(ctx);
     if (!appUrl()) {
       if (role === "yuk_beruvchi") {
-        await ctx.reply(`⚙️ Sozlamalar — ${ROLE_TEXT.yuk_beruvchi.register}.\n\n«${MENU.trucks}» sozlamalarsiz ham ochiladi.`, menu(driver));
+        await ctx.reply(`📦 Yukingizni shu chatga yozing yoki ovozli xabar qiling — sozlash shart emas.`, menu(driver));
         return;
       }
       return startWizard(ctx, driver.profile, role);
@@ -811,7 +808,7 @@ export function createBot({
     if (role === "yuk_beruvchi") {
       const t = ROLE_TEXT[role];
       // 2026-11-19: faqat «yukingizni yozing» — sozlamalar haqida gap yo'q (ixtiyoriy, /yordam da bor)
-      await ctx.reply(loadIntro({ form: Boolean(loadFormUrl()) }), html(driver));
+      await ctx.reply(loadIntro(), html(driver));
       return;
     }
     // Haydovchi, sozlamalar hali yo'q (2026-11-14): avval rejim — «mana shunaqa rejimlar bor» (feed.js). Saralangan
@@ -1079,7 +1076,7 @@ export function createBot({
     }
     // Yuk beruvchi: ro'yxatdan o'tish shart emas — «📦 Yuk berish» (forma yoki oddiy xabar)
     if (role === "yuk_beruvchi") {
-      await ctx.reply(`${hello}\n\n${loadIntro({ form: Boolean(loadFormUrl()) })}`, html(driver));
+      await ctx.reply(`${hello}\n\n${loadIntro()}`, html(driver));
       return;
     }
     // Haydovchi, hali ro'yxatdan o'tmagan (2026-11-14): salom + rejim tanlash (feed.js). Saralangan → forma / yozish
@@ -1300,7 +1297,13 @@ export function createBot({
   });
 
   // Pastki menyu tugmalari (savol-javob o'rtasida bosilsa ham ishlaydi, qoralama saqlanib qoladi)
-  privateChat.hears([MENU.loads, MENU.trucks], showMatches);
+  privateChat.hears(MENU.loads, showMatches);
+  // «🚚 Bo'sh mashinalar» menyudan olindi (2026-11-27: faqat yuk e'lonlari) — eski menyuda bosilsa: yuk berish yo'li
+  privateChat.hears(MENU.trucks, async (ctx) => {
+    const driver = rememberUser(ctx);
+    if (roleOf(driver) !== "yuk_beruvchi") return showMatches(ctx);
+    await ctx.reply(`🚚 Bo'sh mashinalar bo'limi endi yo'q — biz yuk e'lonlari bilan ishlaymiz.\n\n${loadIntro()}`, html(driver));
+  });
   privateChat.hears([MENU.settings, MENU.register], openSettings);
   // «✍️ Shu chatga yozish» (haydovchi, profilsiz): namuna beramiz, keyingi matnni mashina tavsifi deb o'qiymiz (readRegText)
   privateChat.hears(MENU.writeHere, async (ctx) => {
@@ -1335,7 +1338,7 @@ export function createBot({
   privateChat.hears(MENU.giveLoad, async (ctx) => {
     const driver = rememberUser(ctx);
     if (roleOf(driver) !== "yuk_beruvchi") return showStart(ctx);
-    await ctx.reply(loadIntro({ form: Boolean(loadFormUrl()) }), html(driver));
+    await ctx.reply(loadIntro(), html(driver));
   });
 
   // Desk ko'rinishi ({ text, keyboard? }) → xabar. Tugmali xabarda pastki menyu bo'lmaydi (Telegram: bitta xabar — bitta
@@ -1346,10 +1349,35 @@ export function createBot({
   }
 
   // Yuk beruvchi chatga oddiy xabar yozdi — yuk deb o'qiymiz (AI bir necha soniya o'ylashi mumkin: «yozmoqda...» belgisi)
-  async function readLoad(ctx, driver) {
+  async function readLoad(ctx, driver, text = ctx.message.text) {
     await ctx.replyWithChatAction("typing").catch(() => {});
-    const view = await desk.read(ctx.chat.id, ctx.message.text, driver, { form: Boolean(loadFormUrl()) });
+    const view = await desk.read(ctx.chat.id, text, driver);
     await showLoadView(ctx, view, driver);
+  }
+
+  // Yuk beruvchining ovozli xabari (2026-11-27, Azimjon: «Ilovadagi kabi yozib … yoki audioham jo'nataversin»): fayl
+  // Telegram'dan olinadi → Gemini matnga o'giradi → «🎤 Eshitdim: …» → keyin oddiy yozilgan matndek (desk.read)
+  const VOICE_MAX_S = 120; // ilovadagi kabi — 2 daqiqagacha
+  const fetchFile = downloadFile ?? (async (filePath) => {
+    const res = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+    if (!res.ok) throw new Error(`fayl olinmadi: ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  });
+  async function readVoiceLoad(ctx, driver) {
+    const media = ctx.message.voice ?? ctx.message.audio;
+    if ((media.duration ?? 0) > VOICE_MAX_S) return ctx.reply(LOAD_TEXT.voiceLong, menu(driver));
+    await ctx.replyWithChatAction("typing").catch(() => {});
+    let text = null;
+    try {
+      const file = await ctx.api.getFile(media.file_id);
+      const data = await fetchFile(file.file_path);
+      text = (await transcribeVoice(data, ctx.message.voice ? "audio/ogg" : (media.mime_type ?? "audio/mpeg")))?.trim() || null;
+    } catch (error) {
+      log(`Yuk beruvchining ovozi o'qilmadi (${ctx.chat.id}): ${error.description ?? error.message}`);
+    }
+    if (!text) return ctx.reply(LOAD_TEXT.voiceFail, html(driver));
+    await ctx.reply(LOAD_TEXT.heard(text), { parse_mode: "HTML" });
+    return readLoad(ctx, driver, text);
   }
 
   // Haydovchi «✍️ Shu chatga yozish» → mashinasini yozdi. parseLoad (qoidalar, bo'lmasa AI) bilan tushunamiz → profil
@@ -1658,6 +1686,13 @@ export function createBot({
     }
     store.saveDriver(ctx.chat.id, { draft });
     await showStep(ctx, draft, { edit: true });
+  });
+
+  privateChat.on(["message:voice", "message:audio"], async (ctx) => {
+    const driver = rememberUser(ctx);
+    if (!roleOf(driver)) return showStart(ctx);
+    if (roleOf(driver) !== "yuk_beruvchi") return ctx.reply("Pastdagi tugmalardan birini bosing 👇", menu(driver));
+    return readVoiceLoad(ctx, driver);
   });
 
   privateChat.on("message:text", async (ctx) => {

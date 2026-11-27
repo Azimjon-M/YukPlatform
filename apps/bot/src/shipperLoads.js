@@ -1,9 +1,10 @@
 // «📦 Yuk berish» — yuk beruvchining o'z yuki botda (2026-11-10, Azimjon: «Forma va oddiy yozish bo'lsin (o'z xohishiga qarab
-// yozaversin)»). Ikki yo'l:
-//   1) pastki menyudagi «📦 Yuk berish» — web forma (apps/web LoadFormPage; server POST /pub/loads);
-//   2) shu yerga oddiy xabar: «Andijondan Toshkentga 20 tonna un, tent kerak, 90 123 45 67».
+// yozaversin)»). 2026-11-27 dan (Azimjon: «Ilovadagi kabi yozib (abrazavanyaga qarab) yoki audioham jo'nataversin, buyerda
+// Formaga yo'naltirish (qo'rqinchli) kerak emas») — faqat chatda, formasiz:
+//   1) shu yerga oddiy xabar: «Andijondan Toshkentga 20 tonna un, tent kerak, 90 123 45 67»;
+//   2) ovozli xabar — Gemini matnga o'giradi (main.js transcribeVoice, ilova chati bilan bir xil), keyin matndek.
 // Oddiy xabarni qoidaviy parser (darhol) yoki AI tushunadi — guruh e'lonlaridagi bilan bir xil. Keyin yuk beruvchi
-// haydovchilarga qanday borishini ko'radi va tasdiqlaydi (Azimjon: «Tasdiqlatsin»): [✅ Yuborish] [✏️ Formada tuzatish] [❌].
+// haydovchilarga qanday borishini ko'radi va tasdiqlaydi (Azimjon: «Tasdiqlatsin»): [✅ Yuborish] [❌].
 // Matnda telefon bo'lmasa — so'raladi va YOZILADI (ulashilmaydi: «raqam ulashish emas balki raqam yozish kerak»); oxirgi
 // yozgan raqamlari tugma bo'lib turadi. Tasdiqlansa — navbatga (store.addDirectPost), bot ishchisi uni darhol mos
 // haydovchilarga yuboradi (pipeline.js) va natijani shu yerga yozadi (resultText).
@@ -23,32 +24,35 @@ export const LOAD_CALLBACKS = { send: "yb:send", cancel: "yb:no", phone: /^yb:ph
 
 const EXAMPLE = "Andijondan Toshkentga 20 tonna un bor, tent fura kerak, 3 mln, ertaga. 90 123 45 67";
 
-// «Yuk berish» haqida (rol tanlangach, /yordam, menyudagi tugma — forma yo'q bo'lsa). form — web forma bormi (https manzil).
-// Azimjon, 2026-11-12: «roldan yuk beruvchilikni tanlaganda bot chatiga yuk haqida ma'lumotni yozib tushsam ham
-// bo'lishligini 1-o'rinda va bold qilib yozib ber» — chatga yozish yo'li BIRINCHI va QALIN, web forma ikkinchi va
-// oddiy qator. Manzil bo'lmasa (form=false) 2️⃣ qatori umuman yo'q, 1️⃣ raqami ham tushiriladi.
-export function loadIntro({ form = true } = {}) {
-  // 2026-11-19 (soddalashtirish): bitta harakat — yozib yuborish; forma — ikkinchi yo'l
+// «Yuk berish» haqida (rol tanlangach, /yordam, menyudagi tugma): ilovadagi «📝 E'lon berish» namunasi bilan bir xil —
+// nima yozish (yoki aytish) kerakligi qatorma-qator, misol va ovozli xabar ham bo'lishi
+export const GUIDE = [
+  ["📍", "Qayerdan → qayerga", "Andijondan Toshkentga"],
+  ["📦", "Nima yuk, necha tonna", "20 tonna un"],
+  ["🚚", "Qanday mashina", "tent fura"],
+  ["💰", "Narxi, qachon", "3 mln, ertaga"],
+  ["📞", "Telefon", "90 123 45 67"],
+];
+export function loadIntro() {
   return [
-    `📦 <b>Yukingizni shu chatga yozib yuboring</b> — mos haydovchilar o'zlari qo'ng'iroq qiladi.`,
+    `📦 <b>Yukingizni shu chatga yozib yuboring yoki 🎤 ovozli xabar qilib ayting</b> — mos haydovchilar o'zlari qo'ng'iroq qiladi.`,
+    "",
+    ...GUIDE.map(([icon, what, sample]) => `${icon} ${what}: <i>${sample}</i>`),
     "",
     `Masalan:\n<b>${EXAMPLE}</b>`,
-    form ? `\nYoki pastdagi «${LOAD_BUTTON}» tugmasi — forma.` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ].join("\n");
 }
 
 export const LOAD_TEXT = {
   // Azimjon, 2026-11-12: misol endi QALIN (<b>) — loadIntro bilan bir xil ko'rinish
-  notLoad: (form) =>
-    `🤔 Bu xabardan yukni tushunmadim. Qayerdan, qayerga, nima yuk va necha tonna ekanini yozing, masalan:\n<b>${EXAMPLE}</b>` +
-    (form ? `\n\nYoki pastdagi «${LOAD_BUTTON}» formasini to'ldiring.` : ""),
+  notLoad: () => `🤔 Bu xabardan yukni tushunmadim. Qayerdan, qayerga, nima yuk va necha tonna ekanini yozing, masalan:\n<b>${EXAMPLE}</b>`,
   truck: "🤔 Bu bo'sh mashina e'loniga o'xshaydi. Siz yuk beruvchisiz — yukingizni yozing (qayerdan, qayerga, necha tonna). " +
     "Haydovchi bo'lsangiz — «🔄 Rolni almashtirish».",
-  busy: (form) =>
-    "⏳ Hozir xabaringizni tushuna olmadim (AI band). Bir daqiqadan keyin qayta yuboring" +
-    (form ? ` yoki pastdagi «${LOAD_BUTTON}» formasini to'ldiring.` : "."),
+  busy: () => "⏳ Hozir xabaringizni tushuna olmadim. Bir daqiqadan keyin qayta yuboring.",
+  // Ovozli xabar (2026-11-27): eshitilgani ko'rsatiladi, keyin matndek; tushunilmasa — yozib yuborishni taklif qilamiz
+  heard: (text) => `🎤 Eshitdim: <i>«${escapeHtml(text)}»</i>`,
+  voiceFail: `🎤 Ovozingizni tushuna olmadim. Qaytadan, aniqroq ayting — yoki yozib yuboring, masalan:\n<b>${EXAMPLE}</b>`,
+  voiceLong: "🎤 Ovozli xabar juda uzun — 2 daqiqagacha qilib ayting yoki yozib yuboring.",
   limit: (limit) => `⚠️ 24 soatda ${limit} ta yuk yubordingiz — bu chegara. Keyingisini birozdan keyin yuboring.`,
   askPhone:
     "📞 <b>Haydovchilar qaysi raqamga qo'ng'iroq qilsin?</b>\nRaqamni yozib yuboring, masalan: <code>90 123 45 67</code> " +
@@ -133,7 +137,7 @@ export function createLoadDesk({ store, parse, scope, now = Date.now, limit = SH
     current,
 
     // Yuk beruvchi chatga oddiy xabar yozdi. → ko'rinish
-    async read(chatId, text, user, { form = false } = {}) {
+    async read(chatId, text, user) {
       const draft = current(chatId);
       // Raqam kutilyapti va raqam yozdi — o'sha qoralamaga
       if (draft?.stage === "phone") {
@@ -144,9 +148,9 @@ export function createLoadDesk({ store, parse, scope, now = Date.now, limit = SH
       }
       if (store.shipperPostCount(chatId) >= limit) return { text: LOAD_TEXT.limit(limit) };
       const result = await parse(text);
-      if (!result) return { text: LOAD_TEXT.busy(form) };
+      if (!result) return { text: LOAD_TEXT.busy() };
       if (result.ok && result.postType === "mashina_bor") return { text: LOAD_TEXT.truck };
-      if (!result.ok || result.postType !== "yuk_bor" || !result.loads?.length) return { text: LOAD_TEXT.notLoad(form) };
+      if (!result.ok || result.postType !== "yuk_bor" || !result.loads?.length) return { text: LOAD_TEXT.notLoad() };
       const inScope = result.loads.filter((load) => routeInScope(load, scope));
       if (!inScope.length) return { text: scopeText(result.loads, scope) };
       const loads = inScope.slice(0, MAX_DRAFT_LOADS);

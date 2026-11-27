@@ -48,3 +48,32 @@ export function transcribePauseMs(error) {
   if ([400, 401, 403, 404].includes(code)) return 6 * 60 * 60_000;
   return 60_000;
 }
+
+// Foydalanuvchining o'z ovozli e'loni (ilova chati — apps/api server.js, botdagi «📦 Yuk berish» — apps/bot main.js):
+// avval faqat o'girish modellari (TRANSCRIBE_MODELS — tahlil bilan umumiy limiti yo'q), keyin boshqaruv markazidagi Gemini
+// ulanishlari; xato bergan model bir muddat dam oladi (transcribePauseMs). connections() — [{ provider, apiKey, model, enabled }].
+// → async (data, mime) => matn | null (hammasi band). transcribe — testda soxta
+export function createVoiceTranscriber({ connections, log = () => {}, label = "Ovozli e'lon", transcribe = transcribeWithGemini, now = Date.now, maxTries = 4 }) {
+  const rest = new Map();
+  return async function transcribeVoice(data, mime) {
+    const gemini = connections().filter((c) => c.provider === "gemini" && c.enabled !== false && c.apiKey);
+    const list = [];
+    for (const apiKey of new Set(gemini.map((c) => c.apiKey))) for (const model of TRANSCRIBE_MODELS) list.push({ apiKey, model });
+    for (const c of gemini) list.push({ apiKey: c.apiKey, model: c.model });
+    const seen = new Set();
+    for (const c of list) {
+      const key = `${c.apiKey}|${c.model}`;
+      if (seen.has(key) || (rest.get(key) ?? 0) > now()) continue;
+      seen.add(key);
+      try {
+        const { text } = await transcribe({ apiKey: c.apiKey, model: c.model, data, mime, timeoutMs: 20_000 });
+        return text;
+      } catch (error) {
+        rest.set(key, now() + transcribePauseMs(error));
+        log(`${label}: ${c.model} — ${String(error.message ?? error).slice(0, 160)}`);
+      }
+      if (seen.size >= maxTries) break;
+    }
+    return null;
+  };
+}

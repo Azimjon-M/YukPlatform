@@ -8,7 +8,7 @@
 // Yo'nalish (qayerdan → qayerga) bu yerda so'ralmaydi (Azimjon, 2026-11-07: haydovchi har kuni boshqa joyda bo'ladi) —
 // botda «📋 Mos yuklar» bosilganda tanlanadi; viloyatlar va davlatlar shu yerdagi «Qayerda ishlaysiz?» ga qarab chiqadi.
 // Saqlash: server orqali; botning pastki menyu tugmasidan ochilgan bo'lsa — botga ham (settingsParts.jsx submitProfile).
-// Yuk beruvchi sozlamalari — ShipperSettings.jsx.
+// Yuk beruvchida sozlamalar (bo'sh mashinalar uchun) yo'q — 2026-11-27.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BODY_TYPES,

@@ -6,7 +6,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Api } from "grammy";
-import { createParser, createParserPool, envSeedEntries, resolveSettings } from "@yuk/parser";
+import { createParser, createParserPool, createVoiceTranscriber, envSeedEntries, resolveSettings } from "@yuk/parser";
 import { EXIT_CONFIG, ROUTE_SCOPES, SHIPPER_LOAD_LIMIT, devBotProblem, isDevMode, routeScopeFrom } from "@yuk/shared";
 import { DEFAULT_DB_FILE, acquireRunLock, createCallLinks, createSessions, loadSecret, openStore, tunnelUrl } from "@yuk/store";
 import { createBot } from "./bot.js";
@@ -229,6 +229,8 @@ async function main() {
     callLink,
     postCallLink,
     parseLoad,
+    // Yuk beruvchining ovozli xabari → matn (2026-11-27; ilova chati bilan bir xil yo'l — o'girish modellari, keyin Gemini)
+    transcribeVoice: createVoiceTranscriber({ connections: () => store.aiConnections({ secret, env: process.env }), log, label: "Botdagi ovozli yuk" }),
     onLoadQueued: () => worker?.poke(),
   });
   await init();
