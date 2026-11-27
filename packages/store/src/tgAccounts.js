@@ -189,7 +189,9 @@ export function createTgAccountQueries(db, now) {
         const source = names.map((n) => known.get(n)).find(Boolean);
         if (source && !(source.auto_scan && source.check_state === "failed" && time - (source.check_at ?? 0) >= SCAN_RECHECK.rejected)) continue;
         const scan = scans.get(d.peerId);
-        if (!source && scan) {
+        // O'qib bo'lmagan (error) guruh — Auto scan qayta bosilsa, 1 kun kutmasdan yana ko'riladi (2026-11-27)
+        const retry = scan?.state === "error" && scan.at < since;
+        if (!source && scan && !retry) {
           const wait = SCAN_RECHECK[scan.state];
           if (wait == null || time - scan.at < wait) continue;
         }

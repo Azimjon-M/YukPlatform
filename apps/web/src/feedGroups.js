@@ -46,6 +46,10 @@ export const scopeOptions = (options, scope) => (scope === "own" ? options.filte
 export const OWN_EMPTY_HINT =
   "Bu yerda o'zingiz ulagan Telegram akkauntingiz a'zo bo'lgan guruh va kanallar chiqadi. Akkauntni «⚙️ Sozlamalar» → «📡 Telegram akkaunt ulash» da ulang.";
 
+// «👤 Akkauntimdagi» → «🔒 Yopiq» bo'sh (2026-11-27, Azimjon: «Akkauntimdagi ni tanlasa ham Ochiq/Yopiq chiqarilishi kerak»)
+export const OWN_CLOSED_EMPTY_HINT =
+  "Akkauntingiz a'zo bo'lgan yopiq yuk guruhlari «🔎 Auto scan» tekshiruvidan o'tgach shu yerda chiqadi. Yangi guruhga qo'shilgan bo'lsangiz — Auto scan'ni qayta bosing, bir necha daqiqada tekshiriladi.";
+
 // Sahifalash (2026-11-20, Azimjon: «juda ko'p guruh bo'lgani sababli Pagination kerak. max 20 ta bo'lsin»)
 export const GROUPS_PAGE_SIZE = 20;
 

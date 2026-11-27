@@ -108,3 +108,18 @@ test("avtomatik Pro: akkaunt bog'lagan bo'lsa bas (raqam shart emas, 2026-11-26)
   assert.equal(store.getDriver(70).autoPro, false, "akkaunt chiqib ketdi");
   store.close();
 });
+
+test("Auto scan (2026-11-27): o'qib bo'lmagan (error) guruh — Auto scan qayta bosilsa 1 kun kutmasdan yana tekshiriladi", () => {
+  let time = 1_000_000;
+  const store = openStore({ file: ":memory:", now: () => time });
+  store.saveTgAccount("ufk-1", { userId: 1, status: "ok" });
+  store.setTgDialogs("ufk-1", [{ id: "-1004489147352", title: "YUK MARKAZI", username: null, type: "guruh", members: 647 }]);
+  store.requestAccountScan("ufk-1");
+  const since = store.listTgAccounts().find((a) => a.name === "ufk-1").scanRequestedAt;
+  store.finishDialogScan("-1004489147352", { account: "ufk-1", state: "error", note: "a'zo emas" });
+  assert.deepEqual(store.dialogsToScan("ufk-1", { since }), [], "shu so'rov ichida — qayta urinmaydi");
+  time += 60_000;
+  store.requestAccountScan("ufk-1");
+  const again = store.listTgAccounts().find((a) => a.name === "ufk-1").scanRequestedAt;
+  assert.deepEqual(store.dialogsToScan("ufk-1", { since: again }).map((d) => d.peerId), ["-1004489147352"]);
+});

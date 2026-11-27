@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { foldText } from "@yuk/shared";
 import { getFeedSources } from "./api.js";
-import { CLOSED_PRO_HINT, GROUP_SCOPES, OWN_EMPTY_HINT, groupOptions, pageButtons, pageOf, scopeOptions } from "./feedGroups.js";
+import { CLOSED_PRO_HINT, GROUP_SCOPES, OWN_CLOSED_EMPTY_HINT, OWN_EMPTY_HINT, groupOptions, pageButtons, pageOf, scopeOptions } from "./feedGroups.js";
 import { haptic } from "./telegram.js";
 import { Chips, Section, SourceAvatar, Spinner } from "./ui.jsx";
 
@@ -88,7 +88,9 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
   const allOptions = useMemo(() => groupOptions(state.list, chosen), [state.list, chosen]);
   const options = scopeOptions(allOptions, scope);
   const closedCount = options.filter((o) => o.closed).length;
-  const tab = kind === "closed" && closedCount ? "closed" : "open";
+  // «👤 Akkauntimdagi» da Ochiq/Yopiq doim ko'rinadi (yopig'i 0 bo'lsa ham — nega yo'qligi yoziladi); Global'da — yopiq bo'lsa
+  const showKinds = closedCount > 0 || (scope === "own" && online && !state.loading && !state.error);
+  const tab = kind === "closed" && showKinds ? "closed" : "open";
   const inTab = options.filter((o) => (tab === "closed") === o.closed);
   const query = foldText(q.trim());
   const shown = query ? inTab.filter((o) => o.search.includes(query)) : inTab;
@@ -131,7 +133,7 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
           })}
         </div>
       )}
-      {closedCount > 0 && (
+      {showKinds && (
         <div className="seg" role="tablist" aria-label="Guruh turi">
           {[
             ["open", `🌐 Ochiq · ${options.length - closedCount}`, pickedIn(false)],
@@ -164,7 +166,15 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
           {paged.pages > 1 && <Pager page={paged.page} pages={paged.pages} onPage={goPage} info={`${paged.first}–${paged.last} / ${paged.total}`} />}
         </>
       ) : (
-        <p className="hint">{query ? "Bunday guruh topilmadi." : scope === "own" ? OWN_EMPTY_HINT : "Hozircha tanlasa bo'ladigan guruh yo'q."}</p>
+        <p className="hint">
+          {query
+            ? "Bunday guruh topilmadi."
+            : scope === "own"
+              ? tab === "closed" && options.length
+                ? OWN_CLOSED_EMPTY_HINT
+                : OWN_EMPTY_HINT
+              : "Hozircha tanlasa bo'ladigan guruh yo'q."}
+        </p>
       )}
     </Section>
   );

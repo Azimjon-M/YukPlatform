@@ -321,6 +321,10 @@ export async function searchPublicChats(client, query, { limit = 50 } = {}) {
 // (akkaunt guruhlarini avtomatik tekshirish yuzlab id so'raydi — har biriga butun ro'yxatni qayta varaqlamaymiz);
 // topilmasa — ko'pi bilan DIALOGS_TTL_MS da bir marta qayta o'qiladi (yangi qo'shilgan guruh)
 const DIALOGS_TTL_MS = 10 * 60_000;
+// Id ro'yxatda topilmasa — ro'yxat shundan eski bo'lsa darhol qayta o'qiladi (2026-11-27, Azimjon: yopiq guruhga qo'shilib
+// darhol «🔎 Auto scan» bosdi — guruhlar ro'yxati (tg_dialogs) yangi edi, collector keshi esa 10 daqiqagacha eski
+// qolib, guruh «a'zo emas» deb xato oldi va 1 kunga qoldi)
+const DIALOGS_MISS_MS = 30_000;
 const dialogCache = new WeakMap(); // client → { at, byId: Map("-100…" → entity), byUsername: Map("nom" → entity) }
 
 const dialogLoads = new WeakMap(); // client → yuklanayotgan ro'yxat (bir vaqtda bittadan; 4 ta parallel o'qish bor)
@@ -354,7 +358,7 @@ async function resolveEntity(client, source) {
   if (source.kind === "username") return client.getEntity(source.value);
   const cached = dialogCache.get(client);
   if (cached?.byId.has(source.value)) return cached.byId.get(source.value);
-  if (!cached || Date.now() - cached.at >= DIALOGS_TTL_MS) {
+  if (!cached || Date.now() - cached.at >= DIALOGS_MISS_MS) {
     const fresh = await loadDialogs(client);
     if (fresh.byId.has(source.value)) return fresh.byId.get(source.value);
   }
