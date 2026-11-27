@@ -77,9 +77,9 @@ test("to'lov: tekshirib bo'lmagan / summa kam / narx belgilanmagan — darhol yo
   assert.equal(store.claimPayment({ chatId: 7, plan: "vip", amount: 1, sure: true }).error, "plan");
   assert.deepEqual(store.listPayments({ status: "open" }).map((p) => p.chatId), [8]);
 
-  assert.deepEqual(store.setPlanSettings({ prices: { pro: "70000" }, days: 0, holdHours: 24 }), { prices: { pro: 70_000, max: 120_000 }, days: 30, payInfo: "Click: 8600 …", holdHours: 24 });
+  assert.deepEqual(store.setPlanSettings({ prices: { pro: "70000" }, days: 0, holdHours: 24 }), { prices: { pro: 70_000, max: 120_000 }, days: 30, payInfo: "Click: 8600 …", holdHours: 24, autoGrant: true });
   const fresh = openStore({ file: ":memory:" });
-  assert.deepEqual(fresh.planSettings(), { prices: { pro: 0, max: 0 }, days: 30, payInfo: "", holdHours: 48 });
+  assert.deepEqual(fresh.planSettings(), { prices: { pro: 0, max: 0 }, days: 30, payInfo: "", holdHours: 48, autoGrant: true });
   fresh.saveDriver(1, { name: "X" });
   assert.equal(fresh.claimPayment({ chatId: 1, plan: "pro", amount: 999_999, sure: true }).payment.status, "asked", "narx belgilanmagan — egasi hal qiladi");
 });
@@ -96,4 +96,14 @@ test("to'lov: bitta tranzaksiya raqami ikkinchi marta — darhol yoqilmaydi (dup
   store.decidePayment(b.id, false);
   store.saveDriver(9, { name: "Yangi", role: "haydovchi" });
   assert.equal(store.claimPayment({ chatId: 9, plan: "pro", amount: 50_000, sure: true, txn: "4471120093" }).payment.dupOf, null, "rad etilganlar hisobga kirmaydi");
+});
+
+test("to'lov: «darhol yoqish» o'chirilgan (autoGrant: false) — eng ishonchli chek ham faqat egasi tasdiqlagach yoqiladi", () => {
+  const { store } = setup();
+  store.setPlanSettings({ autoGrant: false });
+  const p = store.claimPayment({ chatId: 7, plan: "pro", amount: 50_000, sure: true }).payment;
+  assert.equal(p.status, "asked");
+  assert.equal(store.getDriver(7).plan, "free");
+  store.decidePayment(p.id, true);
+  assert.equal(store.getDriver(7).plan, "pro");
 });

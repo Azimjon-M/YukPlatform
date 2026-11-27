@@ -20,14 +20,14 @@ const who = (p) => [p.name, p.username ? `@${p.username}` : null].filter(Boolean
 
 function SettingsForm({ initial, onSaved }) {
   const notify = useToast();
-  const [form, setForm] = useState({ pro: initial.prices.pro || "", max: initial.prices.max || "", days: initial.days, holdHours: initial.holdHours, payInfo: initial.payInfo });
+  const [form, setForm] = useState({ pro: initial.prices.pro || "", max: initial.prices.max || "", days: initial.days, holdHours: initial.holdHours, payInfo: initial.payInfo, autoGrant: initial.autoGrant !== false });
   const [busy, setBusy] = useState(false);
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   async function save(event) {
     event.preventDefault();
     setBusy(true);
     try {
-      const saved = await put("/api/plan-settings", { prices: { pro: Number(form.pro) || 0, max: Number(form.max) || 0 }, days: Number(form.days), holdHours: Number(form.holdHours), payInfo: form.payInfo });
+      const saved = await put("/api/plan-settings", { prices: { pro: Number(form.pro) || 0, max: Number(form.max) || 0 }, days: Number(form.days), holdHours: Number(form.holdHours), payInfo: form.payInfo, autoGrant: form.autoGrant });
       notify("Saqlandi — sayt, Mini App va yordamchi shu narxlarni ko'rsatadi", "good");
       onSaved(saved);
     } catch (e) {
@@ -53,6 +53,10 @@ function SettingsForm({ initial, onSaved }) {
       <Field label="To'lov rekvizitlari (foydalanuvchiga shu matn ko'rsatiladi)" className="field-wide">
         <textarea rows="2" maxLength={500} value={form.payInfo} onChange={set("payInfo")} placeholder="Masalan: Click yoki Payme orqali 8600 **** **** 1234 kartaga (F. I.)" />
       </Field>
+      <label className="field-wide plan-auto">
+        <input type="checkbox" checked={form.autoGrant} onChange={(e) => setForm((f) => ({ ...f, autoGrant: e.target.checked }))} />{" "}
+        Ishonchli ko'ringan chekda obunani darhol yoqish (o'chirilsa — har bir to'lovda obuna faqat siz tasdiqlagandan keyin yoqiladi)
+      </label>
       <Button type="submit" variant="primary" busy={busy}>
         Saqlash
       </Button>

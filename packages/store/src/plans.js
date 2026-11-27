@@ -19,7 +19,9 @@ export const PAID_PLANS = ["pro", "max"];
 export const PAYMENT_OPEN = ["held", "asked"];
 
 // Narx va to'lov sozlamalari (boshqaruv markazi «Haydovchilar» → «💳 Obuna va to'lov»). prices 0 — hali belgilanmagan
-export const DEFAULT_PLAN_SETTINGS = { prices: { pro: 0, max: 0 }, days: 30, payInfo: "", holdHours: 48 };
+// autoGrant — ishonchli chekda obuna darhol yoqilsinmi (true), yoki har doim avval egasi tasdiqlasinmi (false; Azimjon,
+// 2026-11-27: «pul tushmagan bo'lsa-yu chek haqiqiy deb obuna taqdim etishidan cho'chiyapman»)
+export const DEFAULT_PLAN_SETTINGS = { prices: { pro: 0, max: 0 }, days: 30, payInfo: "", holdHours: 48, autoGrant: true };
 
 export function cleanPlanSettings(input = {}) {
   const num = (value, fallback, min, max) => {
@@ -31,6 +33,7 @@ export function cleanPlanSettings(input = {}) {
     days: num(input.days, DEFAULT_PLAN_SETTINGS.days, 1, 366),
     payInfo: String(input.payInfo ?? "").trim().slice(0, 500),
     holdHours: num(input.holdHours, DEFAULT_PLAN_SETTINGS.holdHours, 1, 24 * 14),
+    autoGrant: input.autoGrant !== false,
   };
 }
 
@@ -134,13 +137,13 @@ export function createPlanQueries(db, now) {
       const open = db.prepare("SELECT id FROM payments WHERE chat_id = ? AND status IN ('held', 'asked') ORDER BY id DESC").get(chatId);
       if (open) return { ok: false, error: "open", payment: get(open.id) };
       const time = now();
-      const { prices, days, holdHours } = settings();
+      const { prices, days, holdHours, autoGrant } = settings();
       const price = prices[plan] || null;
       const paid = Number.isFinite(Number(amount)) && Number(amount) > 0 ? Math.round(Number(amount)) : null;
       const bad = db.prepare("SELECT 1 FROM payments WHERE chat_id = ? AND status IN ('rejected', 'lapsed') AND created_at > ?").get(chatId, time - 30 * DAY);
       const code = txn ? String(txn).replace(/\s+/g, "").slice(0, 60) || null : null;
       const dup = code ? db.prepare("SELECT id FROM payments WHERE txn = ? AND status <> 'rejected' ORDER BY id LIMIT 1").get(code) : null;
-      const held = Boolean(sure) && price != null && paid != null && paid >= price && !bad && !dup;
+      const held = autoGrant && Boolean(sure) && price != null && paid != null && paid >= price && !bad && !dup;
       const id = db
         .prepare(
           `INSERT INTO payments (chat_id, plan, days, amount, price, status, receipt, note, prev_plan, prev_until, hold_until, created_at, txn, paid_at)

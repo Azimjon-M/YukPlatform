@@ -585,7 +585,7 @@ export function createResponder({ client, name, ownerId, opsDir, root, audit, gr
           const head = `💳 To'lov #${p.id} — ${who(p)} (id ${p.chatId}): ${label}, ${paid}${price}.`;
           const state = p.status === "held"
             ? `Obuna DARHOL yoqildi. ${dayText(p.holdUntil)} gacha tasdiqlamasangiz — bekor bo'ladi.`
-            : "Obuna hali BERILMADI — chekni tekshirib bo'lmadi yoki shubhali. Tasdiqlasangiz yoqiladi.";
+            : "Obuna hali BERILMADI — faqat siz tasdiqlasangiz yoqiladi.";
           const facts = [p.paidAt ? `Chekdagi vaqt: ${p.paidAt}` : null, p.txn ? `Tranzaksiya: ${p.txn}` : null].filter(Boolean).join(" · ");
           await toOwner([
             head, state,
