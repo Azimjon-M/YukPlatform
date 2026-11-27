@@ -209,7 +209,7 @@ main {
   max-width: 100%;
 }
 .chips.list .chip-main,
-.chips.list .chip > span:not(.chip-box):not(.chip-avatar) {
+.chips.list .chip > span:not(.chip-box):not(.chip-avatar):not(.chip-side) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -301,6 +301,59 @@ main {
   bottom: -4px;
   font-size: 11px;
   line-height: 1;
+}
+
+/* Bir qatorli, suriladigan nom (ui.jsx Marquee) */
+.marquee {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.marquee-inner {
+  display: inline-block;
+  white-space: nowrap;
+}
+.marquee.is-moving .marquee-inner {
+  animation: marquee-swing var(--marquee-time, 8s) ease-in-out infinite;
+}
+@keyframes marquee-swing {
+  0%,
+  18% {
+    transform: translateX(0);
+  }
+  48%,
+  66% {
+    transform: translateX(var(--marquee-shift, 0));
+  }
+  96%,
+  100% {
+    transform: translateX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee.is-moving .marquee-inner {
+    animation: none;
+  }
+  .marquee-inner {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+/* O'ngdagi ikki qator: «1234 ta/kun» va ostida «👥 1.3K» */
+.chip-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+.chip .chip-main:has(.marquee) small.note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Nom va ostida izoh («Kamaz» / «samosval, shag'al-sheben...») */

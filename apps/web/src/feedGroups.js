@@ -3,6 +3,17 @@ import { foldText } from "@yuk/shared";
 
 const perDayText = (n) => (n > 0 ? `${n} ta/kun` : "kam");
 
+// A'zolar soni qisqa (2026-11-27, Azimjon: «uzun bo'ladi desang 1.3K yoki 1.7M qil»): 950 → «950», 1 340 → «1.3K»,
+// 12 500 → «12.5K», 245 000 → «245K», 1 700 000 → «1.7M». Kasr — nuqta bilan, «.0» yozilmaydi
+export function membersText(n) {
+  if (!(n > 0)) return null;
+  const short = (value, unit) => `${String(Math.floor(value * 10) / 10).replace(/\.0$/, "")}${unit}`;
+  if (n < 1000) return String(n);
+  if (n < 100_000) return short(n / 1000, "K");
+  if (n < 1_000_000) return `${Math.floor(n / 1000)}K`;
+  return short(n / 1_000_000, "M");
+}
+
 // list — serverdan kelgan ro'yxat; chosen — tanlanganlar (ro'yxatda bo'lmasa ham ko'rinsin: masalan, oflayn)
 export function groupOptions(list, chosen) {
   const known = new Set(list.map((s) => s.name.toLowerCase()));
@@ -12,9 +23,12 @@ export function groupOptions(list, chosen) {
   return [...extra, ...list].map((s) => ({
     id: s.name,
     label: s.title ?? s.name,
-    // Yopiq guruhning raqamli id'si foydalanuvchiga hech narsa demaydi — ko'rsatilmaydi
-    note: [s.title && !s.closed ? s.name : null, s.mine ? "siz qo'shgansiz" : null, s.locked ? "🔒 Pro uchun" : null].filter(Boolean).join(" · ") || null,
+    // Nom ostida — @username (yopiq guruhning raqamli id'si hech narsa demaydi — ko'rsatilmaydi). Kim qo'shgani yozilmaydi
+    // (2026-11-27, Azimjon: «Kim tomonidan qo'shilgani kerak emas!»)
+    note: [s.title && !s.closed ? s.name : null, s.locked ? "🔒 Pro uchun" : null].filter(Boolean).join(" · ") || null,
     sub: s.perDay == null ? null : perDayText(s.perDay),
+    sub2: membersText(s.members) ? `👥 ${membersText(s.members)}` : null, // o'ngda, «ta/kun» ostida
+    marquee: true, // uzun nom bir qatorda, chapga-o'ngga suriladi (ui.jsx Marquee)
     search: foldText(`${s.title ?? ""} ${s.name}`), // kirill/lotin farqisiz (@yuk/shared foldText)
     closed: Boolean(s.closed),
     disabled: Boolean(s.locked),

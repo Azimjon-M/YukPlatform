@@ -1,5 +1,5 @@
 // Kichik umumiy bo'laklar: bo'lim, tanlov tugmalari, ikki-uch tanlovli almashtirgich, bo'sh/xato holati.
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { sourceAvatarUrl } from "./api.js";
 import { haptic } from "./telegram.js";
 
@@ -36,19 +36,55 @@ export function Chips({ options, selected, onPick, layout = "wrap", check = fals
           >
             {check && <span className="chip-box" aria-hidden="true">{on ? "✓" : ""}</span>}
             {o.icon}
-            {o.note ? (
+            {o.note || o.marquee ? (
               <span className="chip-main">
-                <span>{o.label}</span>
-                <small className="note">{o.note}</small>
+                {o.marquee ? <Marquee text={o.label} /> : <span>{o.label}</span>}
+                {o.note && <small className="note">{o.note}</small>}
               </span>
             ) : (
               <span>{o.label}</span>
             )}
-            {o.sub && <small>{o.sub}</small>}
+            {o.sub2 ? (
+              <span className="chip-side">
+                {o.sub && <small>{o.sub}</small>}
+                <small className="note">{o.sub2}</small>
+              </span>
+            ) : (
+              o.sub && <small>{o.sub}</small>
+            )}
           </button>
         );
       })}
     </div>
+  );
+}
+
+// Bir qatorli matn: sig'masa — sekin chapga surilib oxirigacha ko'rsatadi, to'xtab, qaytadi (2026-11-27, Azimjon: «nomini 1
+// qatorda qilib hammasini o'qish uchun chapdan unga borib qaytadigan qilsak»). Sig'sa — oddiy matn. Kenglik o'zgarsa qayta
+// o'lchanadi; «harakatni kamaytirish» yoqilgan bo'lsa — surilmaydi, oxiri «…» (CSS)
+export function Marquee({ text }) {
+  const box = useRef(null);
+  const inner = useRef(null);
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const over = (inner.current?.scrollWidth ?? 0) - (box.current?.clientWidth ?? 0);
+      setShift(over > 2 ? over : 0);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box.current);
+    return () => observer.disconnect();
+  }, [text]);
+  // Tezlik ~35 px/s, ikki chetda to'xtash — animatsiyaning o'zida (keyframes), shuning uchun umumiy vaqt uzunroq
+  const style = shift ? { "--marquee-shift": `-${shift}px`, "--marquee-time": `${Math.max(5, (shift / 35) * 2 + 3).toFixed(1)}s` } : undefined;
+  return (
+    <span ref={box} className={`marquee${shift ? " is-moving" : ""}`} title={text} style={style}>
+      <span ref={inner} className="marquee-inner">
+        {text}
+      </span>
+    </span>
   );
 }
 

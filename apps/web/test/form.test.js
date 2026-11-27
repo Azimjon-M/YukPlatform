@@ -290,3 +290,21 @@ test("sahifa tugmalari: 5 sahifa — hammasi; ko'p bo'lsa birinchi, oxirgi, jori
       assert.equal(items.at(-1), pages - 1);
     }
 });
+
+test("guruh qatori: a'zolar soni qisqa (1.3K, 1.7M), nom ostida faqat @username — kim qo'shgani yo'q", async () => {
+  const { groupOptions, membersText } = await import("../src/feedGroups.js");
+  assert.deepEqual([0, null, 7, 950, 1000, 1340, 1399, 12_500, 99_999, 245_000, 999_999, 1_000_000, 1_749_000, 12_300_000].map(membersText), [
+    null, null, "7", "950", "1K", "1.3K", "1.3K", "12.5K", "99.9K", "245K", "999K", "1M", "1.7M", "12.3M",
+  ]);
+  const [mine, closed, bare] = groupOptions(
+    [
+      { name: "@TutGruz", title: "Tut Gruz", perDay: 1234, members: 1340, mine: true, closed: false, locked: false },
+      { name: "-1002", title: "Yopiq", perDay: 3, members: null, closed: true, locked: false },
+      { name: "@nomsiz", title: null, perDay: 0, members: 1_700_000, closed: false, locked: false },
+    ],
+    [],
+  );
+  assert.deepEqual([mine.note, mine.sub, mine.sub2, mine.marquee], ["@TutGruz", "1234 ta/kun", "👥 1.3K", true]);
+  assert.deepEqual([closed.note, closed.sub2], [null, null]);
+  assert.deepEqual([bare.label, bare.note, bare.sub, bare.sub2], ["@nomsiz", null, "kam", "👥 1.7M"]);
+});

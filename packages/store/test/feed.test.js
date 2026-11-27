@@ -77,3 +77,13 @@ test("feedSources own: o'z Telegram akkaunti a'zo bo'lgan guruh/kanal (id yoki @
   assert.deepEqual(own(10, { pro: true }), { "@TutGruz": false, "@Mening_kanalim": true, "-1003333333": true });
   assert.deepEqual(own(20, { pro: true }), { "@TutGruz": false, "@Mening_kanalim": false, "-1003333333": false }, "begonada own yo'q");
 });
+
+test("feedSources members: sources dagi soni, bo'lmasa akkauntlarimiz guruhlar ro'yxatidagi (tg_dialogs) eng kattasi", () => {
+  const { store } = setup();
+  store.addSource("@TutGruz");
+  store.addSource("@Sanoqli");
+  store.setTgDialogs("u1-1", [{ id: "-1005", title: "Tut", username: "tutgruz", type: "supergroup", members: 1340 }]);
+  store.setTgDialogs("u2-1", [{ id: "-1005", title: "Tut", username: "TutGruz", type: "supergroup", members: 1500 }]);
+  const byName = Object.fromEntries(store.feedSources(10).map((s) => [s.name, s.members]));
+  assert.deepEqual(byName, { "@TutGruz": 1500, "@Sanoqli": null });
+});
