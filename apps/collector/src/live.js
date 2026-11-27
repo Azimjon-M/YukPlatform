@@ -514,7 +514,7 @@ export async function runLive({
       const messages = await call(reader.since(source, 0, closed ? CLOSED_PROBE.limit : PROBE.limit));
       const verdict = closed
         ? judgeClosed(messages, { now: now(), title: row.title ?? "", channel: row.chat_type === "channel" || row.chatType === "channel" })
-        : judgeProbe(messages, { now: now(), requireContact });
+        : judgeProbe(messages, { now: now(), title: row.title ?? "", requireContact });
       let queued = 0;
       if (verdict.ok) {
         for (const message of messages) {
@@ -594,7 +594,7 @@ export async function runLive({
       const messages = await call(reader.since(peer, 0, closed ? CLOSED_PROBE.limit : PROBE.limit));
       const verdict = closed
         ? judgeClosed(messages, { now: now(), title: dialog.title ?? "", channel: dialog.type === "kanal" })
-        : judgeProbe(messages, { now: now(), requireContact });
+        : judgeProbe(messages, { now: now(), title: dialog.title ?? "", requireContact });
       ok();
       scanBatch.checked++;
       if (!verdict.ok) {

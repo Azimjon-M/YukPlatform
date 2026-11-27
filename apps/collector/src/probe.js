@@ -24,7 +24,7 @@ const dayText = (time) =>
 // → { ok, note (foydalanuvchiga va boshqaruv markaziga), stats: { messages, texts, loadLike, withContact, loadLikeDay, lastAt } }
 export function judgeProbe(
   messages,
-  { now, limit = PROBE.limit, minLoadLike = PROBE.minLoadLike, deadAfterMs = PROBE.deadAfterMs, requireContact = true } = {},
+  { now, title = "", limit = PROBE.limit, minLoadLike = PROBE.minLoadLike, deadAfterMs = PROBE.deadAfterMs, requireContact = true } = {},
 ) {
   const texts = messages.filter((m) => (m.text ?? "").trim().length >= 20);
   const looks = texts.filter((m) => looksLikeLoad(m.text));
@@ -42,6 +42,15 @@ export function judgeProbe(
   if (!messages.length) return { ok: false, note: "Guruhda birorta ham xabar topilmadi", stats };
   if (now - lastAt > deadAfterMs) {
     return { ok: false, note: `Guruhda ${Math.round(deadAfterMs / DAY)} kundan beri xabar yo'q (oxirgisi ${dayText(lastAt)} da)`, stats };
+  }
+  // Taksi guruhi (2026-11-27, Azimjon: «Qo'sh»): nomida taksi yoki yukka o'xshagan e'lonlarning yarmi yo'lovchi/pochta
+  // e'loni («Jizzaxdan Toshkentga 2 ta bo'sh joy, pochta olamiz») — manzil + telefon bo'lgani uchun yukka o'xshab qoladi
+  // Bir xil matn bir marta sanaladi: yuk guruhida bitta taksichi o'z e'lonini 20 marta tashlasa ham guruh taksi bo'lib qolmaydi (@yuk41)
+  const distinct = [...new Map(loadLike.map((m) => [m.text.replace(/\s+/g, " ").trim().toLowerCase(), m])).values()];
+  const riders = distinct.filter((m) => PASSENGER_WORDS.test(m.text)).length;
+  stats.passenger = riders;
+  if (TAXI_TITLE.test(title ?? "") || (distinct.length && riders / distinct.length >= PASSENGER_SHARE)) {
+    return { ok: false, note: `Taksi guruhiga o'xshaydi: oxirgi ${shown} ta xabardagi ${distinct.length} ta turli e'londan ${riders} tasi yo'lovchi yoki pochta haqida`, stats };
   }
   if (loadLike.length < minLoadLike && looks.length >= minLoadLike) {
     const note = loadLike.length
@@ -73,6 +82,10 @@ export const CLOSED_PROBE = { limit: 100 };
 // So'z chegarasi \b emas, (?<!\p{L}) … (?!\p{L}) bilan: JS'da \b faqat lotin harflarini taniydi («\bкия\b» hech qachon topilmasdi)
 const CARGO_TITLE =
   /yuk|юк|груз|gruz|fura|фура|isuz|исуз|labo|лабо|damas|дамас|kamaz|камаз|gazel|газел|dostavka|доставка|logist|логист|tashish|ташиш|perevoz|перевоз|tentofka|тентовк|sprint|спринт|porter|портер|bongo|бонго|hyundai|хундай|(?<!\p{L})(?:kia|кия)(?!\p{L})|haydovch|ҳайдовч|хайдовч|shofer|шофер|шофё|шафё|truck|cargo|petak|петак|reys|рейс/iu;
+// Yo'lovchi/pochta e'loni (taksi): «2 ta bo'sh joy», «odam olamiz», «pochta olamiz», «yo'lovchi», «kishi olamiz»
+const PASSENGER_WORDS =
+  /taks|taxi|такси|po[cs]hta|почта|пошта|yo['‘’ʻ`]?lovchi|йўловчи|ёловчи|пассажир|odam olamiz|одам оламиз|kishi olamiz|киши оламиз|bo['‘’ʻ`]?sh joy|бўш жой|бош жой|joy bor|жой бор|tom bagaj|том багаж/i;
+const PASSENGER_SHARE = 0.5;
 // Yo'lovchi taksisi — yuk guruhi emas (manzil + telefon bo'lgani uchun e'lonlari yukka o'xshab qolishi mumkin)
 const TAXI_TITLE = /taks|taxi|такси/i;
 // Xabarda yuk ishiga oid so'z — e'lon bo'lmasa ham (haydovchilar gaplashyapti: «fura bo'shadi», «ertaga zagruzka bor»)

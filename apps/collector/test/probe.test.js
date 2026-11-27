@@ -20,7 +20,7 @@ test("judgeProbe: yuk e'lonlari bor — sinovga; suhbat guruhi, o'lik guruh, bo'
   const cargo = judgeProbe(messages([[LOAD(1), 600], [CHAT(1), 300], [LOAD(2), 120], [LOAD(3), 30], ["rasm", 10]]), { now: NOW });
   assert.equal(cargo.ok, true);
   assert.equal(cargo.note, "Oxirgi 5 ta xabaridan 3 tasi yuk e'loniga o'xshaydi");
-  assert.deepEqual(cargo.stats, { messages: 5, texts: 4, loadLike: 3, withContact: 3, loadLikeDay: 3, lastAt: NOW - 10 * MIN });
+  assert.deepEqual(cargo.stats, { messages: 5, texts: 4, loadLike: 3, withContact: 3, loadLikeDay: 3, lastAt: NOW - 10 * MIN, passenger: 0 });
 
   const chat = judgeProbe(messages([[CHAT(1), 50], [LOAD(1), 40], [CHAT(2), 30], [LOAD(2), 20]]), { now: NOW });
   assert.equal(chat.ok, false);
@@ -304,4 +304,17 @@ test("yopiq guruh nomi kirillchada: «Кия» so'z sifatida topiladi, «Кия�
   assert.equal(judgeClosed(one, { now, title: "КИЯ" }).stats.titleHit, true);
   assert.equal(judgeClosed(one, { now, title: "Кияли дўстлар" }).stats.titleHit, false);
   assert.equal(judgeClosed(one, { now, title: "Юк ташиш хизмати" }).stats.titleHit, true);
+});
+
+test("ochiq taksi guruhi (2026-11-27): nomida taksi yoki e'lonlarning yarmi yo'lovchi/pochta — rad; bitta taksichining takrori yuk guruhini yiqitmaydi", () => {
+  const now = 1_800_000_000_000;
+  const msg = (text, i) => ({ id: i, text, date: Math.floor(now / 1000) - i * 60, sender: null });
+  const taxi = Array.from({ length: 6 }, (_, i) => msg(`Jizzaxdan Toshkentga ${i + 1} ta bo'sh joy, pochta olamiz +998901234${String(i).padStart(3, "0")}`, i));
+  const verdict = judgeProbe(taxi, { now, title: "Toshkent navoiy" });
+  assert.equal(verdict.ok, false);
+  assert.match(verdict.note, /Taksi guruhiga o'xshaydi/);
+  const cargo = Array.from({ length: 6 }, (_, i) => msg(`Andijondan Toshkentga ${10 + i} tonna un bor, isuzu kerak +998901234${String(i).padStart(3, "0")}`, i));
+  assert.equal(judgeProbe(cargo, { now, title: "Samarqand Toshkent Taxi" }).ok, false, "nomida taksi");
+  const spammed = [...cargo, ...Array.from({ length: 10 }, (_, i) => msg("QARSHIDAN TOSHKENTGA +998700590089 ODAM OLAMIZ POCHTA OLAMIZ", 20 + i))];
+  assert.equal(judgeProbe(spammed, { now, title: "" }).ok, true, "bir xil taksi e'loni bir marta sanaladi");
 });
