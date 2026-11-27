@@ -322,6 +322,28 @@ export function createBot({
   // «Menu» tugmasi (buyruqlar ro'yxati) — faqat rol tanlaganlarda (commands.js). main.js commands.start() ni chaqiradi
   const commands = createCommandSync({ api: bot.api, store, log });
 
+  // Ochilmay qolgan oyna chatni uzib qo'ymasin (2026-11-27, Azimjon: «#303983 … 5149275321 ga yetmagan»). Oyna (🎛 Filtr va
+  // ro'yxatlari, savol-javob…) avval chatni uzadi (holdWindow, bazada), keyin xabar chiziladi. 26.11 19:00 da «📌 Guruh
+  // tanlash» Telegram'dan 400 qaytardi (guruh nomi emoji o'rtasidan kesilgan edi, c3de3b3) — odam oynani ko'rmadi, yopa
+  // olmadi, uzilish esa bazada qoldi: bot qayta yoqilgandan keyin ham 20:28 gacha unga birorta e'lon bormadi.
+  // Endi: shu update ichida oyna ochilgan bo'lsa-yu, update xato bilan tugasa — uzilish darhol yechiladi
+  const openedNow = new Set(); // shu update'da holdWindow chaqirilgan chatlar
+  bot.use(async (ctx, next) => {
+    const chatId = ctx.chat?.type === "private" ? ctx.chat.id : null;
+    if (chatId != null) openedNow.delete(chatId);
+    try {
+      await next();
+    } catch (error) {
+      if (chatId != null && openedNow.has(chatId)) {
+        release(chatId);
+        log(`${chatId}: oyna ochilmadi (${error.description ?? error.message}) — chat uzilmadi, e'lonlar kelaveradi`);
+      }
+      throw error;
+    } finally {
+      if (chatId != null) openedNow.delete(chatId);
+    }
+  });
+
   // Collector botga forward qilgan ovozli xabar / dumaloq video (media.js showSender: yozuvchini botga «ko'rsatish», darhol
   // o'chiriladi) — javob yozilmaydi, faollik ham sanalmaydi
   bot.use(async (ctx, next) => {
@@ -625,7 +647,7 @@ export function createBot({
   const busy = new Map(); // chatId → qachongacha (faqat 2-tur)
   // ms — qancha vaqt uzilib turadi (oldingi uzunroq muddat qisqartirilmaydi)
   const hold = (chatId, ms) => (busy.set(chatId, Math.max(busy.get(chatId) ?? 0, Date.now() + ms)), drain(chatId));
-  const holdWindow = (chatId, kind) => (store.setHold?.(chatId, kind), drain(chatId));
+  const holdWindow = (chatId, kind) => (openedNow.add(chatId), store.setHold?.(chatId, kind), drain(chatId));
   // release — haydovchi e'lon olishni (qayta) boshlaydi: oxirgi catchUpMs dagi mos e'lonlar ham yuboriladi (main.js
   // setCatchUp → pipeline catchUp). Biroz keyin — saqlash va javob xabari tugasin; pauza bosilgan bo'lsa catchUp o'zi qaytadi
   let catchUpFn = null;
@@ -2044,8 +2066,12 @@ export function createBot({
   // Shaxsiy xabar (yuk yoki tezkor e'lon) — tugmalar bilan, ular yo'q bo'lsa pastki menyu bilan
   // fallback() — Telegram tugmalarni rad etsa sinab ko'riladigan ikkinchi to'plam («💬 Lichkasi» siz); faqat kerak bo'lganda quriladi
   // media — { file, kind } bo'lsa xabar o'rniga asl fayl yuboriladi, text esa uning izohi (caption)
-  async function sendDirect(chatId, text, buttons, fallback = null, media = null) {
+  async function sendDirect(chatId, rawText, buttons, fallback = null, media = null) {
     const driver = store.getDriver(chatId);
+    // E'lon matnida buzuq belgi (yarim emoji — guruhdagi xabar o'zi shunday yoki kesilgan) bo'lsa Telegram butun xabarni
+    // «text must be encoded in UTF-8» bilan rad etadi — e'lon haydovchiga umuman bormaydi (2026-11-27 06:59, 5149275321;
+    // 16.11 dan 14 marta). toWellFormed — buzuq bo'lagini «�» bilan almashtiradi, qolgan matn o'zgarmaydi
+    const text = String(rawText ?? "").toWellFormed();
     const send = media
       ? (markup) => sendMedia(chatId, media, text, markup)
       : (markup) => bot.api.sendMessage(chatId, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup });

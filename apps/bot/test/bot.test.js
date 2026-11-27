@@ -1930,6 +1930,37 @@ test("ochiq amal: 🎛 Filtr ochilsa — «✅ Tayyor» bosilmaguncha e'lon kelm
   assert.equal((await deliverRaw(42, { ...post, id: 102 }, { phones: [] })).ok, true);
 });
 
+test("ochiq amal: oyna Telegram'da ochilmasa (400) — chat uzilib qolmaydi, e'lonlar kelaveradi (2026-11-26, #303983)", async () => {
+  // 26.11 19:00: «🎛 Filtr» oynasi Telegram'dan 400 qaytardi — odam oynani ko'rmadi, uzilish bazada 1,5 soat qoldi
+  let broken = true;
+  const { store, deliverRaw, message, isBusy } = setup({
+    fail: (method, p) =>
+      broken && method === "sendMessage" && p.reply_markup?.inline_keyboard && { ok: false, error_code: 400, description: "Bad Request: inline keyboard button text must be encoded in UTF-8" },
+  });
+  store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
+  await assert.rejects(message(PRIVATE, MENU.feed), /UTF-8/);
+  assert.equal(store.getDriver(42).hold, null, "uzilish bazada qolmadi");
+  assert.equal(isBusy(42), false);
+  const post = { id: 103, source: "@yukkdehqonobod", link: "https://t.me/yukkdehqonobod/303983", text: "Qo'qondan Jizzaxga yuk bor 91 055 57 73", postedAt: Date.now() };
+  broken = false;
+  assert.equal((await deliverRaw(42, post, { phones: [] })).ok, true, "e'lon yetib boradi");
+  // Oyna ochilsa — avvalgidek uziladi
+  await message(PRIVATE, MENU.feed);
+  assert.equal(store.getDriver(42).hold.kind, "filtr");
+});
+
+test("e'lon matnida buzuq belgi (yarim emoji) — Telegram rad etmasin: matn tozalanib yetib boradi", async () => {
+  const { store, calls, deliverRaw } = setup({
+    fail: (method, p) => method === "sendMessage" && !p.text.isWellFormed() && { ok: false, error_code: 400, description: "Bad Request: text must be encoded in UTF-8" },
+  });
+  store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
+  const post = { id: 104, source: "@TutGruz", link: "https://t.me/TutGruz/10", text: "Toshkentdan Samarqandga 20 t un bor \uD83D 90 123 45 67", postedAt: Date.now() };
+  assert.equal((await deliverRaw(42, post, { phones: [] })).ok, true);
+  const sent = calls.filter((c) => c.method === "sendMessage").at(-1).payload.text;
+  assert.ok(sent.isWellFormed());
+  assert.match(sent, /Samarqandga 20 t un bor/);
+});
+
 test("ochiq amal tashlab ketildi — 3 daqiqadan keyin BIR marta eslatma; «✅ Tugatish» — e'lonlar yana keladi", async () => {
   const { store, calls, press, message, isBusy, holdReminder } = setup({});
   store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
