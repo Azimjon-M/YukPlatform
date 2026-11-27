@@ -49,7 +49,7 @@ import {
 } from "@yuk/shared";
 import { createCommandSync } from "./commands.js";
 import { profileFromText } from "./driverText.js";
-import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, REGION_CALLBACK, TRUCK_CALLBACK, feedSavedText, groupStep, modeStep, regionStep, toggleSource, truckStep } from "./feed.js";
+import { CLOSED_PRO_TEXT, FEED_CALLBACK, GROUP_CALLBACK, REGION_CALLBACK, TRUCK_CALLBACK, feedSavedText, groupStep, modeStep, regionStep, scopeList, toggleSource, truckStep } from "./feed.js";
 import { SENDER_TEXT, escapeHtml, formatLoad, formatRaw, formatRawCaption, formatTruck } from "./format.js";
 import { APK_DIR, APK_PATH, mediaFileOf, readRelease, sizeText } from "@yuk/store";
 import { IDLE_BUTTONS } from "./idle.js";
@@ -866,8 +866,9 @@ export function createBot({
     await holdWindow(ctx.chat.id, "filtr");
     const pro = isPro(store.getDriver(ctx.chat.id));
     const list = store.feedSources(ctx.chat.id, { pro });
-    const { text, keyboard, page } = groupStep({ list, chosen: draft.sources, page: draft.page, mode: draft.mode, kind: draft.kind, pro });
+    const { text, keyboard, page, scope } = groupStep({ list, chosen: draft.sources, page: draft.page, mode: draft.mode, kind: draft.kind, pro, scope: draft.scope });
     draft.page = page;
+    draft.scope = scope;
     await render(ctx, text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: toKeyboard(keyboard) }, edit);
   }
 
@@ -1526,16 +1527,26 @@ export function createBot({
     const driver = rememberUser(ctx);
     const draft = feedDraft(ctx.chat.id);
     if (roleOf(driver) !== "haydovchi" || draft?.step !== "groups") return staleList(ctx, driver);
-    const [, name, page, kind] = ctx.match;
+    const [, name, page, kind, scope] = ctx.match;
     const data = ctx.callbackQuery.data;
     draft.at = Date.now();
     if (data === "fg:all") {
       // Ochiq + yopiq (tanlab bo'ladigan) hammasi; hammasi tanlangan bo'lsa — tozalanadi
-      const pickable = store.feedSources(ctx.chat.id, { pro: isPro(driver) }).filter((s) => !s.locked).map((s) => s.name);
+      // Faqat ko'rinib turgan ro'yxat (🌍 global yoki 👤 akkauntimdagi) — boshqasidagi tanlov o'zgarmaydi
+      const pickable = scopeList(store.feedSources(ctx.chat.id, { pro: isPro(driver) }), draft.scope).filter((s) => !s.locked).map((s) => s.name);
       const keys = new Set(draft.sources.map((n) => n.toLowerCase()));
       const all = pickable.every((n) => keys.has(n.toLowerCase()));
-      draft.sources = all ? [] : pickable.slice(0, FEED_SOURCES_MAX);
+      const inList = new Set(pickable.map((n) => n.toLowerCase()));
+      const others = draft.sources.filter((n) => !inList.has(n.toLowerCase()));
+      draft.sources = all ? others : [...others, ...pickable].slice(0, FEED_SOURCES_MAX);
       await ctx.answerCallbackQuery({ text: all ? "▫️ Hammasi olib tashlandi" : `☑️ ${draft.sources.length} ta guruh tanlandi` });
+      return showGroups(ctx, draft, { edit: true });
+    }
+    if (scope != null) {
+      await ctx.answerCallbackQuery();
+      draft.scope = scope === "-" ? null : scope;
+      draft.page = 0;
+      draft.kind = "open";
       return showGroups(ctx, draft, { edit: true });
     }
     if (kind != null) {

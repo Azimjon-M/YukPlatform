@@ -93,9 +93,21 @@ export function createFeedQueries(db, now) {
       );
       // Oddiy (Pro emas) foydalanuvchiga yopiq guruhlar umuman ko'rinmaydi (2026-11-19, Azimjon: «oddiy foydalanuvchilarda
       // yopiq guruhlar ko'rinmasin! ammo public guruhlarni tanlay olsin») — faqat o'zi qo'shgani qoladi
+      // own — shu odamning o'z Telegram akkaunti(lari) a'zo bo'lgan guruh/kanal (tg_dialogs; Azimjon, 2026-11-26: «guruh
+      // tanlashda global va o'z accountimdagi ochiq/yopiq guruh/kanallardan tanlash kerak»). Mos — id (-100…) yoki @username
+      const accounts = (this.tgAccountsOf?.(chatId) ?? []).map((a) => a.name);
+      const own = new Set();
+      if (accounts.length) {
+        const marks = accounts.map(() => "?").join(",");
+        for (const d of db.prepare(`SELECT peer_id, username FROM tg_dialogs WHERE account IN (${marks})`).all(...accounts)) {
+          if (d.peer_id) own.add(String(d.peer_id).toLowerCase());
+          if (d.username) own.add(`@${d.username}`.toLowerCase());
+        }
+      }
       return rows
         .filter((r) => canPick(r, chatId, pro))
         .map((r) => ({
+          own: own.has(r.name.toLowerCase()) || (r.added_by != null && r.added_by === chatId),
           name: r.name,
           title: r.title ?? null,
           members: r.members ?? null,

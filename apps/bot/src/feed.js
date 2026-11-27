@@ -9,7 +9,7 @@ import { FEED_MODES, FEED_SOURCES_MAX, REGIONS, TRUCK_FILTERS, choiceMode, feedO
 // fm:<rejim> — rejim (tezkor — hamma guruhlar, guruhlarim — ro'yxat ochiladi, hududim — eski tugma: viloyatlar ro'yxati),
 // fm:done — oynani yopish
 export const FEED_CALLBACK = /^fm:(\w+)$/;
-export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|k:(open|closed)|ok|back|all)$/;
+export const GROUP_CALLBACK = /^fg:(?:t:(.+)|p:(\d+)|k:(open|closed)|s:(all|own|-)|ok|back|all)$/;
 // «📍 Qaysi viloyatlardan?» (2026-11-19): fr:t:<viloyat> — belgilash, fr:ok — saqlash, fr:back — rejimlarga
 export const REGION_CALLBACK = /^fr:(?:t:([a-z_]+)|ok|back|all)$/;
 // «🚚 Qaysi transport?» (2026-11-19): ft:open — ro'yxat, ft:t:<tur> — belgilash, ft:ok — saqlash, ft:all — hammasi, ft:back
@@ -74,8 +74,36 @@ function groupLabel(source, chosen) {
 // list — store.feedSources(chatId, { pro }) (eng faoli birinchi), chosen — tanlangan nomlar, mode — guruhlarim | guruhlarim_plus,
 // kind — qaysi bo'lim ko'rinadi: open (🌐 ochiq) | closed (🔒 yopiq; Azimjon, 2026-11-16: «publik va private guruhlardan
 // tanlaydigan qil»). Yopiq guruh bo'lmasa — bo'lim tugmalari yo'q
-export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", kind = "open", pro = false }) {
+// scope (Azimjon, 2026-11-26): avval qaysi ro'yxatdan — 🌍 global (hamma guruhlar) yoki 👤 o'z akkauntimdagi (own);
+// null — tanlov oynasi. O'z akkaunti ulanmagan (own yo'q) — tanlovsiz, darhol global
+export const scopeList = (list, scope) => (scope === "own" ? list.filter((s) => s.own) : list);
+export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", kind = "open", pro = false, scope = null }) {
   const keys = new Set(chosen.map(sourceKey));
+  const count = (items) => items.filter((s) => keys.has(sourceKey(s.name))).length;
+  const owned = list.filter((s) => s.own);
+  if (owned.length && scope !== "all" && scope !== "own") {
+    const lines = [
+      "📌 <b>Qaysi guruhlardan tanlaysiz?</b>",
+      "",
+      "🌍 <b>Global</b> — Yuk Ekspert kuzatadigan hamma guruh va kanallar.",
+      "👤 <b>Akkauntimdagi</b> — o'zingiz ulagan Telegram akkauntingiz a'zo bo'lgan guruh va kanallar (ochiq va yopiq).",
+      "",
+      `Tanlandi: <b>${keys.size}</b> ta.`,
+    ];
+    const tag = (items) => (count(items) ? ` (✅${count(items)})` : "");
+    return {
+      text: lines.join("\n"),
+      keyboard: [
+        [{ text: `🌍 Global · ${list.length}${tag(list)}`, data: "fg:s:all" }],
+        [{ text: `👤 Akkauntimdagi · ${owned.length}${tag(owned)}`, data: "fg:s:own" }],
+        [{ text: "💾 Saqlash", data: "fg:ok" }],
+      ],
+      page: 0,
+      scope: null,
+    };
+  }
+  const where = owned.length ? scope : "all";
+  list = scopeList(list, where);
   const open = list.filter((s) => !s.closed);
   const closed = list.filter((s) => s.closed);
   const tab = kind === "closed" && closed.length ? "closed" : "open";
@@ -85,15 +113,15 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", ki
   const shown = part.slice(p * GROUPS_PAGE, (p + 1) * GROUPS_PAGE);
   const rest = mode === "guruhlarim_plus" ? "Qolgan guruhlardan — mashinangizga moslari." : "Faqat shulardan yuk keladi.";
   const lines = [
-    "📌 <b>Qaysi guruhlardan?</b>",
+    where === "own" ? "👤 <b>Akkauntimdagi guruh va kanallar</b>" : owned.length ? "🌍 <b>Global — hamma guruhlar</b>" : "📌 <b>Qaysi guruhlardan?</b>",
     `Guruhni bosing — ✅ belgi qo'yiladi. ${rest}`,
     "",
-    list.length ? `Tanlandi: <b>${keys.size}</b> ta. Raqam — kuniga nechta e'lon.` : "Ro'yxat hozircha bo'sh.",
+    list.length ? `Tanlandi: <b>${keys.size}</b> ta${owned.length ? ` (bu ro'yxatda — ${count(list)})` : ""}. Raqam — kuniga nechta e'lon.` : "Ro'yxat hozircha bo'sh.",
     "Kerakli guruh yo'qmi? — «➕ Guruh qo'shish».",
   ];
   if (tab === "closed") lines.push("", pro ? "🔒 <b>Yopiq guruhlar</b> — Pro foydalanuvchi sifatida ulardagi e'lonlar ham sizga keladi." : CLOSED_PRO_TEXT);
-  const count = (items) => items.filter((s) => keys.has(sourceKey(s.name))).length;
   const keyboard = [];
+  if (owned.length) keyboard.push([{ text: "⬅️ Global / Akkauntimdagi", data: "fg:s:-" }]);
   if (closed.length) {
     keyboard.push([
       { text: `${tab === "open" ? "● " : ""}🌐 Ochiq · ${open.length}${count(open) ? ` (✅${count(open)})` : ""}`, data: "fg:k:open" },
@@ -116,7 +144,7 @@ export function groupStep({ list, chosen = [], page = 0, mode = "guruhlarim", ki
   }
   // Bitta chiqish — doim saqlaydi: guruh tanlangan bo'lsa — «📌 Tanlangan guruhlar», hech biri — «🌐 Hamma guruhlar»
   keyboard.push([{ text: "💾 Saqlash", data: "fg:ok" }]);
-  return { text: lines.join("\n"), keyboard, page: p };
+  return { text: lines.join("\n"), keyboard, page: p, scope: where };
 }
 
 // «📍 Qayerdan?»: viloyatlar ro'yxati (✅ belgilangan), 2 ustunda. chosen — viloyat kodlari; bo'sh — hamma joydan
