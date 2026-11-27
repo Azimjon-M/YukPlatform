@@ -1,4 +1,5 @@
-// Haydovchi: yuklarni qanday olishi (rejim), transporti va qayerda ishlashi.
+// Haydovchi: «🎛 Filtr» bo'limi (App.jsx; 2026-11-27 dan botda emas, faqat shu yerda) — yuklarni qanday olishi (rejim),
+// mashina turi, qayerdan, guruhlar (🌍 Global / 👤 Akkauntimdagi — FeedGroups.jsx), transporti va qayerda ishlashi.
 //   Birinchi marta (profil yo'q) — ro'yxatdan o'tish: Rejim → (Guruhlar) → Transport → O'lcham → Tasdiqlash (Steps.jsx).
 //   Rejim (@yuk/shared feed.js, 2026-11-14): «🎯 Saralangan» — hozirgidek; «⚡ Tezkor» va «📌 Mening guruhlarim» da mashina
 //   so'ralmaydi (Rejim → (Guruhlar) → Tasdiqlash); «Guruhlarim + saralangan» — guruhlar ham, mashina ham.
@@ -218,7 +219,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
   const draft = registering && wizard.last ? profileFromForm(form, scope).profile : null;
   const firstName = me?.name?.split(/\s+/)[0];
 
-  let lead = "Sozlamalarni o'zgartiring va «Saqlash» ni bosing.";
+  let lead = "Qaysi yuklar kelsin — tanlang va «Saqlash» ni bosing.";
   if (registering) {
     const hello = firstName ? `Xush kelibsiz, ${firstName}!` : "Xush kelibsiz!";
     lead =
@@ -398,7 +399,7 @@ export function SettingsPage({ me, initialProfile, scope, onSaved, roleLine = nu
         </p>
       )}
 
-      {/* Sozlamalarda bu qator eng pastda (App.jsx, telefon raqamidan keyin), ro'yxatdan o'tishda — birinchi qadamda */}
+      {/* Bu qator «⚙️ Sozlamalar» da (App.jsx, telefon raqamidan keyin), ro'yxatdan o'tishda — shu yerda, birinchi qadamda */}
       {registering && wizard.index === 0 && roleLine}
 
       {registering ? (

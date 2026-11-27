@@ -201,7 +201,7 @@ export function LoadsPage({ kind = "yuk", scope, view, onView, feedNote = null, 
           title={k.needTitle}
           action={
             <button type="button" className="primary" onClick={onNeedProfile}>
-              ⚙️ Sozlamalarni to'ldirish
+              {kind === "yuk" ? "🎛 Filtrni to'ldirish" : "⚙️ Sozlamalarni to'ldirish"}
             </button>
           }
         >

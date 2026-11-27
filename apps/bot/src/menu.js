@@ -27,7 +27,7 @@ export const MENU = {
   role: "🔄 Rolni almashtirish",
   feed: "🎛 Filtr", // haydovchi: qaysi yuklar kelsin (feed.js; 2026-11-19 gacha «🎛 Rejim» — eski menyuda bosilsa ham ishlaydi, OLD_MENU) — /rejim
   fastOff: "⚡ Tezkorni o'chirish", // tezkor rejimda birinchi tugma → saralanganga qaytadi (Azimjon, 2026-11-18: «bir marta yoqsa, keyin o'chmaydigan bo'libdi»)
-  groups: "📌 Guruhlarim", // «📌 Mening guruhlarim» rejimlarida — qaysi guruhlardan (feed.js groupStep)
+  groups: "📌 Guruhlarim", // eski menyu tugmasi — endi ilovadagi «🎛 Filtr» ni ochadi
   help: "❓ Yordam",
   admin: "🛠 Boshqaruv",
 };
@@ -152,7 +152,10 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   // 2026-11-19 (soddalashtirish): hamma tezkor rejimda birinchi tugma — «🎛 Filtr» (guruhlar ham shu oynada), alohida
   // «📌 Guruhlarim» qatori yo'q
   const first = mode.sorted ? matchesLabel(driver) : MENU.feed;
-  const keyboard = loadRow(new Keyboard()).text(first).text(paused ? MENU.resume : MENU.pause).row();
+  // «🎛 Filtr» — Mini App'ning «🎛 Filtr» bo'limini ochadi (2026-11-27: filtr chatda emas, faqat ilovada); manzil yo'q — oddiy tugma
+  const filterUrl = miniAppUrl(miniappUrl, null, scope, { view: "filtr", role, token });
+  const button = (kb, text) => (text === MENU.feed && filterUrl ? kb.webApp(text, filterUrl) : kb.text(text));
+  const keyboard = button(loadRow(new Keyboard()), first).text(paused ? MENU.resume : MENU.pause).row();
   // Rolni almashtirish (haydovchi ↔ yuk beruvchi) — /rol bilan bir xil. Odamda bugun yuk, ertaga bo'sh mashina bo'lishi
   // mumkin, /rol ni esa hamma ham topavermaydi. Rol tanlanmagan bo'lsa tugma yo'q
   if (role) keyboard.text(MENU.role);
@@ -166,7 +169,7 @@ export function mainMenu(driver, miniappUrl, scope = null, { admin = false, toke
   const extra = [first !== MENU.feed ? MENU.feed : null].filter(Boolean);
   if (extra.length) {
     keyboard.row();
-    for (const text of extra) keyboard.text(text);
+    for (const text of extra) button(keyboard, text);
   }
   // Boshqaruv — faqat Mini App ichida (Azimjon: "botda telegram webi orqali ochib ishlaydigan bo'lsin")
   const adminUrl = admin ? miniAppUrl(miniappUrl, null, scope, { view: "admin", role, token }) : null;

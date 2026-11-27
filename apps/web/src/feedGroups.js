@@ -8,7 +8,7 @@ export function groupOptions(list, chosen) {
   const known = new Set(list.map((s) => s.name.toLowerCase()));
   const extra = chosen
     .filter((name) => !known.has(name.toLowerCase()))
-    .map((name) => ({ name, title: null, perDay: null, mine: false, closed: !name.startsWith("@"), locked: false }));
+    .map((name) => ({ name, title: null, perDay: null, mine: false, own: false, closed: !name.startsWith("@"), locked: false }));
   return [...extra, ...list].map((s) => ({
     id: s.name,
     label: s.title ?? s.name,
@@ -18,8 +18,19 @@ export function groupOptions(list, chosen) {
     search: foldText(`${s.title ?? ""} ${s.name}`), // kirill/lotin farqisiz (@yuk/shared foldText)
     closed: Boolean(s.closed),
     disabled: Boolean(s.locked),
+    own: Boolean(s.own), // o'z Telegram akkaunti a'zo bo'lgan guruh/kanal (yoki o'zi qo'shgan) — store feedSources
   }));
 }
+
+// «🌍 Global» — hamma guruhlar, «👤 Akkauntimdagi» — faqat own (2026-11-26, Azimjon: «guruh tanlashda global va o'z
+// accountimdagi ochiq/yopiq guruh/kanallardan tanlash kerak»; 2026-11-27 dan — faqat ilovadagi «🎛 Filtr» da)
+export const GROUP_SCOPES = [
+  { id: "all", label: "🌍 Global" },
+  { id: "own", label: "👤 Akkauntimdagi" },
+];
+export const scopeOptions = (options, scope) => (scope === "own" ? options.filter((o) => o.own) : options);
+export const OWN_EMPTY_HINT =
+  "Bu yerda o'zingiz ulagan Telegram akkauntingiz a'zo bo'lgan guruh va kanallar chiqadi. Akkauntni «⚙️ Sozlamalar» → «📡 Telegram akkaunt ulash» da ulang.";
 
 // Sahifalash (2026-11-20, Azimjon: «juda ko'p guruh bo'lgani sababli Pagination kerak. max 20 ta bo'lsin»)
 export const GROUPS_PAGE_SIZE = 20;

@@ -154,7 +154,7 @@ export function MapPage({ view, onView, feedNote = null, onNeedProfile, onAuthLo
           title="Transportingizni kiriting"
           action={
             <button type="button" className="primary" onClick={onNeedProfile}>
-              ⚙️ Sozlamalarni to'ldirish
+              🎛 Filtrni to'ldirish
             </button>
           }
         >

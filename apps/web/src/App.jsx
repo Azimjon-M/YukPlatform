@@ -1,5 +1,7 @@
 // Yuk Ekspert ilovasi: Telegram Mini App va oddiy sayt — bitta kod. Bo'limlar rolga qarab:
-//   haydovchi:     📋 Yuklar (menga mos — tanlangan yo'nalish bo'yicha / hammasi) · 🗺 Xarita · ⚙️ Sozlamalar (transport)
+//   haydovchi:     📋 Yuklar (menga mos — tanlangan yo'nalish bo'yicha / hammasi) · 🗺 Xarita · 🎛 Filtr (qaysi yuklar kelsin:
+//                  mashina, qayerdan, guruhlar — 2026-11-27 dan botda emas, faqat shu yerda) · ⚙️ Sozlamalar (raqam, Telegram
+//                  akkaunt, ilova, hisob)
 //   yuk beruvchi:  📦 Yuk berish (o'z yukini haydovchilarga) · 🚚 Mashinalar (bo'sh mashinalar) · ⚙️ Sozlamalar (yo'nalish va
 //                  kerakli mashina — faqat bo'sh mashina e'lonlari uchun; yuk berishga shart emas)
 // Rol tanlanmagan bo'lsa — «Siz kimsiz?» ekrani. Bot ham shu sozlamalar bo'yicha shaxsiy xabar yuboradi.
@@ -27,13 +29,17 @@ import { canSendData, closeApp, haptic, inTelegram, showAlert } from "./telegram
 import { Notice, Spinner } from "./ui.jsx";
 
 const SETTINGS_TAB = { id: "sozlamalar", icon: "⚙️", label: "Sozlamalar" };
+// «🎛 Filtr» (Azimjon, 2026-11-27: «Filtr To'liq MiniApp da bo'lsin … Sozlamalar saxifasida esa Telefon raqam, Telegram
+// akkount ulashish, ilova va hisob qolishi kifoya»): haydovchining ro'yxatdan o'tishi ham shu yerda (profil hali yo'q)
+const FILTER_TAB = { id: "filtr", icon: "🎛", label: "Filtr" };
 const LOAD_TAB = { id: "yuk", icon: "📦", label: "Yuk berish" };
 const ROLE_TABS = {
-  haydovchi: [{ id: "yuklar", icon: "📋", label: "Yuklar" }, { id: "xarita", icon: "🗺", label: "Xarita" }, SETTINGS_TAB],
+  haydovchi: [{ id: "yuklar", icon: "📋", label: "Yuklar" }, { id: "xarita", icon: "🗺", label: "Xarita" }, FILTER_TAB, SETTINGS_TAB],
   yuk_beruvchi: [LOAD_TAB, { id: "mashinalar", icon: "🚚", label: "Mashinalar" }, SETTINGS_TAB],
 };
-// Rol tanlangach / sozlamalarsiz ochilganda qaysi bo'lim: yuk beruvchi — «📦 Yuk berish» (sozlamalar unga shart emas)
-const startTab = (role) => (role === "yuk_beruvchi" ? LOAD_TAB.id : SETTINGS_TAB.id);
+// Rol tanlangach / sozlamalarsiz ochilganda qaysi bo'lim: yuk beruvchi — «📦 Yuk berish» (sozlamalar unga shart emas),
+// haydovchi — «🎛 Filtr» (ro'yxatdan o'tish)
+const startTab = (role) => (role === "yuk_beruvchi" ? LOAD_TAB.id : FILTER_TAB.id);
 const ADMIN_TAB = { id: "admin", icon: "🛠", label: "Boshqaruv" };
 // Rolga qarab so'zlar
 const ROLE_TEXT = {
@@ -67,7 +73,7 @@ const loadDraftRequest = params.get("v") === LOAD_TAB.id && params.get("d") === 
 function rawFeedNote(profile) {
   const mode = FEED_MODES[feedMode(profile)];
   const how = mode.groups ? "tanlagan guruhlaringizdagi yuk e'lonlari" : "yuk e'lonlari";
-  const tail = mode.vehicle ? " Mos yuklar uchun Sozlamalarda transportingizni kiriting." : "";
+  const tail = mode.vehicle ? " Mos yuklar uchun «🎛 Filtr» da transportingizni kiriting." : "";
   return `${mode.icon} ${mode.name}: ${how} botga darhol keladi. Bu yerda — hammasi.${tail}`;
 }
 
@@ -75,6 +81,7 @@ export function App() {
   const [session, setSession] = useState({ status: "loading", me: null, error: null }); // loading | in | out | offline | signedOut | deleted | blocked
   const [config, setConfig] = useState(null);
   const [tab, setTab] = useState(requestedTab);
+  const [tabPicked, setTabPicked] = useState(false); // pastki menyudan bo'lim tanlandi
   const [view, setView] = useState("mine");
   const [toast, setToast] = useState(null);
   const [offlineRole, setOfflineRole] = useState(roleHint); // server bilan aloqa yo'q paytda tanlangan rol
@@ -153,7 +160,7 @@ export function App() {
     else setSession({ status: "out", me: null, error: null });
   }, [connect]);
 
-  const onNeedProfile = useCallback(() => setTab("sozlamalar"), []);
+  const onNeedProfile = useCallback(() => setTab(FILTER_TAB.id), []);
 
   // «🚪 Chiqish» dan keyin (server hisobdan chiqardi — store.signOut): «Hisobdan chiqdingiz» ekrani.
   // Saytda token ham o'chadi (qaytish — kirish sahifasi). Telegram'da token qoladi: «Qayta kirish» → «Siz kimsiz?»,
@@ -247,8 +254,8 @@ export function App() {
         setToast(`${ROLES[id].icon} Siz: ${ROLES[id].name}. Yukingizni shu yerda yuboring.`);
       } else {
         setView("all");
-        setTab("sozlamalar");
-        setToast(`${ROLES[id].icon} Siz: ${ROLES[id].name}. Endi sozlamalarni to'ldiring.`);
+        setTab(FILTER_TAB.id);
+        setToast(`${ROLES[id].icon} Siz: ${ROLES[id].name}. Endi filtrni to'ldiring.`);
       }
       window.scrollTo(0, 0);
     } catch (error) {
@@ -380,26 +387,31 @@ export function App() {
   // Server bilan aloqa yo'q (yoki Telegram ichida kirib bo'lmadi) — faqat sozlamalar: ular botga sendData bilan ketadi.
   // Admin bo'limi faqat server bilan aloqa bo'lsa (ma'lumot serverdan, huquq ham serverda tekshiriladi)
   // Yuk berish formasi ham botga sendData bilan yubora oladi (pastki menyu tugmasidan ochilganda)
-  const offlineTabs = role === "yuk_beruvchi" && canSendData ? [LOAD_TAB, SETTINGS_TAB] : [SETTINGS_TAB];
+  // Haydovchida oflayn faqat «🎛 Filtr» (raqam, akkaunt, hisob — server bilan)
+  const offlineTabs = role === "yuk_beruvchi" ? (canSendData ? [LOAD_TAB, SETTINGS_TAB] : [SETTINGS_TAB]) : role === "haydovchi" ? [FILTER_TAB] : [SETTINGS_TAB];
   const tabs = online ? [...(ROLE_TABS[role] ?? []), ...(me.isAdmin ? [ADMIN_TAB] : [])] : offlineTabs;
-  const current = tabs.some((t) => t.id === tab) ? tab : (tabs[0]?.id ?? null);
+  // ?p= dagi profil faqat o'sha rolniki bo'lsa (rol keyin almashtirilgan bo'lishi mumkin)
+  const initialProfile = role === profileRole ? decodeProfile(params.get("p"), { scope, role }) : null;
+  // Ro'yxatdan o'tmagan haydovchi (botdagi «🚚 Ro'yxatdan o'tish» ?v=sozlamalar bilan ochadi) — «🎛 Filtr» dagi qadamlarga
+  const unregisteredDriver = role === "haydovchi" && !(me?.profile ?? initialProfile);
+  // (faqat manzildan kelganda — pastki menyudan «⚙️ Sozlamalar» ni o'zi bossa, raqam/akkaunt ochilaveradi)
+  const wanted = unregisteredDriver && !tabPicked && !tgAccountsRequest && tab === SETTINGS_TAB.id ? FILTER_TAB.id : tab;
+  const current = tabs.some((t) => t.id === wanted) ? wanted : (tabs[0]?.id ?? null);
   const switchTab = (id) => {
     haptic.select();
     // Rol almashtirish oynasida pastki menyu ko'rinadi (rol tanlangan hisobda) — tab bosilsa o'sha oyna yopiladi,
     // aks holda sahifa o'zgarmas qolardi (Azimjon, 2026-11-12)
     if (changingRole) setChangingRole(false);
+    setTabPicked(true);
     setTab(id);
     window.scrollTo(0, 0);
   };
-  // ?p= dagi profil faqat o'sha rolniki bo'lsa (rol keyin almashtirilgan bo'lishi mumkin)
-  const initialProfile = role === profileRole ? decodeProfile(params.get("p"), { scope, role }) : null;
   // Ro'yxatdan o'tish (qadamlar) faqat haydovchida: yuk beruvchi uchun sozlamalar ixtiyoriy va bitta sahifa
   // (Azimjon, 2026-11-12: «yuk beruvchi uchun Ro'yxatdan o'tish kerak emas — bu funksionallikni olib tashla»)
-  const registering =
-    role === "haydovchi" && !changingRole && current === "sozlamalar" && !(me?.profile ?? initialProfile);
+  const registering = unregisteredDriver && !changingRole && current === FILTER_TAB.id;
   // Ro'yxat / xarita / boshqaruv so'ralgan, lekin server bilan aloqa yo'q
   const listNotice =
-    !online && requestedTab && requestedTab !== "sozlamalar" && !offlineTabs.some((t) => t.id === requestedTab) ? (
+    !online && requestedTab && !["sozlamalar", FILTER_TAB.id].includes(requestedTab) && !offlineTabs.some((t) => t.id === requestedTab) ? (
       <div className="notice">
         {session.status === "offline"
           ? "Server bilan aloqa yo'q — ro'yxat hozir ochilmaydi. Sozlamalarni baribir saqlashingiz mumkin: ular botga yuboriladi."
@@ -434,17 +446,21 @@ export function App() {
     );
   } else if (!role || changingRole) {
     page = <RolePage current={changingRole ? role : null} busy={busy} onPick={pickRole} onCancel={changingRole ? () => setChangingRole(false) : null} />;
-  } else if (current === "sozlamalar") {
-    const settingsKey = `${me?.chatId ?? "offline"}-${role}`;
-    const settingsProps = { me, initialProfile, scope, onSaved, roleLine };
+  } else if (current === FILTER_TAB.id) {
+    // «🎛 Filtr»: rejim (hamma / tanlangan guruhlar), mashina turi, qayerdan, guruhlar (🌍 Global / 👤 Akkauntimdagi)
     page = (
       <>
         {listNotice}
-        {role === "yuk_beruvchi" ? (
-          <ShipperSettings key={settingsKey} me={me} initialProfile={initialProfile} scope={scope} onSaved={onSaved} />
-        ) : (
-          <SettingsPage key={settingsKey} {...settingsProps} />
-        )}
+        <SettingsPage key={`${me?.chatId ?? "offline"}-${role}`} me={me} initialProfile={initialProfile} scope={scope} onSaved={onSaved} roleLine={roleLine} />
+      </>
+    );
+  } else if (current === "sozlamalar") {
+    const settingsKey = `${me?.chatId ?? "offline"}-${role}`;
+    page = (
+      <>
+        {listNotice}
+        {/* Haydovchida filtr — alohida «🎛 Filtr» bo'limida; bu yerda faqat raqam, Telegram akkaunt, ilova va hisob */}
+        {role === "yuk_beruvchi" && <ShipperSettings key={settingsKey} me={me} initialProfile={initialProfile} scope={scope} onSaved={onSaved} />}
         {online && !registering && (
           <PhoneCard
             me={me}
@@ -534,7 +550,7 @@ export function App() {
       </header>
 
       <main>
-        {me && !me.active && me.profile && role === "haydovchi" && showTabs && !["sozlamalar", "admin", LOAD_TAB.id].includes(current) && (
+        {me && !me.active && me.profile && role === "haydovchi" && showTabs && !["sozlamalar", FILTER_TAB.id, "admin", LOAD_TAB.id].includes(current) && (
           <div className="notice">⏸ Pauzadasiz: botga yangi {ROLE_TEXT[role].many} kelmaydi. Bu yerda ko'rish mumkin.</div>
         )}
         {page}

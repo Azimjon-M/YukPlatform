@@ -61,3 +61,19 @@ test("feedSources: ochiq va yopiq guruhlar; yopig'ini Pro yoki o'zi qo'shgan ko'
   assert.deepEqual(store.allowedFeedSources(10, ["-1002222222", "-1001111111"]), ["-1002222222"], "o'zi qo'shgani — Pro'siz ham");
   assert.equal(store.sourceTitles()["-1002222222"], "O'z yopig'im");
 });
+
+test("feedSources own: o'z Telegram akkaunti a'zo bo'lgan guruh/kanal (id yoki @username bo'yicha) va o'zi qo'shgani — 👤 Akkauntimdagi", () => {
+  const { store } = setup();
+  store.addSource("@TutGruz");
+  store.addSource("@Mening_kanalim");
+  store.addSource("-1003333333", { account: "u9-1", title: "A'zo yopiq guruhim" });
+  store.saveDriver(10, { name: "A", role: "haydovchi" });
+  store.setTgAccountOwner("u9-1", 10);
+  store.setTgDialogs("u9-1", [
+    { id: "-1003333333", title: "A'zo yopiq guruhim", type: "supergroup" },
+    { id: "-1004444444", title: "Kanalim", username: "mening_kanalim", type: "channel" },
+  ]);
+  const own = (chatId, opts) => Object.fromEntries(store.feedSources(chatId, opts).map((s) => [s.name, s.own]));
+  assert.deepEqual(own(10, { pro: true }), { "@TutGruz": false, "@Mening_kanalim": true, "-1003333333": true });
+  assert.deepEqual(own(20, { pro: true }), { "@TutGruz": false, "@Mening_kanalim": false, "-1003333333": false }, "begonada own yo'q");
+});

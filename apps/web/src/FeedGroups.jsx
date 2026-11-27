@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { foldText } from "@yuk/shared";
 import { getFeedSources } from "./api.js";
-import { CLOSED_PRO_HINT, groupOptions, pageOf } from "./feedGroups.js";
+import { CLOSED_PRO_HINT, GROUP_SCOPES, OWN_EMPTY_HINT, groupOptions, pageOf, scopeOptions } from "./feedGroups.js";
 import { Chips, Section, Spinner } from "./ui.jsx";
 
 export { CLOSED_PRO_HINT, GROUPS_PAGE_SIZE, groupOptions, pageOf, sourceNamer } from "./feedGroups.js";
@@ -19,6 +19,7 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
   const [state, setState] = useState({ list: [], loading: online, error: null, pro: false });
   const [q, setQ] = useState("");
   const [kind, setKind] = useState("open"); // open — 🌐 ochiq, closed — 🔒 yopiq
+  const [scope, setScope] = useState("all"); // all — 🌍 Global, own — 👤 Akkauntimdagi
   const [notice, setNotice] = useState(null);
   const [pageAt, setPageAt] = useState({ key: "", page: 0 }); // sahifa; qidiruv yoki bo'lim o'zgarsa — birinchisi
   const topRef = useRef(null);
@@ -42,13 +43,14 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
     };
   }, [online, onList, onAuthLost]);
 
-  const options = useMemo(() => groupOptions(state.list, chosen), [state.list, chosen]);
+  const allOptions = useMemo(() => groupOptions(state.list, chosen), [state.list, chosen]);
+  const options = scopeOptions(allOptions, scope);
   const closedCount = options.filter((o) => o.closed).length;
   const tab = kind === "closed" && closedCount ? "closed" : "open";
   const inTab = options.filter((o) => (tab === "closed") === o.closed);
   const query = foldText(q.trim());
   const shown = query ? inTab.filter((o) => o.search.includes(query)) : inTab;
-  const pageKey = `${tab}|${query}`;
+  const pageKey = `${scope}|${tab}|${query}`;
   const paged = pageOf(shown, pageAt.key === pageKey ? pageAt.page : 0);
   const goPage = (page) => {
     setPageAt({ key: pageKey, page });
@@ -56,8 +58,9 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
   };
   const picked = (id) => chosen.some((n) => n.toLowerCase() === id.toLowerCase());
   const pickedIn = (closed) => options.filter((o) => o.closed === closed && picked(o.id)).length;
+  const pickedScope = (id) => scopeOptions(allOptions, id).filter((o) => picked(o.id)).length;
   const pick = (id) => {
-    const option = options.find((o) => o.id === id);
+    const option = allOptions.find((o) => o.id === id);
     if (option?.disabled) return setNotice(CLOSED_PRO_HINT);
     setNotice(null);
     onToggle(id);
@@ -73,6 +76,19 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
       {chosen.length > 0 && <p className="summary">Tanlangan: {chosen.length} ta</p>}
       {!online && <p className="hint">Guruhlar ro'yxati internet orqali ochiladi — hozir faqat tanlanganlari ko'rinadi.</p>}
       {state.error && <p className="hint">Ro'yxat ochilmadi: {state.error.message}</p>}
+      {online && !state.loading && !state.error && (
+        <div className="seg" role="tablist" aria-label="Qaysi ro'yxatdan">
+          {GROUP_SCOPES.map(({ id, label }) => {
+            const n = pickedScope(id);
+            return (
+              <button key={id} type="button" role="tab" aria-selected={scope === id} className={scope === id ? "on" : ""} onClick={() => setScope(id)}>
+                {label} · {scopeOptions(allOptions, id).length}
+                {n > 0 && <span className="seg-count">✓{n}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {closedCount > 0 && (
         <div className="seg" role="tablist" aria-label="Guruh turi">
           {[
@@ -112,7 +128,7 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
           )}
         </>
       ) : (
-        <p className="hint">{query ? "Bunday guruh topilmadi." : "Hozircha tanlasa bo'ladigan guruh yo'q."}</p>
+        <p className="hint">{query ? "Bunday guruh topilmadi." : scope === "own" ? OWN_EMPTY_HINT : "Hozircha tanlasa bo'ladigan guruh yo'q."}</p>
       )}
     </Section>
   );

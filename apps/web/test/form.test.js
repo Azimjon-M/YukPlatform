@@ -212,6 +212,21 @@ test("«📌 Mening guruhlarim» ro'yxati: yopiq guruh belgisi, Pro'siz — tanl
   ]);
 });
 
+test("guruhlar: 🌍 Global — hammasi, 👤 Akkauntimdagi — faqat o'z akkaunti a'zo bo'lganlari (own); tanlangan, ro'yxatda yo'q — globalda", async () => {
+  const { groupOptions, scopeOptions, GROUP_SCOPES } = await import("../src/feedGroups.js");
+  const options = groupOptions(
+    [
+      { name: "@TutGruz", title: "Tut Gruz", perDay: 3, closed: false, locked: false, own: false },
+      { name: "-1002", title: "O'zimning yopiq guruhim", perDay: 1, closed: true, locked: false, own: true },
+      { name: "@mening_kanalim", title: "Kanalim", perDay: 2, closed: false, locked: false, own: true },
+    ],
+    ["@eski_guruh"],
+  );
+  assert.deepEqual(GROUP_SCOPES.map((g) => g.id), ["all", "own"]);
+  assert.deepEqual(scopeOptions(options, "all").map((o) => o.id), ["@eski_guruh", "@TutGruz", "-1002", "@mening_kanalim"]);
+  assert.deepEqual(scopeOptions(options, "own").map((o) => o.id), ["-1002", "@mening_kanalim"], "ochiq ham, yopiq ham");
+});
+
 test("«📌 Mening guruhlarim» qidiruvi kirill/lotin farqisiz", async () => {
   const { groupOptions } = await import("../src/feedGroups.js");
   const { foldText } = await import("@yuk/shared");

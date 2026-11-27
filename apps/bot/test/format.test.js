@@ -95,39 +95,3 @@ test("yopiq guruh: matnda raqam yo'q — yozgan odamning profil raqami ko'rsatil
   assert.match(formatLoad({ fromCity: "Toshkent", toCity: "Samarqand", phones: [] }, post).text, /yozgan odamning Telegram raqami/);
 });
 
-test("tugma matni: emoji o'rtasidan kesilmaydi (2026-11-26 — guruh tanlash ochilmay qolgan edi)", async () => {
-  const { cut } = await import("../src/feed.js");
-  const name = "Yuk tashish xizmati 24/7 🚛🇺🇿 Toshkent";
-  const short = cut(name, 26);
-  assert.ok(short.isWellFormed());
-  assert.ok(short.endsWith("…"));
-  assert.equal(cut("Qisqa nom", 26), "Qisqa nom");
-  assert.ok(cut("buzuq \uD83D nom", 26).isWellFormed(), "oldindan buzuq belgi ham tozalanadi");
-  // har qanday joydan kesilganda ham butun
-  const emoji = "🚛".repeat(40);
-  for (let n = 2; n < 30; n++) assert.ok(cut(emoji, n).isWellFormed());
-});
-
-test("guruh tanlash: avval 🌍 Global / 👤 Akkauntimdagi; akkaunt ulanmagan — darhol ro'yxat (2026-11-26)", async () => {
-  const { groupStep } = await import("../src/feed.js");
-  const list = [
-    { name: "@ochiq_umumiy", perDay: 9, closed: false, own: false },
-    { name: "@ochiq_meniki", perDay: 3, closed: false, own: true },
-    { name: "-1001", title: "Yopiq meniki", perDay: 2, closed: true, own: true },
-  ];
-  const first = groupStep({ list, chosen: ["@ochiq_meniki"] });
-  assert.equal(first.scope, null);
-  assert.deepEqual(first.keyboard.map((row) => row[0].data), ["fg:s:all", "fg:s:own", "fg:ok"]);
-  assert.match(first.keyboard[1][0].text, /Akkauntimdagi · 2 \(✅1\)/);
-  const own = groupStep({ list, scope: "own" });
-  const names = own.keyboard.flat().map((b) => b.data);
-  assert.ok(!names.includes("fg:t:@ochiq_umumiy"), "global guruh ko'rinmaydi");
-  assert.ok(names.includes("fg:t:@ochiq_meniki"));
-  assert.equal(own.keyboard[0][0].data, "fg:s:-", "orqaga");
-  const global = groupStep({ list, scope: "all" });
-  assert.ok(global.keyboard.flat().some((b) => b.data === "fg:t:@ochiq_umumiy"));
-  // akkaunti yo'q — tanlov bosqichisiz
-  const plain = groupStep({ list: list.map((s) => ({ ...s, own: false })) });
-  assert.equal(plain.scope, "all");
-  assert.ok(!plain.keyboard.flat().some((b) => b.data === "fg:s:-"));
-});

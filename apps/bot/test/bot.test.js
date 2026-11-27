@@ -99,7 +99,8 @@ test("tugmalar bilan to'liq ro'yxatdan o'tish (eski saralangan oqimi) va /pauza"
   await command("/start");
   // 2026-11-19: yangi haydovchi darhol tezkor; mashina ustasi ichkarida qoldi — eski profilsiz haydovchi uchun shu yerda
   store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
-  for (const data of ["fm:saralangan", "w:class:isuzu", "w:class:ok", "w:body:tent", "w:capacity:5", "w:size:std", "w:sides:t.orqa", "w:sides:ok", "w:intl:yoq"]) {
+  await message(PRIVATE, MENU.register); // appUrl yo'q — chatda savol-javob (filtr 2026-11-27 dan ilovada)
+  for (const data of ["w:class:isuzu", "w:class:ok", "w:body:tent", "w:capacity:5", "w:size:std", "w:sides:t.orqa", "w:sides:ok", "w:intl:yoq"]) {
     await press(data);
   }
   assert.equal(store.getDriver(42).draft.step, "done", "yo'nalish va «qaysi yuklar» savollari yo'q");
@@ -139,7 +140,8 @@ test("sig'imni matn bilan yozish, noto'g'ri bo'lsa qayta so'raydi", async () => 
   const { store, calls, command, press, message } = setup();
   await command("/start");
   await press("r:haydovchi");
-  await press("fm:saralangan");
+  store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
+  await message(PRIVATE, MENU.register);
   await press("w:class:mini_fura");
   await press("w:class:ok");
   await press("w:body:tent");
@@ -225,8 +227,6 @@ test("haydovchi «✍️ Shu chatga yozish»: matn → AI → preview → tasdiq
 
   // 2026-11-19: yangi haydovchi darhol tezkor — bu (eski saralangan) oqim faqat profilsiz haydovchida qolgan
   store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
-  await press("fm:saralangan"); // appUrl bor — wizard boshlanmaydi, 2 yo'l taklif qilinadi
-  assert.match(texts(calls).at(-1), /Shu chatga yozish/);
 
   // Tugma bosildi — namuna chiqadi, profil hali yo'q
   calls.length = 0;
@@ -256,7 +256,6 @@ test("haydovchi matni tushunarsiz — xato, keyin aniqroq yozsa preview; AI band
   const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP }, parseLoad: async () => reply });
 
   store.saveDriver(42, { role: "haydovchi", profile: null, active: false }); // eski saralangan oqimi (2026-11-19)
-  await press("fm:saralangan");
   await message(PRIVATE, MENU.writeHere);
 
   // Tushunmadi (truckClass yo'q) — xato, profil saqlanmaydi, lekin rejim saqlanadi (qaytadan yozsa bo'ladi)
@@ -303,15 +302,9 @@ test("pastki menyu: rol tanlanmaguncha yo'q, rol tanlangach Mini App tugmasi, sa
   // Eski (profilsiz) saralangan oqimi — ichkarida qoldi
   store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
   calls.length = 0;
-  await press("fm:saralangan");
+  await message(PRIVATE, MENU.register);
   assert.equal(texts(calls).length, 1);
-  assert.equal(
-    texts(calls)[0],
-    "🎯 Saralangan: mashinangiz va yo'nalishingizga mos yuklar keladi.\n\n" +
-      "Ro'yxatdan o'tishning 2 yo'li bor:\n" +
-      `• «${MENU.register}» — 1 daqiqalik forma;\n` +
-      `• «${MENU.writeHere}» — mashinangizni shu chatga oddiy yozasiz, qolganini men qilaman.`,
-  );
+  assert.match(texts(calls)[0], /forma ochiladi/);
   const markup = lastMarkup(calls);
   assert.equal(markup.is_persistent, undefined); // yig'iladigan: yozish qatoridagi belgi menyuni ochib-yopadi
   assert.equal(markup.resize_keyboard, true);
@@ -541,7 +534,8 @@ test("menyu tugmasi savol-javob o'rtasida ham ishlaydi, qoralama qoladi", async 
   const { store, calls, command, press, message } = setup();
   await command("/start");
   await press("r:haydovchi");
-  await press("fm:saralangan");
+  store.saveDriver(42, { role: "haydovchi", profile: null, active: false });
+  await message(PRIVATE, MENU.register);
   await press("w:class:isuzu");
   await press("w:class:ok");
   await message(PRIVATE, MENU.apps);
@@ -1654,149 +1648,14 @@ test("rejim: yangi haydovchi darhol «🌐 Hamma guruhlar» (filtrsiz), menyuda 
   assert.equal(store.activeUsers("haydovchi").length, 1, "mashinasiz ham faol");
   await message(PRIVATE, MENU.loads);
   assert.match(texts(calls).at(-1), /darhol shu yerga keladi \(🌐 Hamma guruhlar\)/);
-  // Rejim oynasi — uch filtr tugmasi va «✅ Tayyor» (eski rejim tugmalari yo'q)
-  await message(PRIVATE, MENU.feed);
-  const picker = calls.filter((c) => c.method === "sendMessage").at(-1);
-  assert.match(picker.payload.text, /Qaysi yuklar kelsin[\s\S]*Mashina: <b>Hammasi[\s\S]*Qayerdan: <b>Hamma joy[\s\S]*Guruhlar: <b>Hamma guruhlar/);
-  assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["ft:open", "fm:hududim", "fm:tezkor", "fm:guruhlarim", "fm:done"]);
-  assert.deepEqual(inlineButtons(picker).slice(2, 4).map((b) => b.text), ["✅ 🌐 Hamma guruhlar", "📌 Guruh tanlash"]);
-  // «✅ Tayyor» — oyna o'sha xabarning o'zida yakuniy matnga aylanadi
-  await press("fm:done");
-  assert.match(texts(calls, "editMessageText").at(-1), /✅ <b>Tayyor!<\/b>/);
-});
-
-test("rejim: eski «⚡ Tezkorni o'chirish» tugmasi (menyu va oyna) — tushuntiriladi, rejim o'zgarmaydi", async () => {
-  const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP } });
-  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
-  await message(PRIVATE, MENU.fastOff);
-  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
-  assert.ok(texts(calls).some((t) => /Yuklar endi doim darhol keladi/.test(t)));
-  await press("fm:off");
-  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
-  assert.equal(menuRows(calls)[0][0], MENU.feed, "birinchi tugma — «🎛 Rejim»");
-});
-
-test("rejim: «📍 Qayerdan» — viloyatlar ixtiyoriy (bo'sh — hamma joy); saqlangach oynaga qaytadi; eski «hududim» — tezkor + viloyat", async () => {
-  const { store, calls, press } = setup({ config: { miniappUrl: MINIAPP } });
-  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: false, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
-  await press("fm:hududim");
-  // Ro'yxat rejim oynasining o'zida ochiladi (yangi xabar emas)
-  const picker = calls.filter((c) => c.method === "editMessageText").at(-1);
-  assert.match(picker.payload.text, /Yuk qayerdan ketsin/);
-  assert.ok(inlineButtons(picker).some((b) => b.callback_data === "fr:t:samarqand"));
-  await press("fr:t:samarqand");
-  await press("fr:t:buxoro");
-  await press("fr:t:buxoro"); // qayta bosilsa — olinadi
-  assert.match(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).find((b) => b.callback_data === "fr:t:samarqand").text, /^✅/);
-  await press("fr:ok");
-  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "✅ Saqlandi");
-  assert.deepEqual(store.getDriver(42).profile.feed, { mode: "tezkor", sources: [], regions: ["samarqand"] });
-  assert.equal(store.getDriver(42).active, false, "filtr saqlash pauzani yechmaydi");
-  const back = calls.filter((c) => c.method === "editMessageText").at(-1);
-  assert.match(back.payload.text, /Qayerdan: <b>Samarqand viloyati<\/b>/, "rejim oynasiga qaytdi");
-  // Qayta ochilsa — tanlov o'sha holatda; «Hamma joy» — tozalaydi
-  await press("fm:hududim");
-  assert.match(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).find((b) => b.callback_data === "fr:t:samarqand").text, /^✅/);
-  await press("fr:all");
-  await press("fr:ok");
-  assert.deepEqual(store.getDriver(42).profile.feed, { mode: "tezkor", sources: [] });
-  // Eski profil (hududim) — tezkor + o'sha viloyatlar
-  const { feedOf } = await import("@yuk/shared");
-  assert.deepEqual(feedOf({ feed: { mode: "hududim", sources: [], regions: ["buxoro"] } }), { mode: "tezkor", sources: [], regions: ["buxoro"], trucks: [] });
-});
-
-test("rejim: «🚚 Transport» — to'rt tur, ixtiyoriy; boshqa filtr va guruhlar o'zgarmaydi", async () => {
-  const { store, calls, press } = setup({ config: { miniappUrl: MINIAPP } });
-  store.addSource("@TutGruz");
-  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "guruhlarim", sources: ["@TutGruz"], regions: ["buxoro"] } } });
-  await press("ft:open");
-  const picker = calls.filter((c) => c.method === "editMessageText").at(-1);
-  assert.match(picker.payload.text, /Mashinangiz qaysi/);
-  assert.deepEqual(inlineButtons(picker).map((b) => b.callback_data), ["ft:t:fura", "ft:t:isuzu", "ft:t:bongo", "ft:t:labo", "ft:all", "ft:ok"]);
-  await press("ft:t:isuzu");
-  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "✅ Tanlandi: Isuzu");
-  await press("ft:t:labo");
-  await press("ft:ok");
-  assert.deepEqual(store.getDriver(42).profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"], regions: ["buxoro"], trucks: ["isuzu", "labo"] });
-  assert.match(calls.filter((c) => c.method === "editMessageText").at(-1).payload.text, /Mashina: <b>Isuzu, Labo \/ Damas<\/b>/);
-  // Eski xabardagi «⬅️ Orqaga» ham saqlaydi (2026-11-19: haydovchi tanlab «Orqaga» bosdi — tanlov yo'qolgan edi)
-  await press("ft:open");
-  await press("ft:t:fura");
-  await press("ft:back");
-  assert.deepEqual(store.getDriver(42).profile.feed.trucks, ["fura", "isuzu", "labo"]);
-  await press("ft:open");
-  await press("ft:t:fura");
-  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "▫️ Olib tashlandi: Fura");
-  await press("ft:ok");
-  assert.deepEqual(store.getDriver(42).profile.feed.trucks, ["isuzu", "labo"]);
-  // Guruhlar rejimidan «🌐 Hamma guruhlardan olish» — filtrlar qoladi
-  await press("fm:tezkor");
-  assert.deepEqual(store.getDriver(42).profile.feed, { mode: "tezkor", sources: [], regions: ["buxoro"], trucks: ["isuzu", "labo"] });
-  // Eskirgan ro'yxat (bot qayta yoqilgandek)
-  const fresh = setup();
-  fresh.store.saveDriver(42, { role: "haydovchi", profile: store.getDriver(42).profile, active: true });
-  await fresh.press("ft:ok");
-  assert.match(fresh.calls.find((c) => c.method === "answerCallbackQuery").payload.text, /eskirgan/);
-});
-
-test("rejim: «📌 Guruhlar» — ro'yxatdan tanlash, kamida bitta; saqlangach oynaga qaytadi, menyuda «📌 Guruhlarim»", async () => {
-  const { store, calls, press, message } = setup({ config: { miniappUrl: MINIAPP } });
-  store.addSource("@TutGruz");
-  store.addSource("@Yuk_markazi");
-  store.addSource("@Ochirilgan_guruh", { enabled: false });
-  await press("r:haydovchi");
-  await press("fm:guruhlarim");
-  const picker = calls.filter((c) => c.method === "editMessageText").at(-1); // rejim oynasining o'zida
-  assert.match(picker.payload.text, /Qaysi guruhlardan/);
-  const data = inlineButtons(picker).map((b) => b.callback_data);
-  assert.ok(data.includes("fg:t:@TutGruz") && data.includes("fg:t:@Yuk_markazi"));
-  assert.ok(!data.includes("fg:t:@Ochirilgan_guruh"), "o'chirilgan guruh ro'yxatda yo'q");
-  // Hech narsa tanlamay chiqsa — «🌐 Hamma guruhlar» qoladi
-  await press("fg:ok");
-  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "Guruh tanlanmadi — 🌐 hamma guruhlardan");
-  assert.equal(store.getDriver(42).profile.feed.mode, "tezkor");
-  await press("fm:guruhlarim");
-  // «☑️ Hammasini tanlash» — ochiq va yopiq hammasi; qayta bosilsa — tozalanadi
-  await press("fg:all");
-  assert.equal(calls.filter((c) => c.method === "answerCallbackQuery").at(-1).payload.text, "☑️ 2 ta guruh tanlandi");
-  assert.ok(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).some((b) => b.text === "▫️ Hammasini olib tashlash"));
-  await press("fg:all");
-  assert.ok(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).some((b) => b.text === "☑️ Hammasini tanlash (2 ta)"));
-  await press("fg:t:@TutGruz");
-  assert.match(inlineButtons(calls.filter((c) => c.method === "editMessageText").at(-1)).find((b) => b.callback_data === "fg:t:@TutGruz").text, /^✅ @TutGruz/);
-  await press("fg:t:@Ochirilgan_guruh"); // eski/soxta tugma — tanlanmaydi
-  await press("fg:ok");
-  assert.deepEqual(store.getDriver(42).profile.feed, { mode: "guruhlarim", sources: ["@TutGruz"] });
-  const back = calls.filter((c) => c.method === "editMessageText").at(-1);
-  assert.match(back.payload.text, /Guruhlar: <b>tanlangan 1 ta<\/b>/);
-  assert.deepEqual(inlineButtons(back).filter((b) => b.callback_data.startsWith("fm:") && b.callback_data !== "fm:done" && b.callback_data !== "fm:hududim").map((b) => b.text), ["🌐 Hamma guruhlar", "✅ 📌 Tanlangan: 1 ta"]);
-  await press("fm:done");
-  assert.match(texts(calls, "editMessageText").at(-1), /Tayyor![\s\S]*Guruhlar: <b>tanlangan 1 ta<\/b>/);
-  await message(PRIVATE, PHONE.later);
-  assert.deepEqual(menuRows(calls), [[MENU.feed, MENU.pause], [MENU.role, MENU.phone], [MENU.help, MENU.settings]], "guruh rejimida ham bir xil menyu");
-  // Eski menyudagi «📌 Guruhlarim» va «🎛 Rejim» ham ishlaydi; guruhlar — tanlov o'sha holatda ochiladi
-  await message(PRIVATE, "🎛 Rejim");
-  assert.match(calls.filter((c) => c.method === "sendMessage").at(-1).payload.text, /Qaysi yuklar kelsin/);
-  await message(PRIVATE, MENU.groups);
-  const again = inlineButtons(calls.filter((c) => c.method === "sendMessage").at(-1));
-  assert.match(again.find((b) => b.callback_data === "fg:t:@TutGruz").text, /^✅/);
-  // Bot qayta yoqilgandek (tanlov xotirada yo'q) — «eskirgan»
-  const fresh = setup();
-  fresh.store.saveDriver(42, { role: "haydovchi", profile: store.getDriver(42).profile, active: true });
-  await fresh.press("fg:ok");
-  assert.match(fresh.calls.find((c) => c.method === "answerCallbackQuery").payload.text, /eskirgan/);
-});
-
-test("rejim: eski «Guruhlarim + saralangan» tugmasi — mashinasi bor bo'lsa mashina qoladi", async () => {
-  const { store, press } = setup({ config: { miniappUrl: MINIAPP } });
-  store.addSource("@TutGruz");
-  store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, fromAreas: [] }, active: true, phoneAskedAt: 1 });
-  await press("fm:guruhlarim_plus");
-  await press("fg:t:@TutGruz");
-  await press("fg:ok");
-  const { profile } = store.getDriver(42);
-  assert.equal(profile.vehicle.truckClass, "isuzu", "mashina qoladi");
-  assert.deepEqual(profile.feed, { mode: "guruhlarim_plus", sources: ["@TutGruz"] });
+  // «🎛 Filtr» (2026-11-27) — chatda oyna yo'q: pastki menyu tugmasi ilovaning «🎛 Filtr» bo'limini ochadi
+  const feedButton = buttons(lastMarkup(calls)).find((b) => b.text === MENU.feed);
+  assert.match(feedButton.web_app.url, /[?&]v=filtr(&|$)/);
+  await message(PRIVATE, MENU.feed); // eski menyudan oddiy matn bo'lib kelsa — ilovani ochadigan inline tugma
+  const reply = calls.filter((c) => c.method === "sendMessage").at(-1);
+  assert.match(reply.payload.text, /Filtr ilovada/);
+  assert.equal(inlineButtons(reply)[0].web_app.url, `${MINIAPP}?v=filtr&r=haydovchi`);
+  assert.ok(!inlineButtons(reply).some((b) => b.callback_data), "chat-filtr tugmalari yo'q");
 });
 
 test("rejim: Mini App formasi rejimni yubormasa — eskisi qoladi; begona guruh tanlovdan tushadi", async () => {
@@ -1828,19 +1687,35 @@ test("tezkor xabar (deliverRaw): asl matn, telefonlar, «📄 Asl e'lon» va e'l
   assert.deepEqual(links, [{ postId: 77, phone: 0, chatId: 42 }]);
 });
 
-test("tezkor xabar: 3 s kutish paytida «🎛 Filtr» ochilsa yoki pauza bosilsa — yuborilmaydi", async () => {
+test("eski chat-filtr tugmalari (fm:/fg:/fr:/ft:), /rejim, «⚡ Tezkorni o'chirish» — ilovaga yo'naltiradi, filtr o'zgarmaydi, uzilish yechiladi", async () => {
+  const { store, calls, press, message, command, isBusy } = setup({ config: { miniappUrl: MINIAPP } });
+  const feed = { mode: "guruhlarim", sources: ["@TutGruz"], regions: ["samarqand"] };
+  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed } });
+  store.setHold(42, "filtr"); // eski chat oynasi ochiq qolgan
+  for (const send of [() => press("fm:done"), () => press("fg:t:@TutGruz"), () => press("fr:ok"), () => press("ft:open"), () => command("/rejim"), () => message(PRIVATE, MENU.fastOff), () => message(PRIVATE, MENU.groups)]) {
+    calls.length = 0;
+    await send();
+    assert.match(texts(calls).at(-1), /Filtr ilovada/);
+  }
+  assert.equal(store.getDriver(42).hold, null);
+  assert.equal(isBusy(42), false);
+  assert.deepEqual(store.getDriver(42).profile.feed.sources, ["@TutGruz"], "filtr o'zgarmadi");
+  assert.deepEqual(store.getDriver(42).profile.feed.regions, ["samarqand"]);
+});
+
+test("tezkor xabar: 3 s kutish paytida oyna (raqam so'rovi) ochilsa yoki pauza bosilsa — yuborilmaydi", async () => {
   const { store, calls, deliverRaw, message } = setup({});
   store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true });
   const post = { id: 78, source: "@TutGruz", link: "https://t.me/TutGruz/6", text: "Toshkentdan Samarqandga 20 t un bor\n90 000 00 01", postedAt: Date.now() };
   assert.equal((await deliverRaw(42, post, { phones: [] })).ok, true);
   const sentCount = () => calls.filter((c) => c.method === "sendMessage" && /un bor/.test(c.payload.text)).length;
   const waiting = deliverRaw(42, { ...post, id: 79 }, { phones: [] }); // oraliq tufayli kutadi
-  await message(PRIVATE, "🎛 Filtr");
+  await message(PRIVATE, MENU.addGroup); // raqami yo'q — raqam so'rovi oynasi ochiladi
   assert.equal((await waiting).ok, false);
   store.saveDriver(42, { active: false }); // pauza ham
   await message(PRIVATE, "/start"); // band holatini bo'shatmaydi, lekin pauza baribir to'xtatadi
   assert.equal((await deliverRaw(42, { ...post, id: 80 }, { phones: [] })).ok, false);
-  assert.equal(sentCount(), 1, "Filtr oynasidan keyin e'lon kelmadi");
+  assert.equal(sentCount(), 1, "oyna ochilgandan keyin e'lon kelmadi");
 });
 
 test("charxpalak: e'lon yo'lda turganda «⏸ Pauza» — «To'xtatildi» oxirgi xabar, keyingi e'lonlar kelmaydi; boshqalarga ketaveradi", async () => {
@@ -1868,27 +1743,7 @@ test("charxpalak: e'lon yo'lda turganda «⏸ Pauza» — «To'xtatildi» oxirgi
   assert.equal(arrived.filter((a) => a.startsWith("42:")).length, 2);
 });
 
-test("charxpalak: e'lon yo'lda turganda «🎛 Filtr» — oyna e'londan keyin chiqadi", async () => {
-  const arrived = [];
-  const { store, deliverRaw, message } = setup({
-    slow: async (method, payload) => {
-      if (method !== "sendMessage") return;
-      if (/un bor/.test(payload.text)) await new Promise((r) => setTimeout(r, 150));
-      arrived.push(/un bor/.test(payload.text) ? "e'lon" : payload.text.split("\n")[0]);
-    },
-  });
-  store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true });
-  const post = { id: 95, source: "@TutGruz", link: "https://t.me/TutGruz/9", text: "Toshkentdan Samarqandga 20 t un bor", postedAt: Date.now() };
-  const flying = deliverRaw(42, post, { phones: [] });
-  await new Promise((r) => setTimeout(r, 20));
-  await message(PRIVATE, MENU.feed);
-  await flying;
-  assert.equal(arrived[0], "e'lon");
-  assert.match(arrived.at(-1), /Qaysi yuklar kelsin/);
-  assert.equal((await deliverRaw(42, { ...post, id: 96 }, { phones: [] })).ok, false);
-});
-
-test("har qanday amal (/start, ❓ Yordam, tugma) chatni 60 s uzadi; «✅ Tayyor» / ▶️ darhol ulaydi; boshqa chat uzilmaydi", async () => {
+test("har qanday amal (/start, ❓ Yordam, tugma) chatni 60 s uzadi; ▶️ darhol ulaydi; boshqa chat uzilmaydi", async () => {
   const { store, deliverRaw, message, command, press, isBusy } = setup({ actionHoldMs: 60_000 });
   for (const id of [42, 43]) store.saveDriver(id, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
   const post = { id: 97, source: "@TutGruz", link: "https://t.me/TutGruz/9", text: "Toshkentdan Samarqandga 20 t un bor", postedAt: Date.now() };
@@ -1899,19 +1754,18 @@ test("har qanday amal (/start, ❓ Yordam, tugma) chatni 60 s uzadi; «✅ Tayyo
   assert.equal((await deliverRaw(43, { ...post, id: 98 }, { phones: [] })).ok, true, "boshqa haydovchiga ketaveradi");
   await message(PRIVATE, MENU.help);
   assert.equal(isBusy(42), true);
-  await message(PRIVATE, MENU.feed);
-  await press("fm:done");
-  assert.equal(isBusy(42), false, "«✅ Tayyor» — darhol ulanadi");
-  await press("fm:tezkor");
+  await message(PRIVATE, MENU.resume);
+  assert.equal(isBusy(42), false, "▶️ — darhol ulanadi");
+  await press("mr:back");
   assert.equal(isBusy(42), true, "tugma bosildi — yana uzildi");
 });
 
-test("ochiq amal: 🎛 Filtr ochilsa — «✅ Tayyor» bosilmaguncha e'lon kelmaydi (3 daqiqadan keyin ham), bot qayta yoqilsa ham", async () => {
+test("ochiq amal: oyna ochilsa — tugatilmaguncha e'lon kelmaydi (3 daqiqadan keyin ham), bot qayta yoqilsa ham", async () => {
   const { store, deliverRaw, message, press, isBusy } = setup({});
   store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
   const post = { id: 101, source: "@TutGruz", link: "https://t.me/TutGruz/9", text: "Toshkentdan Samarqandga 20 t un bor", postedAt: Date.now() };
-  await message(PRIVATE, MENU.feed);
-  assert.equal(store.getDriver(42).hold.kind, "filtr", "bazaga yozildi");
+  await message(PRIVATE, MENU.addGroup); // raqami yo'q — raqam so'rovi
+  assert.equal(store.getDriver(42).hold.kind, "raqam", "bazaga yozildi");
   // 10 daqiqa o'tdi (oxirgi bosish eskirdi) — baribir uzilgan
   store.setHold(42, "filtr");
   assert.equal(isBusy(42), true);
@@ -1924,29 +1778,29 @@ test("ochiq amal: 🎛 Filtr ochilsa — «✅ Tayyor» bosilmaguncha e'lon kelm
   // ❓ Yordam bosildi — amal hali tugamagan
   await message(PRIVATE, MENU.help);
   assert.equal(isBusy(42), true);
-  await press("fm:done");
+  await press("fm:done"); // eski chat-filtr xabaridagi «✅ Tayyor» — ilovaga yo'naltiradi va uzilishni yechadi
   assert.equal(store.getDriver(42).hold, null);
   assert.equal(isBusy(42), false);
   assert.equal((await deliverRaw(42, { ...post, id: 102 }, { phones: [] })).ok, true);
 });
 
 test("ochiq amal: oyna Telegram'da ochilmasa (400) — chat uzilib qolmaydi, e'lonlar kelaveradi (2026-11-26, #303983)", async () => {
-  // 26.11 19:00: «🎛 Filtr» oynasi Telegram'dan 400 qaytardi — odam oynani ko'rmadi, uzilish bazada 1,5 soat qoldi
+  // 26.11 19:00: oyna («📌 Guruh tanlash») Telegram'dan 400 qaytardi — odam oynani ko'rmadi, uzilish bazada 1,5 soat qoldi
   let broken = true;
   const { store, deliverRaw, message, isBusy } = setup({
     fail: (method, p) =>
-      broken && method === "sendMessage" && p.reply_markup?.inline_keyboard && { ok: false, error_code: 400, description: "Bad Request: inline keyboard button text must be encoded in UTF-8" },
+      broken && method === "sendMessage" && { ok: false, error_code: 400, description: "Bad Request: inline keyboard button text must be encoded in UTF-8" },
   });
   store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
-  await assert.rejects(message(PRIVATE, MENU.feed), /UTF-8/);
+  await assert.rejects(message(PRIVATE, MENU.addGroup), /UTF-8/); // raqam so'rovi oynasi
   assert.equal(store.getDriver(42).hold, null, "uzilish bazada qolmadi");
   assert.equal(isBusy(42), false);
   const post = { id: 103, source: "@yukkdehqonobod", link: "https://t.me/yukkdehqonobod/303983", text: "Qo'qondan Jizzaxga yuk bor 91 055 57 73", postedAt: Date.now() };
   broken = false;
   assert.equal((await deliverRaw(42, post, { phones: [] })).ok, true, "e'lon yetib boradi");
   // Oyna ochilsa — avvalgidek uziladi
-  await message(PRIVATE, MENU.feed);
-  assert.equal(store.getDriver(42).hold.kind, "filtr");
+  await message(PRIVATE, MENU.addGroup);
+  assert.equal(store.getDriver(42).hold.kind, "raqam");
 });
 
 test("e'lon matnida buzuq belgi (yarim emoji) — Telegram rad etmasin: matn tozalanib yetib boradi", async () => {
@@ -1964,7 +1818,7 @@ test("e'lon matnida buzuq belgi (yarim emoji) — Telegram rad etmasin: matn toz
 test("ochiq amal tashlab ketildi — 3 daqiqadan keyin BIR marta eslatma; «✅ Tugatish» — e'lonlar yana keladi", async () => {
   const { store, calls, press, message, isBusy, holdReminder } = setup({});
   store.saveDriver(42, { role: "haydovchi", profile: { ...PROFILE, vehicle: null, feed: { mode: "tezkor", sources: [] } }, active: true, phoneAskedAt: 1 });
-  await message(PRIVATE, MENU.feed);
+  await message(PRIVATE, MENU.addGroup); // raqam so'rovi
   await holdReminder.run();
   const reminders = () => calls.filter((c) => c.method === "sendMessage" && /hali tugamadi/.test(c.payload.text));
   assert.equal(reminders().length, 0, "hali erta");
@@ -1972,7 +1826,7 @@ test("ochiq amal tashlab ketildi — 3 daqiqadan keyin BIR marta eslatma; «✅ 
   await holdReminder.run();
   await holdReminder.run();
   assert.equal(reminders().length, 1, "bir marta");
-  assert.match(reminders()[0].payload.text, /🎛 Filtr/);
+  assert.match(reminders()[0].payload.text, /📱 Raqam ulashish/);
   assert.equal(reminders()[0].payload.reply_markup.inline_keyboard[0][0].callback_data, "hold:end");
   assert.equal(isBusy(42), true, "eslatmadan keyin ham e'lon kelmaydi");
   await press("hold:end");
@@ -1999,41 +1853,10 @@ test("«💬 Lichkasi» tugmasi: username'i yo'q, bot taniydigan odamga — ID b
   assert.deepEqual(voice.inline_keyboard.flat().map((b) => b.text), ["🎤 Tinglash", "💬 Lichkasi"]);
 });
 
-test("«📌 Qaysi guruhlardan?»: 🌐 Ochiq / 🔒 Yopiq bo'limlari; Pro bo'lmaganga yopig'i 🔒 · Pro", async () => {
-  const { groupStep, CLOSED_PRO_TEXT } = await import("../src/feed.js");
-  const list = [
-    { name: "@TutGruz", title: "Tut Gruz", perDay: 30, closed: false, locked: false },
-    { name: "-1001", title: "Yopiq ISUZU", perDay: 5, closed: true, locked: true },
-    { name: "-1002", title: "O'zimniki", perDay: 2, closed: true, locked: false, mine: true },
-  ];
-  const open = groupStep({ list, chosen: ["@TutGruz", "-1002"] });
-  const texts = (step) => step.keyboard.flat().map((b) => b.text);
-  assert.deepEqual(texts(open).slice(0, 2), ["● 🌐 Ochiq · 1 (✅1)", "🔒 Yopiq · 2 (✅1)"]);
-  assert.ok(texts(open).some((t) => t.startsWith("✅ Tut Gruz")));
-  assert.ok(!texts(open).some((t) => t.includes("Yopiq ISUZU")), "ochiq bo'limda yopiqlar yo'q");
-  const closed = groupStep({ list, chosen: ["-1002"], kind: "closed" });
-  assert.ok(texts(closed).includes("🔒 Yopiq ISUZU · Pro"));
-  assert.ok(texts(closed).some((t) => t.startsWith("✅ 🔒 O'zimniki")));
-  assert.ok(closed.text.includes(CLOSED_PRO_TEXT));
-  assert.ok(groupStep({ list, kind: "closed", pro: true }).text.includes("Pro foydalanuvchi sifatida"));
-  // Yopiq guruh umuman yo'q — bo'lim tugmalari yo'q
-  assert.ok(!texts(groupStep({ list: [list[0]] })).some((t) => t.includes("Yopiq ·")));
-  assert.ok([...CLOSED_PRO_TEXT].length <= 200, "Telegram alert matni 200 belgigacha");
-});
-
-test("band holati (2026-11-19): rejim oynasi va «➕ Guruh qo'shish» ochiq turganda — band; «✅ Tayyor» yoki havola yuborilsa — tugaydi", async () => {
+test("band holati (2026-11-19): «➕ Guruh qo'shish» ochiq turganda — band; havola yuborilsa — tugaydi", async () => {
   const { store, press, message, isBusy } = setup({ config: { miniappUrl: MINIAPP } });
   store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
   assert.equal(isBusy(42), false);
-  await message(PRIVATE, MENU.feed);
-  assert.equal(isBusy(42), true, "rejim oynasi ochiq");
-  await press("fm:hududim");
-  await press("fr:t:samarqand");
-  assert.equal(isBusy(42), true, "viloyat tanlanyapti");
-  await press("fr:ok");
-  assert.equal(isBusy(42), true, "saqlandi, rejim oynasi hali ochiq");
-  await press("fm:done");
-  assert.equal(isBusy(42), false, "«✅ Tayyor»");
   await message(PRIVATE, MENU.addGroup);
   assert.equal(isBusy(42), true, "havola kutilyapti");
   await message(PRIVATE, "@Yangi_guruh");
@@ -2093,13 +1916,13 @@ test("ovozli xabar / dumaloq video (2026-11-20): asl fayl + ostida matn bitta xa
   assert.ok(calls.filter((c) => c.method === "sendVoice").at(-1).payload.caption.length <= 1024);
 });
 
-test("e'lon olish boshlanganda (✅ Tayyor / ▶️) — oxirgi 2 daqiqa uchun catchUp chaqiriladi", async () => {
+test("e'lon olish boshlanganda (oyna tugadi / ▶️) — oxirgi 2 daqiqa uchun catchUp chaqiriladi", async () => {
   const { store, press, message, setCatchUp } = setup({ catchUpDelayMs: 0 });
   const calls = [];
   setCatchUp((chatId, since) => calls.push([chatId, Math.round((Date.now() - since) / 1000)]));
-  store.saveDriver(42, { role: "haydovchi", phone: "+998901112233", active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
-  await message(PRIVATE, MENU.feed);
-  await press("fm:done");
+  store.saveDriver(42, { role: "haydovchi", phoneAskedAt: 1, active: true, profile: { vehicle: null, fromAreas: [], toAreas: [], feed: { mode: "tezkor", sources: [] } } });
+  await message(PRIVATE, MENU.addGroup); // raqam so'rovi oynasi
+  await message(PRIVATE, PHONE.later);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.deepEqual(calls.at(-1), [42, 120]);
   await message(PRIVATE, MENU.pause);

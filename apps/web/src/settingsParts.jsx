@@ -41,7 +41,7 @@ export function useScopeChoices(scope) {
   }, [scope]);
 }
 
-export const OPEN_FROM_MENU = "Saqlash uchun formani botdagi pastki menyudan — «⚙️ Sozlamalar» tugmasi bilan oching.";
+export const OPEN_FROM_MENU = "Saqlash uchun formani botdagi pastki menyudan — «🎛 Filtr» yoki «⚙️ Sozlamalar» tugmasi bilan oching.";
 
 // Saqlash: server bilan aloqa bo'lsa — server orqali (istalgan joydan ochilganda ham ishlaydi).
 // Botning pastki menyu tugmasidan ochilgan bo'lsa (canSendData) — keyin botga ham sendData bilan yuboriladi:
