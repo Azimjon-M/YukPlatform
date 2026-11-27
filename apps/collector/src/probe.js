@@ -81,6 +81,14 @@ const CARGO_WORDS =
 
 const TAXI_MIN_LOADS = 3;
 
+// Nomida yuk so'zi YO'Q yopiq guruh (2026-11-27, Azimjon: «qishlog'imni (Tuvadoq MFY) ko'rdim … Qanday tasdiqlangan?» — 100 ta
+// xabarda 1 ta yuk e'loni + 5 ta «yuk»/«mashina» so'zli gap bilan o'tib ketgan edi). Kamida 2 ta e'lon va ular matnli
+// xabarlarning kamida 4% i (haydovchilar gaplashadigan guruhda ham — 40 ta gap + 2 e'lon o'tadi), yoki 5 tadan ko'p e'lon.
+// O'sha kuni kuzatilayotgan 14 ta yopiq guruhning eng kami 3/23 va 4/35 edi. «1 e'lon + gap» — faqat nomida yuk so'zi bo'lsa
+const CLOSED_MIN_LOADS = 2;
+const CLOSED_MIN_SHARE = 0.04;
+const CLOSED_MANY_LOADS = 5;
+
 // Yopiq KANAL — gap-so'z yo'q, faqat egasi yozadi: yangiliklar kanalida ham ba'zan yuk e'loni chiqadi
 // («Surxondaryoliklar.Uz | Расмий»: 100 tadan 5 tasi, 2026-11-16). Kanal — e'lonlar matnlarning kamida 30% i bo'lsa
 // (nomida yuk so'zi bo'lsa — 15%), kamida 3 ta
@@ -120,7 +128,8 @@ export function judgeClosed(messages, { now, title = "", channel = false, limit 
   const share = texts.length ? looks.length / texts.length : 0;
   if (channel) ok = looks.length >= CHANNEL_MIN_LOADS && share >= (titleHit ? CHANNEL_SHARE_TITLED : CHANNEL_SHARE);
   else if (taxi) ok = looks.length >= TAXI_MIN_LOADS && talk.length >= TAXI_MIN_LOADS;
-  else ok = looks.length >= 2 || (looks.length >= 1 && (titleHit || talk.length >= 3)) || (titleHit && talk.length >= 5);
+  else if (titleHit) ok = looks.length >= 1 || talk.length >= 5;
+  else ok = looks.length >= CLOSED_MANY_LOADS || (looks.length >= CLOSED_MIN_LOADS && share >= CLOSED_MIN_SHARE);
   if (!messages.length) return { ok: false, note: "Guruhda birorta ham xabar topilmadi", stats };
   if (ok) return { ok: true, note: `Yuk ${channel ? "kanali" : "guruhi"}: oxirgi ${shown} ta xabarda ${why}.${quiet}`, stats };
   return {

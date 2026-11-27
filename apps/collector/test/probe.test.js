@@ -270,6 +270,14 @@ test("yopiq guruh: gap-so'z orasidagi e'lonlar ham, nomi ham hisobga olinadi; ji
   assert.equal(judgeClosed([...chat, ...talk], { now: NOW, title: "Хундай Кия Спринтир Шафёлар Группаси" }).ok, true);
   // Oddiy oilaviy guruh → yo'q
   assert.equal(judgeClosed(chat, { now: NOW, title: "Oilam" }).ok, false);
+  // Qishloq/mahalla guruhi (2026-11-27, «Tuvadoq MFY»): 1 ta e'lon + «yuk», «mashina» so'zli gaplar — yuk guruhi emas
+  const village = Array.from({ length: 94 }, (_, i) => msg(`Mahallamizda bugun yig'ilish bo'ladi, hamma kelsin ${i}`));
+  const villageTalk = Array.from({ length: 5 }, (_, i) => msg(`Kimda mashina bor, yuk olib kelish kerak edi ${i}`));
+  assert.equal(judgeClosed([...village, ...villageTalk, load], { now: NOW, title: "TUVADOQ_MFY 2026" }).ok, false);
+  // 3 ta e'lon, lekin 87 ta gapning ichida (3%) — yo'q; 5 ta e'lon — ha
+  const many = Array.from({ length: 84 }, (_, i) => msg(`Tug'ilgan kuning bilan, baxtli bo'l ukajon ${i}`));
+  assert.equal(judgeClosed([...many, load, load2, load], { now: NOW, title: "( O'rinovlar )" }).ok, false);
+  assert.equal(judgeClosed([...many, load, load2, load, load2, load], { now: NOW, title: "( O'rinovlar )" }).ok, true);
   // 20 kun jim, lekin e'lonlari bor → baribir qo'shiladi (izohda jimligi aytiladi)
   const old = judgeClosed([msg("Toshkentdan Buxoroga 20 tonna yuk bor fura kerak +998901112233", 20), msg("Namangandan Toshkentga 5 tonna olma bor isuzu kerak +998901112234", 20)], {
     now: NOW,
