@@ -202,6 +202,22 @@ main {
   min-width: 0;
 }
 
+/* Ro'yxatdagi tugma ekran enidan chiqmasin (2026-11-27: uzun, bo'linmaydigan guruh nomlari — «𝐒𝐔𝐑𝐗𝐎𝐍𝐃𝐀𝐑𝐘𝐎…»,
+   «@yuk_markazin · siz qo'shgansiz» — guruh rasmi qo'shilgach Mini App eniga suriladigan bo'lib qolgan edi) */
+.chips.list .chip {
+  min-width: 0;
+  max-width: 100%;
+}
+.chips.list .chip-main,
+.chips.list .chip > span:not(.chip-box):not(.chip-avatar) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chips.list .chip > small {
+  flex: none;
+  white-space: nowrap;
+}
+
 .chips.grid .chip span {
   overflow-wrap: anywhere;
 }

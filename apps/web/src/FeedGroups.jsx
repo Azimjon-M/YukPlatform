@@ -6,13 +6,55 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { foldText } from "@yuk/shared";
 import { getFeedSources } from "./api.js";
-import { CLOSED_PRO_HINT, GROUP_SCOPES, OWN_EMPTY_HINT, groupOptions, pageOf, scopeOptions } from "./feedGroups.js";
+import { CLOSED_PRO_HINT, GROUP_SCOPES, OWN_EMPTY_HINT, groupOptions, pageButtons, pageOf, scopeOptions } from "./feedGroups.js";
+import { haptic } from "./telegram.js";
 import { Chips, Section, SourceAvatar, Spinner } from "./ui.jsx";
 
 export { CLOSED_PRO_HINT, GROUPS_PAGE_SIZE, groupOptions, pageOf, sourceNamer } from "./feedGroups.js";
 
 // Ro'yxat uzun bo'lsa — qidiruv qatori
 const SEARCH_FROM = 12;
+
+// Raqamli sahifalash (2026-11-27, Azimjon: «Mukammal tushunarli Pagination bo'lsin»): ‹ 1 2 3 4 5 … 26 ›.
+// Birinchi sahifada «‹», oxirgisida «›» — o'chiq; joriy sahifa — to'ldirilgan; ostida «21–40 / 512»
+function Pager({ page, pages, onPage, info }) {
+  const go = (to) => {
+    if (to === page || to < 0 || to >= pages) return;
+    haptic.select();
+    onPage(to);
+  };
+  return (
+    <nav className="pager" aria-label="Sahifalar">
+      <div className="pager-row">
+        <button type="button" className="pager-btn pager-arrow" disabled={page === 0} onClick={() => go(page - 1)} aria-label="Oldingi sahifa">
+          ‹
+        </button>
+        {pageButtons(page, pages).map((item, i) =>
+          item === "gap" ? (
+            <span key={`gap${i}`} className="pager-gap" aria-hidden="true">
+              …
+            </span>
+          ) : (
+            <button
+              key={item}
+              type="button"
+              className={`pager-btn${item === page ? " on" : ""}`}
+              aria-current={item === page ? "page" : undefined}
+              aria-label={`${item + 1}-sahifa`}
+              onClick={() => go(item)}
+            >
+              {item + 1}
+            </button>
+          ),
+        )}
+        <button type="button" className="pager-btn pager-arrow" disabled={page >= pages - 1} onClick={() => go(page + 1)} aria-label="Keyingi sahifa">
+          ›
+        </button>
+      </div>
+      <span className="pager-info">{info}</span>
+    </nav>
+  );
+}
 
 // online — server bilan aloqa bormi; onList(list) — ro'yxat kelganda (SettingsPage sarlavhalarni oladi)
 export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost }) {
@@ -119,19 +161,7 @@ export function FeedGroups({ online, chosen, onToggle, error, onList, onAuthLost
             selected={picked}
             onPick={pick}
           />
-          {paged.pages > 1 && (
-            <nav className="pager" aria-label="Sahifalar">
-              <button type="button" className="pill" disabled={paged.page === 0} onClick={() => goPage(paged.page - 1)}>
-                ← Oldingi
-              </button>
-              <span className="pager-info">
-                {paged.first}–{paged.last} / {paged.total}
-              </span>
-              <button type="button" className="pill" disabled={paged.page >= paged.pages - 1} onClick={() => goPage(paged.page + 1)}>
-                Keyingi →
-              </button>
-            </nav>
-          )}
+          {paged.pages > 1 && <Pager page={paged.page} pages={paged.pages} onPage={goPage} info={`${paged.first}–${paged.last} / ${paged.total}`} />}
         </>
       ) : (
         <p className="hint">{query ? "Bunday guruh topilmadi." : scope === "own" ? OWN_EMPTY_HINT : "Hozircha tanlasa bo'ladigan guruh yo'q."}</p>

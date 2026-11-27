@@ -53,3 +53,17 @@ export const sourceNamer = (list) => {
   const titles = new Map(list.map((s) => [s.name.toLowerCase(), s.title]));
   return (name) => titles.get(name.toLowerCase()) ?? name;
 };
+
+// Sahifa tugmalari (2026-11-27, Azimjon: «Paginationni btnli raqamlab … 5 ta (1, ... 5) btn … btn lar ko'p bo'lsa …
+// "..." qo'yish»). page — 0 dan; → [0, 1, 2, "gap", 9] kabi (raqam — sahifa, "gap" — «…»). Ko'pi bilan `slots` ta
+// (standart 7): birinchi va oxirgi doim, joriy sahifa va yonidagilar, oraliq — «…». 7 tagacha sahifa — hammasi
+export function pageButtons(page, pages, slots = 7) {
+  if (pages <= slots) return Array.from({ length: pages }, (_, i) => i);
+  const side = slots - 2; // birinchi/oxirgidan tashqari
+  const current = Math.min(Math.max(0, page), pages - 1);
+  // Boshida yoki oxirida — bitta «…» (masalan 1 2 3 4 5 … 26), o'rtada — ikkita (1 … 11 12 13 … 26)
+  if (current < side - 1) return [...Array.from({ length: side }, (_, i) => i), "gap", pages - 1];
+  if (current > pages - side) return [0, "gap", ...Array.from({ length: side }, (_, i) => pages - side + i)];
+  const around = Math.floor((side - 2) / 2);
+  return [0, "gap", ...Array.from({ length: side - 2 }, (_, i) => current - around + i), "gap", pages - 1];
+}

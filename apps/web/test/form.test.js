@@ -268,3 +268,25 @@ test("guruhlar ro'yxati 20 tadan sahifalanadi", async () => {
   assert.equal(pageOf(items.slice(0, 15), 2).page, 0);
   assert.deepEqual([pageOf([], 0).pages, pageOf([], 0).first], [1, 0]);
 });
+
+test("sahifa tugmalari: 5 sahifa — hammasi; ko'p bo'lsa birinchi, oxirgi, joriy atrofi va «…»; har doim 7 tadan oshmaydi", async () => {
+  const { pageButtons } = await import("../src/feedGroups.js");
+  assert.deepEqual(pageButtons(0, 5), [0, 1, 2, 3, 4], "100 ta / 20 — 5 ta tugma");
+  assert.deepEqual(pageButtons(0, 1), [0]);
+  assert.deepEqual(pageButtons(0, 7), [0, 1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(pageButtons(0, 26), [0, 1, 2, 3, 4, "gap", 25]);
+  assert.deepEqual(pageButtons(3, 26), [0, 1, 2, 3, 4, "gap", 25]);
+  assert.deepEqual(pageButtons(4, 26), [0, "gap", 3, 4, 5, "gap", 25]);
+  assert.deepEqual(pageButtons(12, 26), [0, "gap", 11, 12, 13, "gap", 25]);
+  assert.deepEqual(pageButtons(21, 26), [0, "gap", 20, 21, 22, "gap", 25]);
+  assert.deepEqual(pageButtons(22, 26), [0, "gap", 21, 22, 23, 24, 25]);
+  assert.deepEqual(pageButtons(25, 26), [0, "gap", 21, 22, 23, 24, 25]);
+  for (let pages = 1; pages <= 40; pages++)
+    for (let page = 0; page < pages; page++) {
+      const items = pageButtons(page, pages);
+      assert.ok(items.length <= 7, `${page}/${pages}`);
+      assert.ok(items.includes(page), `joriy sahifa ko'rinadi: ${page}/${pages}`);
+      assert.equal(items[0], 0);
+      assert.equal(items.at(-1), pages - 1);
+    }
+});
